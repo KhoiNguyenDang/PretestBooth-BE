@@ -33,7 +33,7 @@ export class TokenResponseDto {
 export class LogoutResponseDto {
   @Expose()
   message: string;
-    constructor(partial: Partial<LogoutResponseDto>) {
+  constructor(partial: Partial<LogoutResponseDto>) {
     Object.assign(this, partial);
-    }
+  }
 }

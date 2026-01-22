@@ -1,13 +1,5 @@
-import { 
-  Body, 
-  Controller, 
-  Post, 
-  HttpCode, 
-  HttpStatus, 
-  UseGuards, 
-  Req 
-} from '@nestjs/common';
-import { AuthGuard } from '@nestjs/passport'; 
+import { Body, Controller, Post, HttpCode, HttpStatus, UseGuards, Req } from '@nestjs/common';
+import { AuthGuard } from '@nestjs/passport';
 import { AuthService } from './auth.service';
 import type { RegisterDto } from './dto/register.dto';
 import { RegisterSchema } from './dto/register.dto';
@@ -50,7 +42,7 @@ export class AuthController {
   @Post('logout')
   @HttpCode(HttpStatus.OK)
   logout(@Req() req) {
-    const userId = req.user['sub']; 
+    const userId = req.user['sub'];
     return this.authService.logout(userId);
   }
 }
