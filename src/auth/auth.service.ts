@@ -21,12 +21,33 @@ export class AuthService {
   ) {}
 
   async register(email: string, password: string) {
+    // Validate school email format and extract student code
+    const schoolEmailPattern = /^(\d{8})\.[a-z]+@(student|teacher)\.iuh\.edu\.vn$/;
+    const match = email.match(schoolEmailPattern);
+
+    if (!match) {
+      throw new BadRequestException(
+        'Vui lòng sử dụng email trường (XXXXXXXX.yourname@(student|teacher).iuh.edu.vn)',
+      );
+    }
+
+    const studentCode = match[1];
+
     const exists = await this.prisma.user.findUnique({
       where: { email },
     });
 
     if (exists) {
       throw new ConflictException('Email đã tồn tại');
+    }
+
+    // Check if student code is already registered
+    const studentCodeExists = await this.prisma.user.findUnique({
+      where: { studentCode },
+    });
+
+    if (studentCodeExists) {
+      throw new ConflictException('Mã sinh viên này đã được đăng ký');
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -37,6 +58,7 @@ export class AuthService {
       data: {
         email,
         password: hashedPassword,
+        studentCode,
         emailVerificationToken: verificationToken,
         emailVerificationExpiry: verificationExpiry,
       },
@@ -148,6 +170,62 @@ export class AuthService {
     });
 
     return new LogoutResponseDto({ message: 'Đăng xuất thành công' });
+  }
+
+  async forgotPassword(email: string) {
+    const user = await this.prisma.user.findUnique({ where: { email } });
+
+    if (!user) {
+      throw new BadRequestException('Email không được tìm thấy');
+    }
+
+    const resetCode = crypto.randomInt(100000, 999999).toString();
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+    const hashedCode = await bcrypt.hash(resetCode, 10);
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        resetPasswordCode: hashedCode,
+        resetPasswordExpiry: expiresAt,
+      },
+    });
+
+    await this.mailService.sendPasswordResetEmail(email, resetCode);
+
+    return { message: 'Mã đặt lại mật khẩu đã được gửi tới email của bạn' };
+  }
+
+  async resetPassword(email: string, code: string, newPassword: string) {
+    const user = await this.prisma.user.findUnique({ where: { email } });
+
+    if (!user || !user.resetPasswordCode || !user.resetPasswordExpiry) {
+      throw new BadRequestException('Yêu cầu đặt lại mật khẩu không hợp lệ');
+    }
+
+    if (user.resetPasswordExpiry < new Date()) {
+      throw new BadRequestException('Mã đặt lại mật khẩu đã hết hạn');
+    }
+
+    const isValidCode = await bcrypt.compare(code, user.resetPasswordCode);
+
+    if (!isValidCode) {
+      throw new BadRequestException('Mã xác nhận không hợp lệ');
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        password: hashedPassword,
+        resetPasswordCode: null,
+        resetPasswordExpiry: null,
+        refreshToken: null,
+      },
+    });
+
+    return { message: 'Đặt lại mật khẩu thành công' };
   }
 
   async verifyEmail(token: string) {
