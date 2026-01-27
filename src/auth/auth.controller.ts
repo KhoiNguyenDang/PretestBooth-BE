@@ -19,6 +19,10 @@ import type { VerifyEmailDto } from './dto/verify-email.dto';
 import { VerifyEmailSchema } from './dto/verify-email.dto';
 import type { ResendVerificationDto } from './dto/resend-verification.dto';
 import { ResendVerificationSchema } from './dto/resend-verification.dto';
+import type { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { ForgotPasswordSchema } from './dto/forgot-password.dto';
+import type { ResetPasswordDto } from './dto/reset-password.dto';
+import { ResetPasswordSchema } from './dto/reset-password.dto';
 import { ZodValidationPipe } from '../common/zod/zod-validation.pipe';
 
 @Controller('auth')
@@ -75,5 +79,23 @@ export class AuthController {
     dto: ResendVerificationDto,
   ) {
     return this.authService.resendVerificationEmail(dto.email);
+  }
+
+  @Post('forgot-password')
+  @HttpCode(HttpStatus.OK)
+  forgotPassword(
+    @Body(new ZodValidationPipe(ForgotPasswordSchema))
+    dto: ForgotPasswordDto,
+  ) {
+    return this.authService.forgotPassword(dto.email);
+  }
+
+  @Post('reset-password')
+  @HttpCode(HttpStatus.OK)
+  resetPassword(
+    @Body(new ZodValidationPipe(ResetPasswordSchema))
+    dto: ResetPasswordDto,
+  ) {
+    return this.authService.resetPassword(dto.email, dto.code, dto.newPassword);
   }
 }

@@ -10,11 +10,14 @@ model User {
   id        String   @id @default(uuid())
   email     String   @unique
   password  String
+  studentCode String?  @unique
   role      Role     @default(STUDENT)
   refreshToken  String?
   isEmailVerified Boolean @default(false)
   emailVerificationToken String?
   emailVerificationExpiry DateTime?
+  resetPasswordCode String?
+  resetPasswordExpiry DateTime?
   createdAt DateTime @default(now())
 }
 
