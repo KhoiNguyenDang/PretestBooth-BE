@@ -19,10 +19,146 @@ model User {
   resetPasswordCode String?
   resetPasswordExpiry DateTime?
   createdAt DateTime @default(now())
+  
+  // Relations
+  createdProblems Problem[] @relation("ProblemCreator")
+  submissions     Submission[]
 }
 
 enum Role {
   STUDENT
   LECTURER
   ADMIN
+}
+
+// Problem difficulty levels (like LeetCode)
+enum Difficulty {
+  EASY
+  MEDIUM
+  HARD
+}
+
+// Problem model for coding challenges
+model Problem {
+  id          String     @id @default(uuid())
+  title       String
+  slug        String     @unique
+  description String     @db.Text
+  difficulty  Difficulty @default(MEDIUM)
+  
+  // Code templates for different languages
+  starterCode Json?      // { "javascript": "function solve() {}", "python": "def solve():", ... }
+  
+  // Constraints and hints
+  constraints String?    @db.Text
+  hints       String[]   // Array of hints
+  
+  // Problem metadata
+  timeLimit   Int        @default(1000)  // in milliseconds
+  memoryLimit Int        @default(256)   // in MB
+  
+  // Stats
+  totalSubmissions Int   @default(0)
+  acceptedSubmissions Int @default(0)
+  
+  // Status
+  isPublished Boolean    @default(false)
+  
+  // Relations
+  creatorId   String
+  creator     User       @relation("ProblemCreator", fields: [creatorId], references: [id])
+  testCases   TestCase[]
+  submissions Submission[]
+  
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  
+  @@index([difficulty])
+  @@index([isPublished])
+  @@index([creatorId])
+}
+
+// TestCase model with hidden test cases support
+model TestCase {
+  id          String   @id @default(uuid())
+  
+  // Test case data
+  input       String   @db.Text
+  expectedOutput String @db.Text
+  
+  // Explanation shown to users (only for visible test cases)
+  explanation String?  @db.Text
+  
+  // Hidden test case flag (like LeetCode)
+  isHidden    Boolean  @default(false)
+  
+  // Sample test case (shown in problem description)
+  isSample    Boolean  @default(false)
+  
+  // Order of test case
+  order       Int      @default(0)
+  
+  // Relations
+  problemId   String
+  problem     Problem  @relation(fields: [problemId], references: [id], onDelete: Cascade)
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([problemId])
+  @@index([isHidden])
+  @@index([isSample])
+}
+
+// Submission status enum
+enum SubmissionStatus {
+  PENDING
+  ACCEPTED
+  WRONG_ANSWER
+  COMPILE_ERROR
+  RUNTIME_ERROR
+  TIME_LIMIT_EXCEEDED
+  MEMORY_LIMIT_EXCEEDED
+}
+
+// Submission model for storing user code submissions
+model Submission {
+  id              String           @id @default(uuid())
+  
+  // Code submitted
+  language        String
+  languageVersion String?
+  sourceCode      String           @db.Text
+  
+  // Execution results
+  status          SubmissionStatus @default(PENDING)
+  totalTestCases  Int              @default(0)
+  passedTestCases Int              @default(0)
+  failedTestCases Int              @default(0)
+  
+  // Timing information
+  executionTime   Int?             // Total execution time in ms
+  networkTime     Int?             // Network latency in ms
+  totalTime       Int?             // Total time (execution + network) in ms
+  
+  // Error information
+  compileOutput   String?          @db.Text
+  errorMessage    String?          @db.Text
+  
+  // Detailed results for each test case (JSON array)
+  testCaseResults Json?            // Array of test case results
+  
+  // Relations
+  userId          String
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  problemId       String
+  problem         Problem          @relation(fields: [problemId], references: [id], onDelete: Cascade)
+  
+  createdAt       DateTime         @default(now())
+  
+  @@index([userId])
+  @@index([problemId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([userId, problemId])
 }
