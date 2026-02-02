@@ -48,7 +48,9 @@ Content-Type: application/json
   "description": "Given an array of integers nums and an integer target, return the indices of the two numbers that add up to the target.\n\nYou may assume that each input has exactly one solution, and you may not use the same element twice.",
   "difficulty": "EASY",
   "constraints": "- 2 <= nums.length <= 10^4\n- -10^9 <= nums[i] <= 10^9\n- -10^9 <= target <= 10^9",
-  "hints": ["A really brute force way would be to search for all possible pairs of numbers but that would be too slow. Again, it's best to try out brute force solutions for just for completeness. It might just sell you the interview.\n\nSo, if we fix one of the numbers say,\nxand we want to know if there exists another number such that\nx + another_number = target\n\nAnother way to phrase it is another_number = target -x\nSo, the problem reduces to finding if target - x exists in the array and it is not the same element that we used."],
+  "hints": [
+    "A really brute force way would be to search for all possible pairs of numbers but that would be too slow. Again, it's best to try out brute force solutions for just for completeness. It might just sell you the interview.\n\nSo, if we fix one of the numbers say,\nxand we want to know if there exists another number such that\nx + another_number = target\n\nAnother way to phrase it is another_number = target -x\nSo, the problem reduces to finding if target - x exists in the array and it is not the same element that we used."
+  ],
   "timeLimit": 1000,
   "memoryLimit": 256,
   "starterCode": {
@@ -60,17 +62,17 @@ Content-Type: application/json
 
 **Field Descriptions:**
 
-| Field         | Type              | Required | Description                                   |
-| ------------- | ----------------- | -------- | --------------------------------------------- |
-| title         | string            | Yes      | Problem title                                 |
-| slug          | string            | Yes      | URL-friendly slug (unique)                    |
-| description   | string            | Yes      | Detailed problem description                  |
-| difficulty    | enum              | No       | EASY, MEDIUM, HARD (default: MEDIUM)          |
-| constraints   | string            | No       | Problem constraints and limits                |
-| hints         | string[]          | No       | Array of hints for solving the problem        |
-| timeLimit     | number            | No       | Time limit in milliseconds (default: 1000)    |
-| memoryLimit   | number            | No       | Memory limit in MB (default: 256)             |
-| starterCode   | object            | No       | Starter code templates by language            |
+| Field       | Type     | Required | Description                                |
+| ----------- | -------- | -------- | ------------------------------------------ |
+| title       | string   | Yes      | Problem title                              |
+| slug        | string   | Yes      | URL-friendly slug (unique)                 |
+| description | string   | Yes      | Detailed problem description               |
+| difficulty  | enum     | No       | EASY, MEDIUM, HARD (default: MEDIUM)       |
+| constraints | string   | No       | Problem constraints and limits             |
+| hints       | string[] | No       | Array of hints for solving the problem     |
+| timeLimit   | number   | No       | Time limit in milliseconds (default: 1000) |
+| memoryLimit | number   | No       | Memory limit in MB (default: 256)          |
+| starterCode | object   | No       | Starter code templates by language         |
 
 **Success Response (201):**
 
@@ -120,14 +122,14 @@ GET /problems
 
 **Query Parameters:**
 
-| Parameter  | Type    | Default | Description                    |
-| ---------- | ------- | ------- | ------------------------------ |
-| page       | number  | 1       | Page number for pagination     |
-| limit      | number  | 10      | Items per page                 |
-| difficulty | string  | -       | Filter by difficulty (EASY/MEDIUM/HARD) |
-| search     | string  | -       | Search in title and description |
-| sorted     | string  | -       | Sort field (title, difficulty, createdAt) |
-| order      | string  | asc     | Sort order (asc/desc)          |
+| Parameter  | Type   | Default | Description                               |
+| ---------- | ------ | ------- | ----------------------------------------- |
+| page       | number | 1       | Page number for pagination                |
+| limit      | number | 10      | Items per page                            |
+| difficulty | string | -       | Filter by difficulty (EASY/MEDIUM/HARD)   |
+| search     | string | -       | Search in title and description           |
+| sorted     | string | -       | Sort field (title, difficulty, createdAt) |
+| order      | string | asc     | Sort order (asc/desc)                     |
 
 **Example:**
 
@@ -408,14 +410,14 @@ Content-Type: application/json
 
 **Field Descriptions:**
 
-| Field           | Type    | Required | Description                           |
-| --------------- | ------- | -------- | ------------------------------------- |
-| input           | string  | Yes      | Test case input data                  |
-| expectedOutput  | string  | Yes      | Expected output                       |
-| explanation     | string  | No       | Explanation (shown only if not hidden) |
-| isHidden        | boolean | No       | Hidden from user (default: false)     |
-| isSample        | boolean | No       | Sample test case (default: false)     |
-| order           | number  | No       | Order of test case                    |
+| Field          | Type    | Required | Description                            |
+| -------------- | ------- | -------- | -------------------------------------- |
+| input          | string  | Yes      | Test case input data                   |
+| expectedOutput | string  | Yes      | Expected output                        |
+| explanation    | string  | No       | Explanation (shown only if not hidden) |
+| isHidden       | boolean | No       | Hidden from user (default: false)      |
+| isSample       | boolean | No       | Sample test case (default: false)      |
+| order          | number  | No       | Order of test case                     |
 
 **Success Response (201):**
 
@@ -494,7 +496,7 @@ Content-Type: application/json
       "input": "2 7 11 15\n9",
       "expectedOutput": "[0,1]",
       "order": 1
-    },
+    }
     // ... more test cases
   ]
 }
@@ -636,7 +638,7 @@ Authorization: Bearer <access_token>
 
 2. **Slug Requirements**: Problem slugs must be unique and contain only lowercase letters, numbers, and hyphens.
 
-3. **Test Cases**: 
+3. **Test Cases**:
    - Sample test cases are visible to all users
    - Hidden test cases are only visible to the problem creator and admins
    - Test cases are executed in order when running submissions

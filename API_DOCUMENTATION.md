@@ -10,7 +10,7 @@ http://localhost:3000
 
 The API uses JWT (JSON Web Token) for authentication. Protected endpoints require a Bearer token in the Authorization header.
 
-```
+````
 Authorization: Bearer <access_token>
 ## Endpoints
 ### 1. Health Check
@@ -19,13 +19,11 @@ Authorization: Bearer <access_token>
 
 ```http
 GET /
-```
+````
 
 **Description:** Returns a simple health check message.
 
-
 ### 2. Authentication
-
 
 ```http
 POST /auth/register
@@ -35,9 +33,9 @@ POST /auth/register
 
 - `email`: Must be a valid school email in the format `XXXXXXXX.yourname@(student|teacher).iuh.edu.vn`
 - `password`: Minimum 6 characters
-**Success Response (201):**
+  **Success Response (201):**
 
-```json
+````json
 {
   "message": "User registered successfully. Please check your email for verification."
 }
@@ -46,13 +44,11 @@ POST /auth/register
   "statusCode": 400,
   "error": "Bad Request"
 }
-```
+````
 
 ---
 
-
 **Description:** Authenticate a user and receive access and refresh tokens.
-
 
 ```json
 {
@@ -60,6 +56,7 @@ POST /auth/register
   "password": "password123"
 }
 ```
+
 **Validation Rules:**
 
 - `email`: Valid email format
@@ -148,21 +145,22 @@ Authorization: Bearer <access_token>
 
 **Error Response (401):**
 
-```json
+````json
 #### Verify Email
 
 ```http
-```
+````
 
 **Description:** Verify user's email address using the token sent to their email.
 
 **Request Body:**
 {
-  "token": "verification-token-from-email"
+"token": "verification-token-from-email"
 }
 {
 }
-```
+
+````
 
 **Error Response (400):**
 
@@ -172,14 +170,16 @@ Authorization: Bearer <access_token>
   "message": "Invalid or expired verification token",
   "error": "Bad Request"
 }
-```
+````
 
 ---
+
 #### Resend Verification Email
 
 ```http
 POST /auth/resend-verification
 ```
+
 **Description:** Request a new verification email.
 
 **Request Body:**
@@ -248,8 +248,10 @@ POST /auth/forgot-password
 ---
 
 #### Reset Password
+
 POST /auth/reset-password
-```
+
+````
 
 **Description:** Reset password using the code received via email.
 
@@ -260,7 +262,7 @@ POST /auth/reset-password
   "email": "user@student.iuh.edu.vn",
   "code": "123456",
 }
-```
+````
 
 **Validation Rules:**
 
@@ -271,9 +273,10 @@ POST /auth/reset-password
 **Success Response (200):**
 
 {
-  "message": "Password reset successfully"
+"message": "Password reset successfully"
 }
-```
+
+````
 
   "statusCode": 400,
   "message": "Invalid or expired reset code",
@@ -290,7 +293,7 @@ All endpoints may return the following error responses:
   "message": ["Validation error messages"],
   "error": "Bad Request"
 }
-```
+````
 
 ### 401 Unauthorized
 
@@ -302,12 +305,14 @@ All endpoints may return the following error responses:
 ```
 
 ### 404 Not Found
+
 {
-  "statusCode": 404,
-  "message": "Resource not found",
-  "error": "Not Found"
+"statusCode": 404,
+"message": "Resource not found",
+"error": "Not Found"
 }
-```
+
+````
 
 ### 500 Internal Server Error
 
@@ -317,8 +322,7 @@ All endpoints may return the following error responses:
   "message": "Internal server error",
   "error": "Internal Server Error"
 }
-```
-
+````
 
 ## User Roles
 
@@ -327,12 +331,13 @@ The system supports three user roles:
 - **STUDENT**: Regular student user
 - **LECTURER**: Teacher/lecturer user
 - **ADMIN**: Administrator with full access
+
 ---
 
 ## Notes
 
-   - System sends a 6-digit code to the user's email
-   - Reset code expires after a certain period
+- System sends a 6-digit code to the user's email
+- Reset code expires after a certain period
 
 3. **Token Expiry**:
 4. **School Email Requirement**: Registration requires a valid IUH school email address in the format:

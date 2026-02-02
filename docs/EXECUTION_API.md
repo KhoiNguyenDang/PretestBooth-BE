@@ -131,18 +131,18 @@ Content-Type: application/json
 
 **Response Field Descriptions:**
 
-| Field           | Type    | Description                      |
-| --------------- | ------- | -------------------------------- |
-| stdout          | string  | Standard output                  |
-| stderr          | string  | Standard error                   |
-| output          | string  | Combined output                  |
-| exitCode        | number  | Process exit code                |
-| signal          | string  | Signal name if terminated        |
-| isSuccess       | boolean | Whether execution was successful |
-| isCompileError  | boolean | Whether there was a compile error |
-| executionTime   | number  | Code execution time (ms)         |
-| networkTime     | number  | Network latency (ms)             |
-| totalTime       | number  | Total time (execution + network) |
+| Field          | Type    | Description                       |
+| -------------- | ------- | --------------------------------- |
+| stdout         | string  | Standard output                   |
+| stderr         | string  | Standard error                    |
+| output         | string  | Combined output                   |
+| exitCode       | number  | Process exit code                 |
+| signal         | string  | Signal name if terminated         |
+| isSuccess      | boolean | Whether execution was successful  |
+| isCompileError | boolean | Whether there was a compile error |
+| executionTime  | number  | Code execution time (ms)          |
+| networkTime    | number  | Network latency (ms)              |
+| totalTime      | number  | Total time (execution + network)  |
 
 **Error Response (400):**
 
@@ -186,14 +186,14 @@ Content-Type: application/json
 
 **Field Descriptions:**
 
-| Field           | Type   | Required | Default | Description                      |
-| --------------- | ------ | -------- | ------- | -------------------------------- |
-| language        | string | Yes      | -       | Programming language             |
-| version         | string | No       | "\*"    | Language version                 |
-| source          | string | Yes      | -       | Source code                      |
-| input           | string | Yes      | -       | Test input                       |
-| expectedOutput  | string | Yes      | -       | Expected output                  |
-| runTimeout      | number | No       | 5000    | Execution timeout (ms)           |
+| Field          | Type   | Required | Default | Description            |
+| -------------- | ------ | -------- | ------- | ---------------------- |
+| language       | string | Yes      | -       | Programming language   |
+| version        | string | No       | "\*"    | Language version       |
+| source         | string | Yes      | -       | Source code            |
+| input          | string | Yes      | -       | Test input             |
+| expectedOutput | string | Yes      | -       | Expected output        |
+| runTimeout     | number | No       | 5000    | Execution timeout (ms) |
 
 **Success Response (200):**
 
@@ -217,13 +217,13 @@ Content-Type: application/json
 
 **Response Field Descriptions:**
 
-| Field           | Type    | Description                  |
-| --------------- | ------- | ---------------------------- |
-| isCorrect       | boolean | Output matches expected      |
-| actualOutput    | string  | Actual program output        |
-| passed          | boolean | Test case passed             |
-| message         | string  | Result message               |
-| executionTime   | number  | Execution time (ms)          |
+| Field         | Type    | Description             |
+| ------------- | ------- | ----------------------- |
+| isCorrect     | boolean | Output matches expected |
+| actualOutput  | string  | Actual program output   |
+| passed        | boolean | Test case passed        |
+| message       | string  | Result message          |
+| executionTime | number  | Execution time (ms)     |
 
 ---
 
@@ -348,28 +348,28 @@ Content-Type: application/json
 
 **Response Field Descriptions:**
 
-| Field              | Type   | Description                      |
-| ------------------ | ------ | -------------------------------- |
-| totalTestCases     | number | Total number of test cases       |
-| passedTestCases    | number | Number of passed test cases      |
-| failedTestCases    | number | Number of failed test cases      |
+| Field              | Type    | Description                     |
+| ------------------ | ------- | ------------------------------- |
+| totalTestCases     | number  | Total number of test cases      |
+| passedTestCases    | number  | Number of passed test cases     |
+| failedTestCases    | number  | Number of failed test cases     |
 | isAllPassed        | boolean | All test cases passed           |
 | isCompileError     | boolean | Compilation failed              |
-| totalExecutionTime | number | Sum of all execution times (ms) |
-| totalNetworkTime   | number | Total network time (ms)         |
-| totalTime          | number | Total time (ms)                 |
-| status             | string | Overall submission status       |
+| totalExecutionTime | number  | Sum of all execution times (ms) |
+| totalNetworkTime   | number  | Total network time (ms)         |
+| totalTime          | number  | Total time (ms)                 |
+| status             | string  | Overall submission status       |
 
 **Submission Status Values:**
 
-| Status              | Description                   |
-| ------------------- | ----------------------------- |
-| ACCEPTED            | All test cases passed         |
-| WRONG_ANSWER        | Output doesn't match expected |
-| COMPILE_ERROR       | Code failed to compile        |
-| RUNTIME_ERROR       | Code crashed during execution |
-| TIME_LIMIT_EXCEEDED | Execution exceeded time limit |
-| MEMORY_LIMIT_EXCEEDED | Memory usage exceeded limit  |
+| Status                | Description                   |
+| --------------------- | ----------------------------- |
+| ACCEPTED              | All test cases passed         |
+| WRONG_ANSWER          | Output doesn't match expected |
+| COMPILE_ERROR         | Code failed to compile        |
+| RUNTIME_ERROR         | Code crashed during execution |
+| TIME_LIMIT_EXCEEDED   | Execution exceeded time limit |
+| MEMORY_LIMIT_EXCEEDED | Memory usage exceeded limit   |
 
 **Error Responses:**
 
@@ -385,7 +385,7 @@ Content-Type: application/json
 
 ## Notes
 
-1. **Timeout Configuration**: 
+1. **Timeout Configuration**:
    - Default run timeout is 5000ms per test case
    - Compile timeout is typically 10000ms
    - Can be customized per request

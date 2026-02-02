@@ -7,7 +7,9 @@ The API documentation has been reorganized into a modular structure for better c
 ## Documentation Files Created
 
 ### 1. **docs/AUTH_API.md** ✅
+
 Complete documentation for authentication endpoints including:
+
 - User registration with school email validation
 - Login and token management (access/refresh tokens)
 - Logout functionality
@@ -15,6 +17,7 @@ Complete documentation for authentication endpoints including:
 - Password reset flow
 
 **Endpoints covered:**
+
 - `POST /auth/register`
 - `POST /auth/login`
 - `POST /auth/logout`
@@ -27,7 +30,9 @@ Complete documentation for authentication endpoints including:
 ---
 
 ### 2. **docs/PROBLEMS_API.md** ✅
+
 Complete documentation for problem management including:
+
 - CRUD operations for coding problems
 - Difficulty levels (EASY, MEDIUM, HARD)
 - Comprehensive test case management
@@ -35,6 +40,7 @@ Complete documentation for problem management including:
 - Problem statistics and filtering
 
 **Endpoints covered:**
+
 - `GET /problems` (with pagination & filtering)
 - `POST /problems` (create new problem)
 - `GET /problems/:id` (get by ID)
@@ -50,7 +56,9 @@ Complete documentation for problem management including:
 ---
 
 ### 3. **docs/EXECUTION_API.md** ✅
+
 Complete documentation for code execution including:
+
 - Supported programming languages
 - Direct code execution for testing/playground
 - Single test case execution with comparison
@@ -58,6 +66,7 @@ Complete documentation for code execution including:
 - Detailed timing and error information
 
 **Endpoints covered:**
+
 - `GET /execution/languages` (get supported languages)
 - `POST /execution/run` (execute code)
 - `POST /execution/test` (test against single test case)
@@ -69,7 +78,9 @@ JavaScript, Python, Java, C/C++, C#, Go, Rust, Ruby, PHP, TypeScript
 ---
 
 ### 4. **docs/SUBMISSIONS_API.md** ✅
+
 Complete documentation for submission management including:
+
 - Create and track submissions
 - List submissions with filtering & pagination
 - Submission statistics per problem
@@ -77,6 +88,7 @@ Complete documentation for submission management including:
 - User permission controls (students see only their submissions)
 
 **Endpoints covered:**
+
 - `POST /submissions` (create submission)
 - `GET /submissions` (list all submissions)
 - `GET /submissions/problem/:problemId` (submissions for a problem)
@@ -89,7 +101,9 @@ PENDING, ACCEPTED, WRONG_ANSWER, COMPILE_ERROR, RUNTIME_ERROR, TIME_LIMIT_EXCEED
 ---
 
 ### 5. **API_DOCUMENTATION.md** ✅ (Updated)
+
 Main API documentation has been restructured as an index/overview that:
+
 - Links to all module-specific documentation
 - Provides quick reference of key endpoints
 - Documents authentication and authorization
@@ -103,6 +117,7 @@ Main API documentation has been restructured as an index/overview that:
 ## Key Features
 
 ### Organization Benefits
+
 1. **Modular Structure**: Each module has its own dedicated documentation file
 2. **Easy Navigation**: Main API_DOCUMENTATION.md acts as an index with quick links
 3. **Detailed Endpoints**: Each module contains complete endpoint documentation with:
@@ -113,12 +128,14 @@ Main API documentation has been restructured as an index/overview that:
    - Complete workflow examples
 
 ### Documentation Coverage
+
 - ✅ **Authentication**: All auth flows with validation rules
 - ✅ **Problems**: Full CRUD + comprehensive test case management
 - ✅ **Code Execution**: All execution modes (run, test, submit)
 - ✅ **Submissions**: Complete submission tracking and statistics
 
 ### Best Practices Documented
+
 - Email verification and school email format requirements
 - Token expiry and refresh mechanism
 - Hidden vs. sample test cases
@@ -131,12 +148,14 @@ Main API documentation has been restructured as an index/overview that:
 ## How to Use
 
 ### For API Consumers
+
 1. Start with [API_DOCUMENTATION.md](./API_DOCUMENTATION.md) for an overview
 2. Find the module you need in the index
 3. Open the specific module documentation (e.g., [PROBLEMS_API.md](./docs/PROBLEMS_API.md))
 4. Follow the endpoint documentation and cURL examples
 
 ### For API Developers
+
 1. Each module contains complete endpoint specifications
 2. Field descriptions include validation rules
 3. Error responses are documented for each endpoint

@@ -44,12 +44,12 @@ Content-Type: application/json
 
 **Field Descriptions:**
 
-| Field             | Type          | Required | Description                    |
-| ----------------- | ------------- | -------- | ------------------------------ |
-| language          | string        | Yes      | Programming language           |
-| languageVersion   | string        | No       | Specific language version      |
-| sourceCode        | string        | Yes      | The submitted source code      |
-| problemId         | string (UUID) | Yes      | ID of the problem being solved |
+| Field           | Type          | Required | Description                    |
+| --------------- | ------------- | -------- | ------------------------------ |
+| language        | string        | Yes      | Programming language           |
+| languageVersion | string        | No       | Specific language version      |
+| sourceCode      | string        | Yes      | The submitted source code      |
+| problemId       | string (UUID) | Yes      | ID of the problem being solved |
 
 **Success Response (201):**
 
@@ -101,15 +101,15 @@ Content-Type: application/json
 
 **Submission Status Values:**
 
-| Status              | Description                   |
-| ------------------- | ----------------------------- |
-| PENDING             | Submission pending evaluation |
-| ACCEPTED            | All test cases passed         |
-| WRONG_ANSWER        | Output doesn't match expected |
-| COMPILE_ERROR       | Code failed to compile        |
-| RUNTIME_ERROR       | Code crashed during execution |
-| TIME_LIMIT_EXCEEDED | Execution exceeded time limit |
-| MEMORY_LIMIT_EXCEEDED | Memory usage exceeded limit  |
+| Status                | Description                   |
+| --------------------- | ----------------------------- |
+| PENDING               | Submission pending evaluation |
+| ACCEPTED              | All test cases passed         |
+| WRONG_ANSWER          | Output doesn't match expected |
+| COMPILE_ERROR         | Code failed to compile        |
+| RUNTIME_ERROR         | Code crashed during execution |
+| TIME_LIMIT_EXCEEDED   | Execution exceeded time limit |
+| MEMORY_LIMIT_EXCEEDED | Memory usage exceeded limit   |
 
 **Error Response (404):**
 
@@ -139,14 +139,14 @@ Authorization: Bearer <access_token>
 
 **Query Parameters:**
 
-| Parameter  | Type    | Default | Description                              |
-| ---------- | ------- | ------- | ---------------------------------------- |
-| page       | number  | 1       | Page number for pagination               |
-| limit      | number  | 10      | Items per page                           |
-| status     | string  | -       | Filter by submission status              |
-| language   | string  | -       | Filter by programming language           |
-| sortBy     | string  | createdAt | Sort field (createdAt, status, language) |
-| order      | string  | desc    | Sort order (asc/desc)                    |
+| Parameter | Type   | Default   | Description                              |
+| --------- | ------ | --------- | ---------------------------------------- |
+| page      | number | 1         | Page number for pagination               |
+| limit     | number | 10        | Items per page                           |
+| status    | string | -         | Filter by submission status              |
+| language  | string | -         | Filter by programming language           |
+| sortBy    | string | createdAt | Sort field (createdAt, status, language) |
+| order     | string | desc      | Sort order (asc/desc)                    |
 
 **Example:**
 
@@ -229,13 +229,13 @@ Authorization: Bearer <access_token>
 
 **Query Parameters:**
 
-| Parameter | Type    | Default | Description              |
-| --------- | ------- | ------- | ------------------------ |
-| page      | number  | 1       | Page number              |
-| limit     | number  | 10      | Items per page           |
-| status    | string  | -       | Filter by status         |
-| sortBy    | string  | createdAt | Sort field             |
-| order     | string  | desc    | Sort order (asc/desc)    |
+| Parameter | Type   | Default   | Description           |
+| --------- | ------ | --------- | --------------------- |
+| page      | number | 1         | Page number           |
+| limit     | number | 10        | Items per page        |
+| status    | string | -         | Filter by status      |
+| sortBy    | string | createdAt | Sort field            |
+| order     | string | desc      | Sort order (asc/desc) |
 
 **Example:**
 

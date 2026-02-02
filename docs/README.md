@@ -11,13 +11,15 @@ Welcome to the Pretest Booth API documentation! This folder contains comprehensi
 Select a module based on what you need to implement:
 
 ### 🔐 Authentication & User Management
+
 **File**: [AUTH_API.md](./AUTH_API.md)
 
 Covers user registration, login, email verification, password reset, and token management.
 
 **Key Endpoints:**
+
 - Register user with school email validation
-- Login and receive JWT tokens  
+- Login and receive JWT tokens
 - Refresh access tokens
 - Verify email addresses
 - Reset forgotten passwords
@@ -27,11 +29,13 @@ Covers user registration, login, email verification, password reset, and token m
 ---
 
 ### 🎯 Problem Management
+
 **File**: [PROBLEMS_API.md](./PROBLEMS_API.md)
 
 Covers coding problem creation, management, and test case handling.
 
 **Key Features:**
+
 - Create and manage coding problems
 - Add problem difficulty levels (Easy/Medium/Hard)
 - Create and manage test cases
@@ -43,11 +47,13 @@ Covers coding problem creation, management, and test case handling.
 ---
 
 ### ⚙️ Code Execution
+
 **File**: [EXECUTION_API.md](./EXECUTION_API.md)
 
 Covers code execution in a sandboxed environment using Piston.
 
 **Key Features:**
+
 - Execute code directly (playground mode)
 - Test code against single test cases
 - Full submission evaluation
@@ -59,11 +65,13 @@ Covers code execution in a sandboxed environment using Piston.
 ---
 
 ### 📝 Submission Tracking
+
 **File**: [SUBMISSIONS_API.md](./SUBMISSIONS_API.md)
 
 Covers user code submission history and statistics.
 
 **Key Features:**
+
 - Track code submissions
 - View submission history with filtering
 - Get submission statistics per problem
@@ -83,6 +91,7 @@ Covers user code submission history and statistics.
 ## Navigation Tips
 
 Each API module document includes:
+
 - ✅ Complete endpoint reference
 - ✅ Request/response examples
 - ✅ Field descriptions and validation rules
@@ -109,21 +118,25 @@ Each API module document includes:
 ## Key Concepts
 
 ### Authentication
+
 - JWT-based authentication required for protected endpoints
 - Access tokens are short-lived (15-60 minutes)
 - Use refresh tokens to get new access tokens
 
 ### User Roles
+
 - **STUDENT**: View problems, submit solutions
 - **LECTURER**: Create/manage problems, view submissions
 - **ADMIN**: Full access
 
 ### Email Requirements
+
 - School email format required for registration
 - Student: `XXXXXXXX.yourname@student.iuh.edu.vn`
 - Lecturer: `XXXXXXXX.yourname@teacher.iuh.edu.vn`
 
 ### Pagination
+
 - Default limit: 10 items per page
 - Use `page` and `limit` query parameters
 
@@ -132,6 +145,7 @@ Each API module document includes:
 ## All Endpoints at a Glance
 
 ### Authentication
+
 ```
 POST   /auth/register              - Register new user
 POST   /auth/login                 - Login and get tokens
@@ -144,6 +158,7 @@ POST   /auth/reset-password        - Reset password with code
 ```
 
 ### Problems
+
 ```
 GET    /problems                   - List all problems
 POST   /problems                   - Create problem
@@ -160,6 +175,7 @@ DELETE /problems/testcases/:id     - Delete test case
 ```
 
 ### Code Execution
+
 ```
 GET    /execution/languages        - Get supported languages
 POST   /execution/run              - Execute code
@@ -168,6 +184,7 @@ POST   /execution/submit           - Submit for evaluation
 ```
 
 ### Submissions
+
 ```
 POST   /submissions                - Create submission
 GET    /submissions                - List all submissions
