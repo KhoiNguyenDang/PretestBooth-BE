@@ -98,11 +98,18 @@ export class ExecutionService {
       const result = (await response.json()) as PistonResponse;
       const totalTime = performance.now() - startTime;
 
-      // Check for compile error
-      const isCompileError = result.compile && (result.compile.code !== 0 || result.compile.stderr);
+      // Check for compile error - check both compile phase and stderr for compilation keywords
+      const hasCompilePhaseError =
+        result.compile && (result.compile.code !== 0 || result.compile.stderr);
+      const hasCompilationErrorInStderr =
+        result.run.stderr?.includes('error: compilation failed') ||
+        result.run.stderr?.includes('cannot find symbol') ||
+        (result.run.stderr?.includes('error:') && result.run.code === 1);
+      const isCompileError = hasCompilePhaseError || hasCompilationErrorInStderr;
 
-      // Check for runtime error
-      const isRuntimeError = result.run.code !== 0 || result.run.signal !== null;
+      // Check for runtime error (only if not a compile error)
+      const isRuntimeError =
+        !isCompileError && (result.run.code !== 0 || result.run.signal !== null);
 
       return new ExecutionResultDto({
         language: result.language,
@@ -114,7 +121,10 @@ export class ExecutionService {
         signal: result.run.signal,
         isSuccess: !isCompileError && !isRuntimeError,
         isCompileError: !!isCompileError,
-        compileOutput: result.compile?.output?.trim() || result.compile?.stderr?.trim(),
+        compileOutput:
+          result.compile?.output?.trim() ||
+          result.compile?.stderr?.trim() ||
+          (isCompileError ? result.run.stderr?.trim() : undefined),
         executionTime: Math.round(totalTime - networkTime), // Approximate execution time
         networkTime: Math.round(networkTime),
         totalTime: Math.round(totalTime),

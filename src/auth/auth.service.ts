@@ -4,6 +4,7 @@ import {
   UnauthorizedException,
   ForbiddenException,
   BadRequestException,
+  NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
@@ -20,7 +21,7 @@ export class AuthService {
     private readonly mailService: MailService,
   ) {}
 
-  async register(email: string, password: string) {
+  async register(email: string, password: string, name?: string) {
     // Validate school email format and extract student code
     const schoolEmailPattern = /^(\d{8})\.[a-z]+@(student|teacher)\.iuh\.edu\.vn$/;
     const match = email.match(schoolEmailPattern);
@@ -57,6 +58,7 @@ export class AuthService {
     const user = await this.prisma.user.create({
       data: {
         email,
+        name: name || null,
         password: hashedPassword,
         studentCode,
         emailVerificationToken: verificationToken,
@@ -120,7 +122,15 @@ export class AuthService {
       },
     });
 
-    return new TokenResponseDto(tokens);
+    return new TokenResponseDto({
+      ...tokens,
+      user: new UserResponseDto({
+        id: user.id,
+        email: user.email,
+        name: user.name || undefined,
+        role: user.role,
+      }),
+    });
   }
 
   async refresh(refreshToken: string) {
@@ -170,6 +180,22 @@ export class AuthService {
     });
 
     return new LogoutResponseDto({ message: 'Đăng xuất thành công' });
+  }
+
+  async getUser(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+    });
+    if (!user) {
+      throw new NotFoundException('Người dùng không tồn tại');
+    }
+
+    return new UserResponseDto({
+      id: user.id,
+      email: user.email,
+      name: user.name || undefined,
+      role: user.role,
+    });
   }
 
   async forgotPassword(email: string) {

@@ -9,6 +9,7 @@ datasource db {
 model User {
   id        String   @id @default(uuid())
   email     String   @unique
+  name      String?  // User's full name
   password  String
   studentCode String?  @unique
   role      Role     @default(STUDENT)
@@ -19,10 +20,17 @@ model User {
   resetPasswordCode String?
   resetPasswordExpiry DateTime?
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
   
   // Relations
   createdProblems Problem[] @relation("ProblemCreator")
   submissions     Submission[]
+  
+  // Indexes for common queries
+  @@index([email])
+  @@index([studentCode])
+  @@index([role])
+  @@index([isEmailVerified])
 }
 
 enum Role {
