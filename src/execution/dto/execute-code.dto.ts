@@ -24,6 +24,7 @@ export const ExecuteCodeSchema = z.object({
   language: z.string().min(1, 'Language is required'),
   version: z.string().default('*'),
   source: z.string().min(1, 'Source code is required'),
+  functionName: z.string().min(1).optional(),
   stdin: z.string().optional().default(''),
   args: z.array(z.string()).optional().default([]),
   compileTimeout: z.number().int().positive().optional().default(10000),
@@ -43,6 +44,7 @@ export const ExecuteWithTestCasesSchema = z.object({
   language: z.string().min(1, 'Language is required'),
   version: z.string().default('*'),
   source: z.string().min(1, 'Source code is required'),
+  functionName: z.string().min(1).optional(),
   problemId: z.string().uuid('Invalid problem ID'),
   runTimeout: z.number().int().positive().optional().default(5000),
 });
@@ -55,6 +57,7 @@ export const RunTestCaseSchema = z.object({
   language: z.string().min(1, 'Language is required'),
   version: z.string().default('*'),
   source: z.string().min(1, 'Source code is required'),
+  functionName: z.string().min(1).optional(),
   input: z.string(),
   expectedOutput: z.string(),
   runTimeout: z.number().int().positive().optional().default(5000),

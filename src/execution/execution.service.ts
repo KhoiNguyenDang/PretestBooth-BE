@@ -69,10 +69,13 @@ export class ExecutionService {
   async executeCode(dto: ExecuteCodeInput): Promise<ExecutionResultDto> {
     const startTime = performance.now();
 
+    const functionName = dto.functionName || this.extractFunctionName(dto.language, dto.source);
+    const source = this.generateDriverCode(dto.language, functionName, dto.source);
+
     const payload = {
       language: dto.language,
       version: dto.version,
-      files: [{ content: dto.source }],
+      files: [{ content: source }],
       stdin: dto.stdin || '',
       args: dto.args || [],
       compile_timeout: dto.compileTimeout || 10000,
@@ -146,6 +149,7 @@ export class ExecutionService {
       language: dto.language,
       version: dto.version,
       source: dto.source,
+      functionName: dto.functionName,
       stdin: dto.input,
       runTimeout: dto.runTimeout,
     });
@@ -206,6 +210,7 @@ export class ExecutionService {
         language: dto.language,
         version: dto.version,
         source: dto.source,
+        functionName: dto.functionName,
         stdin: testCase.input,
         runTimeout: dto.runTimeout || problem.timeLimit,
       });
@@ -341,5 +346,115 @@ export class ExecutionService {
       return 'Wrong Answer';
     }
     return 'Accepted';
+  }
+
+  /**
+   * Generate driver code that parses single-line inputs and calls the solution function.
+   */
+  private generateDriverCode(
+    language: string,
+    functionName: string | undefined,
+    userSource: string,
+  ): string {
+    const normalized = language.toLowerCase();
+
+    if (normalized === 'javascript') {
+      if (!functionName) {
+        throw new HttpException(
+          'Function name is required for JavaScript submissions',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+
+      return `"use strict";
+${userSource}
+
+const fs = require('fs');
+const rawInput = fs.readFileSync(0, 'utf8').trim();
+let args = [];
+if (rawInput.length > 0) {
+  try {
+    args = JSON.parse('[' + rawInput + ']');
+  } catch (err) {
+    throw new Error('Invalid input format. Expect single-line, comma-separated arguments.');
+  }
+}
+
+if (typeof ${functionName} !== 'function') {
+  throw new Error('Function ${functionName} not found');
+}
+
+const result = ${functionName}(...args);
+if (result !== undefined) {
+  if (result !== null && typeof result === 'object') {
+    process.stdout.write(JSON.stringify(result));
+  } else {
+    process.stdout.write(String(result));
+  }
+}
+`;
+    }
+
+    if (normalized === 'python') {
+      if (!functionName) {
+        throw new HttpException(
+          'Function name is required for Python submissions',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+
+      return `${userSource}
+
+import sys
+import json
+
+raw_input = sys.stdin.read().strip()
+args = []
+if raw_input:
+    try:
+        args = json.loads('[' + raw_input + ']')
+    except Exception:
+        raise ValueError('Invalid input format. Expect single-line, comma-separated arguments.')
+
+if '${functionName}' not in globals() or not callable(globals()['${functionName}']):
+    raise NameError('Function ${functionName} not found')
+
+result = globals()['${functionName}'](*args)
+if result is not None:
+    if isinstance(result, (list, dict, tuple)):
+        sys.stdout.write(json.dumps(result))
+    else:
+        sys.stdout.write(str(result))
+`;
+    }
+
+    return userSource;
+  }
+
+  /**
+   * Attempt to extract function name from user source.
+   */
+  private extractFunctionName(language: string, source: string): string | undefined {
+    const normalized = language.toLowerCase();
+
+    if (normalized === 'javascript') {
+      const functionDecl = source.match(/function\s+([A-Za-z_$][\w$]*)\s*\(/);
+      if (functionDecl?.[1]) return functionDecl[1];
+
+      const arrowDecl = source.match(
+        /(const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>/,
+      );
+      if (arrowDecl?.[2]) return arrowDecl[2];
+
+      const exportDecl = source.match(/export\s+(default\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(/);
+      if (exportDecl?.[2]) return exportDecl[2];
+    }
+
+    if (normalized === 'python') {
+      const defDecl = source.match(/def\s+([A-Za-z_][\w]*)\s*\(/);
+      if (defDecl?.[1]) return defDecl[1];
+    }
+
+    return undefined;
   }
 }
