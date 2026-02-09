@@ -64,6 +64,12 @@ model Problem {
   // Problem metadata
   timeLimit   Int        @default(1000)  // in milliseconds
   memoryLimit Int        @default(256)   // in MB
+
+  // Function signature metadata for driver code generation
+  functionName String   @default("solution")
+  inputTypes   String[] @default([])
+  outputType   String   @default("void")
+  argNames     String[] @default([])
   
   // Stats
   totalSubmissions Int   @default(0)

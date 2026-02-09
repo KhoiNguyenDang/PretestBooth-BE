@@ -14,6 +14,8 @@ import {
   type PistonResponse,
 } from './dto/execution-response.dto';
 
+import { generateJavascriptDriver, generatePythonDriver, generateJavaDriver } from './drivers';
+
 @Injectable()
 export class ExecutionService {
   private readonly pistonUrl: string;
@@ -70,7 +72,12 @@ export class ExecutionService {
     const startTime = performance.now();
 
     const functionName = dto.functionName || this.extractFunctionName(dto.language, dto.source);
-    const source = this.generateDriverCode(dto.language, functionName, dto.source);
+    const source = this.generateDriverCode(
+      dto.language,
+      functionName,
+      dto.source,
+      dto.inputTypes || [],
+    );
 
     const payload = {
       language: dto.language,
@@ -152,6 +159,7 @@ export class ExecutionService {
       functionName: dto.functionName,
       stdin: dto.input,
       runTimeout: dto.runTimeout,
+      inputTypes: dto.inputTypes,
     });
 
     const actualOutput = result.stdout.trim();
@@ -213,6 +221,7 @@ export class ExecutionService {
         functionName: dto.functionName,
         stdin: testCase.input,
         runTimeout: dto.runTimeout || problem.timeLimit,
+        inputTypes: problem.inputTypes || [],
       });
 
       // Check for compile error (only need to check once)
@@ -315,15 +324,9 @@ export class ExecutionService {
    */
   private compareOutput(actual: string, expected: string): boolean {
     // Normalize whitespace: trim and normalize line endings
-    const normalizeString = (str: string): string => {
-      return str
-        .split('\n')
-        .map((line) => line.trim())
-        .filter((line) => line.length > 0)
-        .join('\n');
-    };
+    const normalize = (str: string) => str.replace(/\s+/g, '');
 
-    return normalizeString(actual) === normalizeString(expected);
+    return normalize(actual) === normalize(expected);
   }
 
   /**
@@ -355,80 +358,37 @@ export class ExecutionService {
     language: string,
     functionName: string | undefined,
     userSource: string,
+    inputTypes: string[] = [],
   ): string {
     const normalized = language.toLowerCase();
 
-    if (normalized === 'javascript') {
-      if (!functionName) {
-        throw new HttpException(
-          'Function name is required for JavaScript submissions',
-          HttpStatus.BAD_REQUEST,
-        );
-      }
+    switch (normalized) {
+      case 'javascript':
+        if (!functionName)
+          throw new HttpException('Function name required for JS', HttpStatus.BAD_REQUEST);
+        return generateJavascriptDriver(userSource, functionName);
 
-      return `"use strict";
-${userSource}
+      case 'python':
+        if (!functionName)
+          throw new HttpException('Function name required for Python', HttpStatus.BAD_REQUEST);
+        return generatePythonDriver(userSource, functionName);
 
-const fs = require('fs');
-const rawInput = fs.readFileSync(0, 'utf8').trim();
-let args = [];
-if (rawInput.length > 0) {
-  try {
-    args = JSON.parse('[' + rawInput + ']');
-  } catch (err) {
-    throw new Error('Invalid input format. Expect single-line, comma-separated arguments.');
-  }
-}
+      case 'java':
+        if (!functionName)
+          throw new HttpException('Function name required for Java', HttpStatus.BAD_REQUEST);
+        return generateJavaDriver(userSource, functionName, inputTypes);
 
-if (typeof ${functionName} !== 'function') {
-  throw new Error('Function ${functionName} not found');
-}
+      case 'cpp':
+        // return generateCppDriver(userSource, functionName, inputTypes);
+        return userSource; // Tạm thời
 
-const result = ${functionName}(...args);
-if (result !== undefined) {
-  if (result !== null && typeof result === 'object') {
-    process.stdout.write(JSON.stringify(result));
-  } else {
-    process.stdout.write(String(result));
-  }
-}
-`;
+      case 'csharp':
+        // return generateCsharpDriver(userSource, functionName, inputTypes);
+        return userSource; // Tạm thời
+
+      default:
+        return userSource;
     }
-
-    if (normalized === 'python') {
-      if (!functionName) {
-        throw new HttpException(
-          'Function name is required for Python submissions',
-          HttpStatus.BAD_REQUEST,
-        );
-      }
-
-      return `${userSource}
-
-import sys
-import json
-
-raw_input = sys.stdin.read().strip()
-args = []
-if raw_input:
-    try:
-        args = json.loads('[' + raw_input + ']')
-    except Exception:
-        raise ValueError('Invalid input format. Expect single-line, comma-separated arguments.')
-
-if '${functionName}' not in globals() or not callable(globals()['${functionName}']):
-    raise NameError('Function ${functionName} not found')
-
-result = globals()['${functionName}'](*args)
-if result is not None:
-    if isinstance(result, (list, dict, tuple)):
-        sys.stdout.write(json.dumps(result))
-    else:
-        sys.stdout.write(str(result))
-`;
-    }
-
-    return userSource;
   }
 
   /**

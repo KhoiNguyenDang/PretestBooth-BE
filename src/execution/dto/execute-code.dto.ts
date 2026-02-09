@@ -31,6 +31,7 @@ export const ExecuteCodeSchema = z.object({
   runTimeout: z.number().int().positive().optional().default(5000),
   compileMemoryLimit: z.number().int().positive().optional().default(-1),
   runMemoryLimit: z.number().int().positive().optional().default(-1),
+  inputTypes: z.array(z.string()).optional().default([]),
 });
 
 // Output type (after validation with defaults applied)
@@ -61,6 +62,7 @@ export const RunTestCaseSchema = z.object({
   input: z.string(),
   expectedOutput: z.string(),
   runTimeout: z.number().int().positive().optional().default(5000),
+  inputTypes: z.array(z.string()).optional().default([]),
 });
 
 export type RunTestCaseDto = z.output<typeof RunTestCaseSchema>;
