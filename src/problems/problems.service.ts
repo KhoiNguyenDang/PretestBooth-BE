@@ -26,7 +26,11 @@ export class ProblemsService {
 
   // ==================== PROBLEM CRUD ====================
 
-  async create(creatorId: string, userRole: string, dto: CreateProblemDto): Promise<ProblemResponseDto> {
+  async create(
+    creatorId: string,
+    userRole: string,
+    dto: CreateProblemDto,
+  ): Promise<ProblemResponseDto> {
     // Check if user has permission to create problems (only LECTURER and ADMIN)
     if (!['LECTURER', 'ADMIN'].includes(userRole)) {
       throw new ForbiddenException('Chỉ giảng viên và quản trị viên mới có thể tạo bài tập');
