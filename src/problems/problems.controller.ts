@@ -36,7 +36,8 @@ export class ProblemsController {
   @UseGuards(AuthGuard('jwt'))
   create(@Body(new ZodValidationPipe(CreateProblemSchema)) dto: CreateProblemDto, @Req() req) {
     const userId = req.user['sub'];
-    return this.problemsService.create(userId, dto);
+    const userRole = req.user['role'];
+    return this.problemsService.create(userId, userRole, dto);
   }
 
   @Get()

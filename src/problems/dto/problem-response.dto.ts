@@ -23,6 +23,10 @@ export class ProblemResponseDto {
   hints: string[];
   timeLimit: number;
   memoryLimit: number;
+  functionName: string;
+  inputTypes: string[];
+  outputType: string;
+  argNames: string[];
   totalSubmissions: number;
   acceptedSubmissions: number;
   acceptanceRate: number;

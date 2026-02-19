@@ -26,7 +26,12 @@ export class ProblemsService {
 
   // ==================== PROBLEM CRUD ====================
 
-  async create(creatorId: string, dto: CreateProblemDto): Promise<ProblemResponseDto> {
+  async create(creatorId: string, userRole: string, dto: CreateProblemDto): Promise<ProblemResponseDto> {
+    // Check if user has permission to create problems (only LECTURER and ADMIN)
+    if (!['LECTURER', 'ADMIN'].includes(userRole)) {
+      throw new ForbiddenException('Chỉ giảng viên và quản trị viên mới có thể tạo bài tập');
+    }
+
     // Check if slug already exists
     const existingProblem = await this.prisma.problem.findUnique({
       where: { slug: dto.slug },
@@ -36,25 +41,60 @@ export class ProblemsService {
       throw new ConflictException('Slug đã tồn tại');
     }
 
-    const problem = await this.prisma.problem.create({
-      data: {
-        title: dto.title,
-        slug: dto.slug,
-        description: dto.description,
-        difficulty: dto.difficulty as Difficulty,
-        starterCode: dto.starterCode || undefined,
-        constraints: dto.constraints,
-        hints: dto.hints || [],
-        timeLimit: dto.timeLimit,
-        memoryLimit: dto.memoryLimit,
-        isPublished: dto.isPublished,
-        creatorId,
-      },
+    // Use a transaction to create problem with optional inline test cases
+    const problem = await this.prisma.$transaction(async (tx) => {
+      const createdProblem = await tx.problem.create({
+        data: {
+          title: dto.title,
+          slug: dto.slug,
+          description: dto.description,
+          difficulty: dto.difficulty as Difficulty,
+          starterCode: dto.starterCode || undefined,
+          constraints: dto.constraints,
+          hints: dto.hints || [],
+          timeLimit: dto.timeLimit,
+          memoryLimit: dto.memoryLimit,
+          functionName: dto.functionName,
+          inputTypes: dto.inputTypes || [],
+          outputType: dto.outputType,
+          argNames: dto.argNames || [],
+          isPublished: dto.isPublished,
+          creatorId,
+        },
+      });
+
+      // Create inline test cases if provided
+      if (dto.testCases && dto.testCases.length > 0) {
+        await tx.testCase.createMany({
+          data: dto.testCases.map((tc, index) => ({
+            input: tc.input,
+            expectedOutput: tc.expectedOutput,
+            explanation: tc.explanation,
+            isHidden: tc.isHidden,
+            isSample: tc.isSample,
+            order: tc.order ?? index,
+            problemId: createdProblem.id,
+          })),
+        });
+      }
+
+      // Re-fetch with test cases included
+      return tx.problem.findUniqueOrThrow({
+        where: { id: createdProblem.id },
+        include: {
+          testCases: {
+            orderBy: { order: 'asc' },
+          },
+        },
+      });
     });
+
+    const testCases = problem.testCases?.map((tc) => new TestCaseResponseDto(tc)) ?? [];
 
     return new ProblemResponseDto({
       ...problem,
       starterCode: problem.starterCode as Record<string, string> | null,
+      testCases,
     });
   }
 
@@ -269,6 +309,10 @@ export class ProblemsService {
         ...(dto.hints && { hints: dto.hints }),
         ...(dto.timeLimit && { timeLimit: dto.timeLimit }),
         ...(dto.memoryLimit && { memoryLimit: dto.memoryLimit }),
+        ...(dto.functionName && { functionName: dto.functionName }),
+        ...(dto.inputTypes && { inputTypes: dto.inputTypes }),
+        ...(dto.outputType && { outputType: dto.outputType }),
+        ...(dto.argNames && { argNames: dto.argNames }),
         ...(dto.isPublished !== undefined && { isPublished: dto.isPublished }),
       },
     });

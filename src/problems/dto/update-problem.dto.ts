@@ -15,6 +15,10 @@ export const UpdateProblemSchema = z.object({
   hints: z.array(z.string()).optional(),
   timeLimit: z.number().int().positive().optional(),
   memoryLimit: z.number().int().positive().optional(),
+  functionName: z.string().min(1).optional(),
+  inputTypes: z.array(z.string()).optional(),
+  outputType: z.string().min(1).optional(),
+  argNames: z.array(z.string()).optional(),
   isPublished: z.boolean().optional(),
 });
 
