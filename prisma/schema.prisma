@@ -79,6 +79,12 @@ model Problem {
   // Status
   isPublished Boolean    @default(false)
   
+  // Classification (optional - links to question bank subjects/topics)
+  subjectId   String?
+  subject     Subject?   @relation(fields: [subjectId], references: [id])
+  topicId     String?
+  topic       Topic?     @relation(fields: [topicId], references: [id])
+  
   // Relations
   creatorId   String
   creator     User       @relation("ProblemCreator", fields: [creatorId], references: [id])
@@ -91,6 +97,8 @@ model Problem {
   @@index([difficulty])
   @@index([isPublished])
   @@index([creatorId])
+  @@index([subjectId])
+  @@index([topicId])
 }
 
 // TestCase model with hidden test cases support
@@ -196,6 +204,7 @@ model Subject {
   // Relations
   topics      Topic[]
   questions   Question[]
+  problems    Problem[]
   
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
@@ -210,6 +219,7 @@ model Topic {
   subjectId   String
   subject     Subject   @relation(fields: [subjectId], references: [id], onDelete: Cascade)
   questions   Question[]
+  problems    Problem[]
   
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt

@@ -32,6 +32,10 @@ export class ProblemResponseDto {
   acceptanceRate: number;
   isPublished: boolean;
   creatorId: string;
+  subjectId: string | null;
+  topicId: string | null;
+  subject?: { id: string; name: string } | null;
+  topic?: { id: string; name: string } | null;
   testCases?: TestCaseResponseDto[];
   sampleTestCases?: TestCaseResponseDto[];
   createdAt: Date;
@@ -58,6 +62,10 @@ export class ProblemListItemDto {
   acceptanceRate: number;
   totalSubmissions: number;
   isPublished: boolean;
+  subjectId: string | null;
+  topicId: string | null;
+  subject?: { id: string; name: string } | null;
+  topic?: { id: string; name: string } | null;
 
   constructor(partial: Partial<ProblemListItemDto>) {
     Object.assign(this, partial);

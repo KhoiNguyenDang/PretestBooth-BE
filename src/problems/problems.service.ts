@@ -63,6 +63,8 @@ export class ProblemsService {
           outputType: dto.outputType,
           argNames: dto.argNames || [],
           isPublished: dto.isPublished,
+          subjectId: dto.subjectId || null,
+          topicId: dto.topicId || null,
           creatorId,
         },
       });
@@ -89,6 +91,8 @@ export class ProblemsService {
           testCases: {
             orderBy: { order: 'asc' },
           },
+          subject: { select: { id: true, name: true } },
+          topic: { select: { id: true, name: true } },
         },
       });
     });
@@ -98,6 +102,8 @@ export class ProblemsService {
     return new ProblemResponseDto({
       ...problem,
       starterCode: problem.starterCode as Record<string, string> | null,
+      subject: problem.subject || null,
+      topic: problem.topic || null,
       testCases,
     });
   }
@@ -108,6 +114,8 @@ export class ProblemsService {
     userRole?: string,
   ): Promise<PaginatedProblemsDto> {
     const { page, limit, difficulty, search, isPublished, sortBy, sortOrder } = query;
+    const subjectId = (query as any).subjectId;
+    const topicId = (query as any).topicId;
     const skip = (page - 1) * limit;
 
     // Build where clause
@@ -129,6 +137,14 @@ export class ProblemsService {
         { title: { contains: search, mode: 'insensitive' } },
         { slug: { contains: search, mode: 'insensitive' } },
       ];
+    }
+
+    if (subjectId) {
+      where.subjectId = subjectId;
+    }
+
+    if (topicId) {
+      where.topicId = topicId;
     }
 
     // Build orderBy
@@ -154,6 +170,10 @@ export class ProblemsService {
           totalSubmissions: true,
           acceptedSubmissions: true,
           isPublished: true,
+          subjectId: true,
+          topicId: true,
+          subject: { select: { id: true, name: true } },
+          topic: { select: { id: true, name: true } },
         },
       }),
       this.prisma.problem.count({ where }),
@@ -186,6 +206,8 @@ export class ProblemsService {
         testCases: {
           orderBy: { order: 'asc' },
         },
+        subject: { select: { id: true, name: true } },
+        topic: { select: { id: true, name: true } },
       },
     });
 
@@ -221,6 +243,8 @@ export class ProblemsService {
     return new ProblemResponseDto({
       ...problem,
       starterCode: problem.starterCode as Record<string, string> | null,
+      subject: problem.subject || null,
+      topic: problem.topic || null,
       testCases,
       sampleTestCases,
     });
@@ -233,6 +257,8 @@ export class ProblemsService {
         testCases: {
           orderBy: { order: 'asc' },
         },
+        subject: { select: { id: true, name: true } },
+        topic: { select: { id: true, name: true } },
       },
     });
 
@@ -266,6 +292,8 @@ export class ProblemsService {
     return new ProblemResponseDto({
       ...problem,
       starterCode: problem.starterCode as Record<string, string> | null,
+      subject: problem.subject || null,
+      topic: problem.topic || null,
       testCases,
       sampleTestCases,
     });
@@ -318,12 +346,20 @@ export class ProblemsService {
         ...(dto.outputType && { outputType: dto.outputType }),
         ...(dto.argNames && { argNames: dto.argNames }),
         ...(dto.isPublished !== undefined && { isPublished: dto.isPublished }),
+        ...(dto.subjectId !== undefined && { subjectId: dto.subjectId || null }),
+        ...(dto.topicId !== undefined && { topicId: dto.topicId || null }),
+      },
+      include: {
+        subject: { select: { id: true, name: true } },
+        topic: { select: { id: true, name: true } },
       },
     });
 
     return new ProblemResponseDto({
       ...updated,
       starterCode: updated.starterCode as Record<string, string> | null,
+      subject: updated.subject || null,
+      topic: updated.topic || null,
     });
   }
 

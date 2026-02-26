@@ -20,6 +20,8 @@ export const UpdateProblemSchema = z.object({
   outputType: z.string().min(1).optional(),
   argNames: z.array(z.string()).optional(),
   isPublished: z.boolean().optional(),
+  subjectId: z.string().uuid('subjectId phải là UUID hợp lệ').optional().nullable(),
+  topicId: z.string().uuid('topicId phải là UUID hợp lệ').optional().nullable(),
 });
 
 export type UpdateProblemDto = z.infer<typeof UpdateProblemSchema>;

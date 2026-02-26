@@ -48,6 +48,99 @@ async function main() {
   });
   console.log('✅ Created teacher user:', teacher.email);
 
+  // ==================== SUBJECTS & TOPICS (shared by problems and questions) ====================
+
+  console.log('\n📚 Creating subjects & topics...');
+
+  // Create Subjects
+  const oopSubject = await prisma.subject.upsert({
+    where: { name: 'Lập trình hướng đối tượng' },
+    update: {},
+    create: {
+      name: 'Lập trình hướng đối tượng',
+      description: 'Các khái niệm và nguyên lý lập trình hướng đối tượng (OOP)',
+    },
+  });
+  console.log('✅ Created subject:', oopSubject.name);
+
+  const dsaSubject = await prisma.subject.upsert({
+    where: { name: 'Cấu trúc dữ liệu & Giải thuật' },
+    update: {},
+    create: {
+      name: 'Cấu trúc dữ liệu & Giải thuật',
+      description: 'Các cấu trúc dữ liệu và thuật toán cơ bản đến nâng cao',
+    },
+  });
+  console.log('✅ Created subject:', dsaSubject.name);
+
+  const dbSubject = await prisma.subject.upsert({
+    where: { name: 'Cơ sở dữ liệu' },
+    update: {},
+    create: {
+      name: 'Cơ sở dữ liệu',
+      description: 'Thiết kế và quản trị cơ sở dữ liệu quan hệ',
+    },
+  });
+  console.log('✅ Created subject:', dbSubject.name);
+
+  // Create Topics for OOP
+  const oopBasicsTopic = await prisma.topic.upsert({
+    where: { subjectId_name: { subjectId: oopSubject.id, name: 'Khái niệm cơ bản' } },
+    update: {},
+    create: { name: 'Khái niệm cơ bản', subjectId: oopSubject.id },
+  });
+
+  const inheritanceTopic = await prisma.topic.upsert({
+    where: { subjectId_name: { subjectId: oopSubject.id, name: 'Kế thừa' } },
+    update: {},
+    create: { name: 'Kế thừa', subjectId: oopSubject.id },
+  });
+
+  const polymorphismTopic = await prisma.topic.upsert({
+    where: { subjectId_name: { subjectId: oopSubject.id, name: 'Đa hình' } },
+    update: {},
+    create: { name: 'Đa hình', subjectId: oopSubject.id },
+  });
+  console.log('✅ Created topics for OOP');
+
+  // Create Topics for DSA
+  const arrayTopic = await prisma.topic.upsert({
+    where: { subjectId_name: { subjectId: dsaSubject.id, name: 'Mảng & Chuỗi' } },
+    update: {},
+    create: { name: 'Mảng & Chuỗi', subjectId: dsaSubject.id },
+  });
+
+  const sortingTopic = await prisma.topic.upsert({
+    where: { subjectId_name: { subjectId: dsaSubject.id, name: 'Sắp xếp' } },
+    update: {},
+    create: { name: 'Sắp xếp', subjectId: dsaSubject.id },
+  });
+
+  const treeTopic = await prisma.topic.upsert({
+    where: { subjectId_name: { subjectId: dsaSubject.id, name: 'Cây' } },
+    update: {},
+    create: { name: 'Cây', subjectId: dsaSubject.id },
+  });
+  console.log('✅ Created topics for DSA');
+
+  // Create Topics for Database
+  const sqlTopic = await prisma.topic.upsert({
+    where: { subjectId_name: { subjectId: dbSubject.id, name: 'SQL cơ bản' } },
+    update: {},
+    create: { name: 'SQL cơ bản', subjectId: dbSubject.id },
+  });
+
+  const normalizationTopic = await prisma.topic.upsert({
+    where: { subjectId_name: { subjectId: dbSubject.id, name: 'Chuẩn hóa' } },
+    update: {},
+    create: { name: 'Chuẩn hóa', subjectId: dbSubject.id },
+  });
+  console.log('✅ Created topics for Database');
+
+  // ==================== CODING PROBLEMS ====================
+
+  console.log('\n💻 Seeding coding problems...');
+
   // Problem 1: Two Sum
   const twoSum = await prisma.problem.upsert({
     where: { slug: 'two-sum' },
@@ -90,6 +183,8 @@ Bạn có thể trả về câu trả lời theo bất kỳ thứ tự nào.`,
       argNames: ['nums', 'target'],
       isPublished: true,
       creatorId: teacher.id,
+      subjectId: dsaSubject.id,
+      topicId: arrayTopic.id,
     },
   });
   console.log('✅ Created problem:', twoSum.title);
@@ -181,6 +276,8 @@ Ví dụ: 121 là palindrome trong khi 123 thì không.`,
       argNames: ['x'],
       isPublished: true,
       creatorId: teacher.id,
+      subjectId: dsaSubject.id,
+      topicId: arrayTopic.id,
     },
   });
   console.log('✅ Created problem:', palindrome.title);
@@ -273,6 +370,8 @@ Bạn phải làm điều này bằng cách sửa đổi mảng đầu vào tạ
       argNames: ['s'],
       isPublished: true,
       creatorId: teacher.id,
+      subjectId: dsaSubject.id,
+      topicId: arrayTopic.id,
     },
   });
   console.log('✅ Created problem:', reverseString.title);
@@ -348,6 +447,8 @@ Một chuỗi đầu vào là hợp lệ nếu:
       argNames: ['s'],
       isPublished: true,
       creatorId: teacher.id,
+      subjectId: dsaSubject.id,
+      topicId: arrayTopic.id,
     },
   });
   console.log('✅ Created problem:', validParentheses.title);
@@ -436,6 +537,8 @@ Mảng con là một phần liên tiếp của mảng.`,
       argNames: ['nums'],
       isPublished: true,
       creatorId: teacher.id,
+      subjectId: dsaSubject.id,
+      topicId: arrayTopic.id,
     },
   });
   console.log('✅ Created problem:', maxSubarray.title);
@@ -522,6 +625,8 @@ Trả về đầu của danh sách đã hợp nhất.`,
       argNames: ['list1', 'list2'],
       isPublished: true,
       creatorId: teacher.id,
+      subjectId: dsaSubject.id,
+      topicId: sortingTopic.id,
     },
   });
   console.log('✅ Created problem:', mergeLists.title);
@@ -556,94 +661,9 @@ Trả về đầu của danh sách đã hợp nhất.`,
   });
   console.log('✅ Created test cases for Merge Two Sorted Lists');
 
-  // ==================== QUESTION BANK SEED DATA ====================
+  // ==================== MULTIPLE-CHOICE QUESTION SEED DATA ====================
 
-  console.log('\n📚 Seeding question bank...');
-
-  // Create Subjects
-  const oopSubject = await prisma.subject.upsert({
-    where: { name: 'Lập trình hướng đối tượng' },
-    update: {},
-    create: {
-      name: 'Lập trình hướng đối tượng',
-      description: 'Các khái niệm và nguyên lý lập trình hướng đối tượng (OOP)',
-    },
-  });
-  console.log('✅ Created subject:', oopSubject.name);
-
-  const dsaSubject = await prisma.subject.upsert({
-    where: { name: 'Cấu trúc dữ liệu & Giải thuật' },
-    update: {},
-    create: {
-      name: 'Cấu trúc dữ liệu & Giải thuật',
-      description: 'Các cấu trúc dữ liệu và thuật toán cơ bản đến nâng cao',
-    },
-  });
-  console.log('✅ Created subject:', dsaSubject.name);
-
-  const dbSubject = await prisma.subject.upsert({
-    where: { name: 'Cơ sở dữ liệu' },
-    update: {},
-    create: {
-      name: 'Cơ sở dữ liệu',
-      description: 'Thiết kế và quản trị cơ sở dữ liệu quan hệ',
-    },
-  });
-  console.log('✅ Created subject:', dbSubject.name);
-
-  // Create Topics for OOP
-  const oopBasicsTopic = await prisma.topic.upsert({
-    where: { subjectId_name: { subjectId: oopSubject.id, name: 'Khái niệm cơ bản' } },
-    update: {},
-    create: { name: 'Khái niệm cơ bản', subjectId: oopSubject.id },
-  });
-
-  const inheritanceTopic = await prisma.topic.upsert({
-    where: { subjectId_name: { subjectId: oopSubject.id, name: 'Kế thừa' } },
-    update: {},
-    create: { name: 'Kế thừa', subjectId: oopSubject.id },
-  });
-
-  const polymorphismTopic = await prisma.topic.upsert({
-    where: { subjectId_name: { subjectId: oopSubject.id, name: 'Đa hình' } },
-    update: {},
-    create: { name: 'Đa hình', subjectId: oopSubject.id },
-  });
-  console.log('✅ Created topics for OOP');
-
-  // Create Topics for DSA
-  const arrayTopic = await prisma.topic.upsert({
-    where: { subjectId_name: { subjectId: dsaSubject.id, name: 'Mảng & Chuỗi' } },
-    update: {},
-    create: { name: 'Mảng & Chuỗi', subjectId: dsaSubject.id },
-  });
-
-  const sortingTopic = await prisma.topic.upsert({
-    where: { subjectId_name: { subjectId: dsaSubject.id, name: 'Sắp xếp' } },
-    update: {},
-    create: { name: 'Sắp xếp', subjectId: dsaSubject.id },
-  });
-
-  const treeTopic = await prisma.topic.upsert({
-    where: { subjectId_name: { subjectId: dsaSubject.id, name: 'Cây' } },
-    update: {},
-    create: { name: 'Cây', subjectId: dsaSubject.id },
-  });
-  console.log('✅ Created topics for DSA');
-
-  // Create Topics for Database
-  const sqlTopic = await prisma.topic.upsert({
-    where: { subjectId_name: { subjectId: dbSubject.id, name: 'SQL cơ bản' } },
-    update: {},
-    create: { name: 'SQL cơ bản', subjectId: dbSubject.id },
-  });
-
-  const normalizationTopic = await prisma.topic.upsert({
-    where: { subjectId_name: { subjectId: dbSubject.id, name: 'Chuẩn hóa' } },
-    update: {},
-    create: { name: 'Chuẩn hóa', subjectId: dbSubject.id },
-  });
-  console.log('✅ Created topics for Database');
+  console.log('\n📝 Seeding multiple-choice questions...');
 
   // ===== QUESTION 1: Single Choice - OOP Basics =====
   const q1 = await prisma.question.create({

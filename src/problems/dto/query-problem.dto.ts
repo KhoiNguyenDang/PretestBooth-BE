@@ -11,6 +11,8 @@ export const QueryProblemSchema = z.object({
     .optional(),
   sortBy: z.enum(['createdAt', 'title', 'difficulty', 'acceptanceRate']).default('createdAt'),
   sortOrder: z.enum(['asc', 'desc']).default('desc'),
+  subjectId: z.string().uuid().optional(),
+  topicId: z.string().uuid().optional(),
 });
 
 export type QueryProblemDto = z.infer<typeof QueryProblemSchema>;

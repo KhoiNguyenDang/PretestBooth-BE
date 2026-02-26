@@ -25,6 +25,10 @@ export const CreateProblemSchema = z.object({
   memoryLimit: z.number().int().positive().default(256),
   isPublished: z.boolean().default(false),
 
+  // Classification (optional - links to question bank subjects/topics)
+  subjectId: z.string().uuid('subjectId phải là UUID hợp lệ').optional().nullable(),
+  topicId: z.string().uuid('topicId phải là UUID hợp lệ').optional().nullable(),
+
   // Function signature metadata for driver code generation
   functionName: z.string().min(1).default('solution'),
   inputTypes: z.array(z.string()).optional().default([]),
