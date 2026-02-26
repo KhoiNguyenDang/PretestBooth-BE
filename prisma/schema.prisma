@@ -24,6 +24,7 @@ model User {
   
   // Relations
   createdProblems Problem[] @relation("ProblemCreator")
+  createdQuestions Question[] @relation("QuestionCreator")
   submissions     Submission[]
   
   // Indexes for common queries
@@ -175,4 +176,105 @@ model Submission {
   @@index([status])
   @@index([createdAt])
   @@index([userId, problemId])
+}
+
+// ==================== QUESTION BANK ====================
+
+// Question type enum
+enum QuestionType {
+  SINGLE_CHOICE    // Single correct answer (ABCD)
+  MULTIPLE_CHOICE  // Multiple correct answers
+  SHORT_ANSWER     // Free-text short answer
+}
+
+// Subject model for question classification
+model Subject {
+  id          String    @id @default(uuid())
+  name        String    @unique
+  description String?   @db.Text
+  
+  // Relations
+  topics      Topic[]
+  questions   Question[]
+  
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+// Topic model (belongs to a Subject)
+model Topic {
+  id          String    @id @default(uuid())
+  name        String
+  
+  // Relations
+  subjectId   String
+  subject     Subject   @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  questions   Question[]
+  
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  @@unique([subjectId, name])
+  @@index([subjectId])
+}
+
+// Question model for multiple-choice question bank
+model Question {
+  id            String       @id @default(uuid())
+  
+  // Question content
+  content       String       @db.Text
+  questionType  QuestionType @default(SINGLE_CHOICE)
+  difficulty    Difficulty   @default(MEDIUM)
+  
+  // For SHORT_ANSWER questions
+  correctAnswer String?      @db.Text
+  
+  // Explanation of the answer
+  explanation   String?      @db.Text
+  
+  // Status
+  isPublished   Boolean      @default(false)
+  
+  // Classification
+  subjectId     String
+  subject       Subject      @relation(fields: [subjectId], references: [id])
+  topicId       String?
+  topic         Topic?       @relation(fields: [topicId], references: [id])
+  
+  // Creator
+  creatorId     String
+  creator       User         @relation("QuestionCreator", fields: [creatorId], references: [id])
+  
+  // Relations
+  choices       QuestionChoice[]
+  
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  
+  @@index([questionType])
+  @@index([difficulty])
+  @@index([isPublished])
+  @@index([subjectId])
+  @@index([topicId])
+  @@index([creatorId])
+}
+
+// QuestionChoice model for answer options
+model QuestionChoice {
+  id          String   @id @default(uuid())
+  
+  // Choice content
+  content     String   @db.Text
+  isCorrect   Boolean  @default(false)
+  order       Int      @default(0)
+  
+  // Relations
+  questionId  String
+  question    Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([questionId])
 }

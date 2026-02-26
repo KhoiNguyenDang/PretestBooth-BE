@@ -556,6 +556,337 @@ Trả về đầu của danh sách đã hợp nhất.`,
   });
   console.log('✅ Created test cases for Merge Two Sorted Lists');
 
+  // ==================== QUESTION BANK SEED DATA ====================
+
+  console.log('\n📚 Seeding question bank...');
+
+  // Create Subjects
+  const oopSubject = await prisma.subject.upsert({
+    where: { name: 'Lập trình hướng đối tượng' },
+    update: {},
+    create: {
+      name: 'Lập trình hướng đối tượng',
+      description: 'Các khái niệm và nguyên lý lập trình hướng đối tượng (OOP)',
+    },
+  });
+  console.log('✅ Created subject:', oopSubject.name);
+
+  const dsaSubject = await prisma.subject.upsert({
+    where: { name: 'Cấu trúc dữ liệu & Giải thuật' },
+    update: {},
+    create: {
+      name: 'Cấu trúc dữ liệu & Giải thuật',
+      description: 'Các cấu trúc dữ liệu và thuật toán cơ bản đến nâng cao',
+    },
+  });
+  console.log('✅ Created subject:', dsaSubject.name);
+
+  const dbSubject = await prisma.subject.upsert({
+    where: { name: 'Cơ sở dữ liệu' },
+    update: {},
+    create: {
+      name: 'Cơ sở dữ liệu',
+      description: 'Thiết kế và quản trị cơ sở dữ liệu quan hệ',
+    },
+  });
+  console.log('✅ Created subject:', dbSubject.name);
+
+  // Create Topics for OOP
+  const oopBasicsTopic = await prisma.topic.upsert({
+    where: { subjectId_name: { subjectId: oopSubject.id, name: 'Khái niệm cơ bản' } },
+    update: {},
+    create: { name: 'Khái niệm cơ bản', subjectId: oopSubject.id },
+  });
+
+  const inheritanceTopic = await prisma.topic.upsert({
+    where: { subjectId_name: { subjectId: oopSubject.id, name: 'Kế thừa' } },
+    update: {},
+    create: { name: 'Kế thừa', subjectId: oopSubject.id },
+  });
+
+  const polymorphismTopic = await prisma.topic.upsert({
+    where: { subjectId_name: { subjectId: oopSubject.id, name: 'Đa hình' } },
+    update: {},
+    create: { name: 'Đa hình', subjectId: oopSubject.id },
+  });
+  console.log('✅ Created topics for OOP');
+
+  // Create Topics for DSA
+  const arrayTopic = await prisma.topic.upsert({
+    where: { subjectId_name: { subjectId: dsaSubject.id, name: 'Mảng & Chuỗi' } },
+    update: {},
+    create: { name: 'Mảng & Chuỗi', subjectId: dsaSubject.id },
+  });
+
+  const sortingTopic = await prisma.topic.upsert({
+    where: { subjectId_name: { subjectId: dsaSubject.id, name: 'Sắp xếp' } },
+    update: {},
+    create: { name: 'Sắp xếp', subjectId: dsaSubject.id },
+  });
+
+  const treeTopic = await prisma.topic.upsert({
+    where: { subjectId_name: { subjectId: dsaSubject.id, name: 'Cây' } },
+    update: {},
+    create: { name: 'Cây', subjectId: dsaSubject.id },
+  });
+  console.log('✅ Created topics for DSA');
+
+  // Create Topics for Database
+  const sqlTopic = await prisma.topic.upsert({
+    where: { subjectId_name: { subjectId: dbSubject.id, name: 'SQL cơ bản' } },
+    update: {},
+    create: { name: 'SQL cơ bản', subjectId: dbSubject.id },
+  });
+
+  const normalizationTopic = await prisma.topic.upsert({
+    where: { subjectId_name: { subjectId: dbSubject.id, name: 'Chuẩn hóa' } },
+    update: {},
+    create: { name: 'Chuẩn hóa', subjectId: dbSubject.id },
+  });
+  console.log('✅ Created topics for Database');
+
+  // ===== QUESTION 1: Single Choice - OOP Basics =====
+  const q1 = await prisma.question.create({
+    data: {
+      content: 'Trong lập trình hướng đối tượng, tính đóng gói (Encapsulation) là gì?',
+      questionType: 'SINGLE_CHOICE',
+      difficulty: 'EASY',
+      explanation:
+        'Tính đóng gói là việc che giấu thông tin bên trong đối tượng và chỉ cho phép truy cập thông qua các phương thức công khai.',
+      isPublished: true,
+      subjectId: oopSubject.id,
+      topicId: oopBasicsTopic.id,
+      creatorId: teacher.id,
+    },
+  });
+  await prisma.questionChoice.createMany({
+    data: [
+      {
+        content: 'Che giấu thông tin và dữ liệu bên trong đối tượng',
+        isCorrect: true,
+        order: 0,
+        questionId: q1.id,
+      },
+      { content: 'Tạo nhiều đối tượng từ một lớp', isCorrect: false, order: 1, questionId: q1.id },
+      { content: 'Kế thừa thuộc tính từ lớp cha', isCorrect: false, order: 2, questionId: q1.id },
+      {
+        content: 'Cho phép một phương thức hoạt động khác nhau tùy đối tượng',
+        isCorrect: false,
+        order: 3,
+        questionId: q1.id,
+      },
+    ],
+  });
+  console.log('✅ Created question: OOP Encapsulation (Single Choice)');
+
+  // ===== QUESTION 2: Single Choice - Inheritance =====
+  const q2 = await prisma.question.create({
+    data: {
+      content: 'Từ khóa nào được sử dụng để kế thừa một lớp trong Java?',
+      questionType: 'SINGLE_CHOICE',
+      difficulty: 'EASY',
+      explanation: 'Trong Java, từ khóa "extends" được sử dụng để kế thừa một lớp.',
+      isPublished: true,
+      subjectId: oopSubject.id,
+      topicId: inheritanceTopic.id,
+      creatorId: teacher.id,
+    },
+  });
+  await prisma.questionChoice.createMany({
+    data: [
+      { content: 'implements', isCorrect: false, order: 0, questionId: q2.id },
+      { content: 'extends', isCorrect: true, order: 1, questionId: q2.id },
+      { content: 'inherits', isCorrect: false, order: 2, questionId: q2.id },
+      { content: 'derives', isCorrect: false, order: 3, questionId: q2.id },
+    ],
+  });
+  console.log('✅ Created question: Java Inheritance keyword (Single Choice)');
+
+  // ===== QUESTION 3: Multiple Choice - OOP Principles =====
+  const q3 = await prisma.question.create({
+    data: {
+      content: 'Chọn các tính chất cơ bản của lập trình hướng đối tượng (chọn nhiều đáp án):',
+      questionType: 'MULTIPLE_CHOICE',
+      difficulty: 'MEDIUM',
+      explanation:
+        'Bốn tính chất cơ bản của OOP là: Đóng gói (Encapsulation), Kế thừa (Inheritance), Đa hình (Polymorphism), và Trừu tượng (Abstraction).',
+      isPublished: true,
+      subjectId: oopSubject.id,
+      topicId: oopBasicsTopic.id,
+      creatorId: teacher.id,
+    },
+  });
+  await prisma.questionChoice.createMany({
+    data: [
+      { content: 'Đóng gói (Encapsulation)', isCorrect: true, order: 0, questionId: q3.id },
+      { content: 'Kế thừa (Inheritance)', isCorrect: true, order: 1, questionId: q3.id },
+      { content: 'Đa hình (Polymorphism)', isCorrect: true, order: 2, questionId: q3.id },
+      { content: 'Trừu tượng (Abstraction)', isCorrect: true, order: 3, questionId: q3.id },
+      { content: 'Đệ quy (Recursion)', isCorrect: false, order: 4, questionId: q3.id },
+      { content: 'Song song (Concurrency)', isCorrect: false, order: 5, questionId: q3.id },
+    ],
+  });
+  console.log('✅ Created question: OOP Principles (Multiple Choice)');
+
+  // ===== QUESTION 4: Multiple Choice - Sorting =====
+  const q4 = await prisma.question.create({
+    data: {
+      content:
+        'Thuật toán sắp xếp nào sau đây có độ phức tạp trung bình là O(n log n)? (Chọn nhiều đáp án)',
+      questionType: 'MULTIPLE_CHOICE',
+      difficulty: 'MEDIUM',
+      explanation:
+        'Merge Sort, Quick Sort và Heap Sort đều có độ phức tạp trung bình là O(n log n).',
+      isPublished: true,
+      subjectId: dsaSubject.id,
+      topicId: sortingTopic.id,
+      creatorId: teacher.id,
+    },
+  });
+  await prisma.questionChoice.createMany({
+    data: [
+      { content: 'Bubble Sort', isCorrect: false, order: 0, questionId: q4.id },
+      { content: 'Merge Sort', isCorrect: true, order: 1, questionId: q4.id },
+      { content: 'Quick Sort', isCorrect: true, order: 2, questionId: q4.id },
+      { content: 'Selection Sort', isCorrect: false, order: 3, questionId: q4.id },
+      { content: 'Heap Sort', isCorrect: true, order: 4, questionId: q4.id },
+    ],
+  });
+  console.log('✅ Created question: Sorting Algorithms Complexity (Multiple Choice)');
+
+  // ===== QUESTION 5: Short Answer - BST =====
+  await prisma.question.create({
+    data: {
+      content:
+        'Trong cây nhị phân tìm kiếm (BST), giá trị của nút con bên trái so với nút cha như thế nào?',
+      questionType: 'SHORT_ANSWER',
+      difficulty: 'EASY',
+      correctAnswer: 'nhỏ hơn',
+      explanation:
+        'Trong BST, nút con bên trái luôn có giá trị nhỏ hơn nút cha, và nút con bên phải có giá trị lớn hơn nút cha.',
+      isPublished: true,
+      subjectId: dsaSubject.id,
+      topicId: treeTopic.id,
+      creatorId: teacher.id,
+    },
+  });
+  console.log('✅ Created question: BST Property (Short Answer)');
+
+  // ===== QUESTION 6: Single Choice - SQL =====
+  const q6 = await prisma.question.create({
+    data: {
+      content: 'Câu lệnh SQL nào dùng để lấy dữ liệu từ bảng?',
+      questionType: 'SINGLE_CHOICE',
+      difficulty: 'EASY',
+      explanation:
+        'Câu lệnh SELECT được sử dụng để truy vấn và lấy dữ liệu từ bảng trong cơ sở dữ liệu.',
+      isPublished: true,
+      subjectId: dbSubject.id,
+      topicId: sqlTopic.id,
+      creatorId: teacher.id,
+    },
+  });
+  await prisma.questionChoice.createMany({
+    data: [
+      { content: 'SELECT', isCorrect: true, order: 0, questionId: q6.id },
+      { content: 'INSERT', isCorrect: false, order: 1, questionId: q6.id },
+      { content: 'UPDATE', isCorrect: false, order: 2, questionId: q6.id },
+      { content: 'DELETE', isCorrect: false, order: 3, questionId: q6.id },
+    ],
+  });
+  console.log('✅ Created question: SQL SELECT (Single Choice)');
+
+  // ===== QUESTION 7: Short Answer - Normalization =====
+  await prisma.question.create({
+    data: {
+      content: 'Dạng chuẩn nào yêu cầu loại bỏ phụ thuộc bắc cầu (transitive dependency)?',
+      questionType: 'SHORT_ANSWER',
+      difficulty: 'MEDIUM',
+      correctAnswer: '3NF',
+      explanation:
+        'Dạng chuẩn 3 (3NF) yêu cầu loại bỏ phụ thuộc bắc cầu — tức là các thuộc tính không khóa không được phụ thuộc vào thuộc tính không khóa khác.',
+      isPublished: true,
+      subjectId: dbSubject.id,
+      topicId: normalizationTopic.id,
+      creatorId: teacher.id,
+    },
+  });
+  console.log('✅ Created question: 3NF Normalization (Short Answer)');
+
+  // ===== QUESTION 8: Single Choice - Polymorphism =====
+  const q8 = await prisma.question.create({
+    data: {
+      content: 'Overloading và Overriding là hai dạng của tính chất nào trong OOP?',
+      questionType: 'SINGLE_CHOICE',
+      difficulty: 'MEDIUM',
+      explanation:
+        'Overloading (nạp chồng) và Overriding (ghi đè) là hai dạng thể hiện của tính đa hình (Polymorphism) trong OOP.',
+      isPublished: true,
+      subjectId: oopSubject.id,
+      topicId: polymorphismTopic.id,
+      creatorId: teacher.id,
+    },
+  });
+  await prisma.questionChoice.createMany({
+    data: [
+      { content: 'Tính đóng gói (Encapsulation)', isCorrect: false, order: 0, questionId: q8.id },
+      { content: 'Tính kế thừa (Inheritance)', isCorrect: false, order: 1, questionId: q8.id },
+      { content: 'Tính đa hình (Polymorphism)', isCorrect: true, order: 2, questionId: q8.id },
+      { content: 'Tính trừu tượng (Abstraction)', isCorrect: false, order: 3, questionId: q8.id },
+    ],
+  });
+  console.log('✅ Created question: Polymorphism types (Single Choice)');
+
+  // ===== QUESTION 9: Multiple Choice - SQL Joins =====
+  const q9 = await prisma.question.create({
+    data: {
+      content: 'Những loại JOIN nào sau đây có trong SQL? (Chọn nhiều đáp án)',
+      questionType: 'MULTIPLE_CHOICE',
+      difficulty: 'MEDIUM',
+      explanation: 'SQL hỗ trợ: INNER JOIN, LEFT JOIN, RIGHT JOIN, FULL OUTER JOIN, và CROSS JOIN.',
+      isPublished: true,
+      subjectId: dbSubject.id,
+      topicId: sqlTopic.id,
+      creatorId: teacher.id,
+    },
+  });
+  await prisma.questionChoice.createMany({
+    data: [
+      { content: 'INNER JOIN', isCorrect: true, order: 0, questionId: q9.id },
+      { content: 'LEFT JOIN', isCorrect: true, order: 1, questionId: q9.id },
+      { content: 'DIAGONAL JOIN', isCorrect: false, order: 2, questionId: q9.id },
+      { content: 'FULL OUTER JOIN', isCorrect: true, order: 3, questionId: q9.id },
+      { content: 'CROSS JOIN', isCorrect: true, order: 4, questionId: q9.id },
+    ],
+  });
+  console.log('✅ Created question: SQL JOIN types (Multiple Choice)');
+
+  // ===== QUESTION 10: Single Choice - Array Complexity (Draft) =====
+  const q10 = await prisma.question.create({
+    data: {
+      content: 'Độ phức tạp thời gian của việc truy cập phần tử trong mảng theo chỉ số là gì?',
+      questionType: 'SINGLE_CHOICE',
+      difficulty: 'EASY',
+      explanation:
+        'Mảng cho phép truy cập trực tiếp bằng chỉ số với độ phức tạp O(1) — thời gian hằng số.',
+      isPublished: false, // Draft question
+      subjectId: dsaSubject.id,
+      topicId: arrayTopic.id,
+      creatorId: teacher.id,
+    },
+  });
+  await prisma.questionChoice.createMany({
+    data: [
+      { content: 'O(1)', isCorrect: true, order: 0, questionId: q10.id },
+      { content: 'O(n)', isCorrect: false, order: 1, questionId: q10.id },
+      { content: 'O(log n)', isCorrect: false, order: 2, questionId: q10.id },
+      { content: 'O(n²)', isCorrect: false, order: 3, questionId: q10.id },
+    ],
+  });
+  console.log('✅ Created question: Array Access Complexity (Single Choice - Draft)');
+
+  console.log('✅ Question bank seeding completed!');
+
   console.log('✨ Seed completed successfully!');
 }
 
