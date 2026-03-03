@@ -26,6 +26,8 @@ model User {
   createdProblems Problem[] @relation("ProblemCreator")
   createdQuestions Question[] @relation("QuestionCreator")
   submissions     Submission[]
+  createdExams    Exam[]        @relation("ExamCreator")
+  examSessions    ExamSession[]
   
   // Indexes for common queries
   @@index([email])
@@ -90,6 +92,7 @@ model Problem {
   creator     User       @relation("ProblemCreator", fields: [creatorId], references: [id])
   testCases   TestCase[]
   submissions Submission[]
+  examItems   ExamItem[]  @relation("ProblemExamItems")
   
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
@@ -205,6 +208,7 @@ model Subject {
   topics      Topic[]
   questions   Question[]
   problems    Problem[]
+  exams       Exam[]
   
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
@@ -220,6 +224,7 @@ model Topic {
   subject     Subject   @relation(fields: [subjectId], references: [id], onDelete: Cascade)
   questions   Question[]
   problems    Problem[]
+  exams       Exam[]
   
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
@@ -258,6 +263,7 @@ model Question {
   
   // Relations
   choices       QuestionChoice[]
+  examItems     ExamItem[]   @relation("QuestionExamItems")
   
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
@@ -287,4 +293,168 @@ model QuestionChoice {
   updatedAt   DateTime @updatedAt
   
   @@index([questionId])
+}
+
+// ==================== EXAM SYSTEM ====================
+
+// Exam section types
+enum ExamSection {
+  QUESTION  // Multiple-choice / short-answer from question bank
+  PROBLEM   // Coding problems (LeetCode-style)
+}
+
+// Exam session status
+enum ExamSessionStatus {
+  IN_PROGRESS
+  SUBMITTED
+  GRADED
+}
+
+// Exam model - the exam template created by a lecturer
+model Exam {
+  id          String      @id @default(uuid())
+  title       String
+  description String?     @db.Text
+  
+  // Configuration
+  questionCount Int       @default(0)   // Number of MC/short-answer questions
+  problemCount  Int       @default(0)   // Number of coding problems
+  duration      Int       @default(60)  // Duration in minutes
+  
+  // Filtering options used during generation
+  difficulty  Difficulty?
+  includeProblemsRelatedToQuestions Boolean @default(false)
+  
+  // Shuffle settings
+  shuffleQuestions Boolean @default(true)   // Shuffle question order per student
+  shuffleChoices  Boolean @default(true)   // Shuffle answer choices per student
+  
+  // Classification
+  subjectId   String?
+  subject     Subject?   @relation(fields: [subjectId], references: [id])
+  topicId     String?
+  topic       Topic?     @relation(fields: [topicId], references: [id])
+  
+  // Status
+  isPublished Boolean    @default(false)
+  
+  // Creator
+  creatorId   String
+  creator     User       @relation("ExamCreator", fields: [creatorId], references: [id])
+  
+  // Relations
+  items       ExamItem[]
+  sessions    ExamSession[]
+  
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  
+  @@index([creatorId])
+  @@index([subjectId])
+  @@index([topicId])
+  @@index([isPublished])
+}
+
+// ExamItem - a concrete item (question or problem) in an exam
+model ExamItem {
+  id        String      @id @default(uuid())
+  
+  // Which exam this belongs to
+  examId    String
+  exam      Exam        @relation(fields: [examId], references: [id], onDelete: Cascade)
+  
+  // Either a question or a problem (exactly one should be set)
+  questionId String?
+  question   Question?   @relation("QuestionExamItems", fields: [questionId], references: [id])
+  problemId  String?
+  problem    Problem?    @relation("ProblemExamItems", fields: [problemId], references: [id])
+  
+  // Section type
+  section   ExamSection
+  
+  // Canonical (unshuffled) order
+  order     Int         @default(0)
+  
+  // Points for this item
+  points    Float       @default(1.0)
+  
+  // Relations
+  sessionAnswers ExamSessionAnswer[]
+  
+  createdAt DateTime    @default(now())
+  
+  @@unique([examId, questionId])
+  @@unique([examId, problemId])
+  @@index([examId])
+  @@index([section])
+}
+
+// ExamSession - one student's attempt at an exam
+model ExamSession {
+  id        String            @id @default(uuid())
+  
+  // Which exam
+  examId    String
+  exam      Exam              @relation(fields: [examId], references: [id], onDelete: Cascade)
+  
+  // Which student
+  userId    String
+  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Deterministic shuffle seed
+  seed      Int
+  
+  // Timing
+  startedAt  DateTime         @default(now())
+  finishedAt DateTime?
+  
+  // Scoring
+  score      Float?
+  maxScore   Float?
+  
+  // Status
+  status    ExamSessionStatus @default(IN_PROGRESS)
+  
+  // Relations
+  answers   ExamSessionAnswer[]
+  
+  createdAt DateTime          @default(now())
+  
+  @@unique([examId, userId])
+  @@index([examId])
+  @@index([userId])
+  @@index([status])
+}
+
+// ExamSessionAnswer - each answer in a session
+model ExamSessionAnswer {
+  id          String      @id @default(uuid())
+  
+  // Which session
+  sessionId   String
+  session     ExamSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  
+  // Which exam item
+  examItemId  String
+  examItem    ExamItem    @relation(fields: [examItemId], references: [id], onDelete: Cascade)
+  
+  // For MC questions - selected choice IDs
+  selectedChoiceIds String[]
+  
+  // For short-answer questions
+  textAnswer  String?     @db.Text
+  
+  // For coding problems - reference to submission
+  submissionId String?
+  
+  // Grading
+  isCorrect   Boolean?
+  score       Float?
+  
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  
+  @@unique([sessionId, examItemId])
+  @@index([sessionId])
+  @@index([examItemId])
 }

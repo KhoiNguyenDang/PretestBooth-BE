@@ -82,6 +82,26 @@ Covers user code submission history and statistics.
 
 ---
 
+### 📋 Exam Management
+
+**File**: [EXAMS_API.md](./EXAMS_API.md)
+
+Covers exam generation, session management, shuffled delivery, and grading.
+
+**Key Features:**
+
+- Generate exams by randomly selecting questions/problems
+- Configure question count, problem count, difficulty, subject/topic
+- Start exam sessions with deterministic shuffled order per student
+- Auto-save answers during the exam
+- Auto-score multiple-choice questions on submission
+- Manual grading for short-answer and coding problems
+- Resume support (same seed = same order)
+
+👉 [View Exams API](./EXAMS_API.md)
+
+---
+
 ## Document Information
 
 - **Version**: 1.1
@@ -106,6 +126,7 @@ Each API module document includes:
 - [Problems Guide](./PROBLEMS_API.md)
 - [Code Execution Guide](./EXECUTION_API.md)
 - [Submissions Guide](./SUBMISSIONS_API.md)
+- [Exams Guide](./EXAMS_API.md)
 - [Documentation Structure](./DOCUMENTATION_STRUCTURE.md)
 
 ## Need Help?
