@@ -309,11 +309,7 @@ export class SubmissionsService {
   /**
    * Get unified list of both coding problem submissions and exam sessions, sorted by date.
    */
-  async findAllUnified(
-    userId: string,
-    userRole: string,
-    query: QueryUnifiedSubmissionsDto,
-  ) {
+  async findAllUnified(userId: string, userRole: string, query: QueryUnifiedSubmissionsDto) {
     const { page, limit, type, sortOrder } = query;
 
     // Fetch coding submissions

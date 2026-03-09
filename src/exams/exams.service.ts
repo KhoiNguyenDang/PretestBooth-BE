@@ -562,7 +562,12 @@ export class ExamsService {
 
     // Auto-score MC questions + auto-grade coding problems
     let totalScore = 0;
-    const answerUpdates: { id: string; isCorrect: boolean; score: number; submissionId?: string }[] = [];
+    const answerUpdates: {
+      id: string;
+      isCorrect: boolean;
+      score: number;
+      submissionId?: string;
+    }[] = [];
 
     for (const answer of session.answers) {
       const item = answer.examItem;
@@ -598,9 +603,7 @@ export class ExamsService {
       // Auto-grade PROBLEM items with source code
       if (item.section === 'PROBLEM' && item.problem && answer.sourceCode && answer.language) {
         try {
-          this.logger.log(
-            `Auto-grading problem "${item.problem.title}" for session ${sessionId}`,
-          );
+          this.logger.log(`Auto-grading problem "${item.problem.title}" for session ${sessionId}`);
 
           // Create a Submission record via SubmissionsService (runs code execution)
           const submission = await this.submissionsService.create(userId, {
