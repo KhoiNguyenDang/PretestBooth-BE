@@ -447,6 +447,11 @@ model ExamSessionAnswer {
   // For coding problems - reference to submission
   submissionId String?
   
+  // For coding problems - store source code for deferred execution on submit
+  sourceCode      String?   @db.Text
+  language        String?
+  languageVersion String?
+  
   // Grading
   isCorrect   Boolean?
   score       Float?

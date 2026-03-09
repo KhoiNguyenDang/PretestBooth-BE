@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/commo
 import { PrismaService } from '../prisma/prisma.service';
 import { ExecutionService } from '../execution/execution.service';
 import type { CreateSubmissionDto, QuerySubmissionsDto } from './dto/submission.dto';
+import type { QueryUnifiedSubmissionsDto } from './dto/unified-submission.dto';
 import {
   SubmissionResponseDto,
   SubmissionListItemDto,
@@ -303,6 +304,156 @@ export class SubmissionsService {
       lastSubmissionAt: lastSubmission?.createdAt || null,
       languages: languagesResult.map((l) => l.language),
     });
+  }
+
+  /**
+   * Get unified list of both coding problem submissions and exam sessions, sorted by date.
+   */
+  async findAllUnified(
+    userId: string,
+    userRole: string,
+    query: QueryUnifiedSubmissionsDto,
+  ) {
+    const { page, limit, type, sortOrder } = query;
+
+    // Fetch coding submissions
+    let problemSubmissions: any[] = [];
+    let problemTotal = 0;
+
+    if (type === 'ALL' || type === 'PROBLEM') {
+      const where: Prisma.SubmissionWhereInput = {};
+      if (userRole === 'STUDENT') {
+        where.userId = userId;
+      }
+
+      [problemSubmissions, problemTotal] = await Promise.all([
+        this.prisma.submission.findMany({
+          where,
+          orderBy: { createdAt: sortOrder },
+          select: {
+            id: true,
+            language: true,
+            status: true,
+            totalTestCases: true,
+            passedTestCases: true,
+            executionTime: true,
+            createdAt: true,
+            problem: {
+              select: { id: true, title: true, slug: true, difficulty: true },
+            },
+          },
+        }),
+        this.prisma.submission.count({ where }),
+      ]);
+    }
+
+    // Fetch exam sessions
+    let examSessions: any[] = [];
+    let examTotal = 0;
+
+    if (type === 'ALL' || type === 'EXAM') {
+      const where: Prisma.ExamSessionWhereInput = {};
+      if (userRole === 'STUDENT') {
+        where.userId = userId;
+      }
+
+      [examSessions, examTotal] = await Promise.all([
+        this.prisma.examSession.findMany({
+          where,
+          orderBy: { startedAt: sortOrder },
+          include: {
+            exam: {
+              select: {
+                id: true,
+                title: true,
+                questionCount: true,
+                problemCount: true,
+              },
+            },
+            answers: {
+              select: { isCorrect: true },
+            },
+          },
+        }),
+        this.prisma.examSession.count({ where }),
+      ]);
+    }
+
+    // Normalize both into a unified shape
+    const unified: any[] = [];
+
+    for (const s of problemSubmissions) {
+      unified.push({
+        id: s.id,
+        type: 'PROBLEM' as const,
+        title: s.problem?.title || 'Unknown Problem',
+        slug: s.problem?.slug || null,
+        difficulty: s.problem?.difficulty || null,
+        status: s.status,
+        language: s.language,
+        totalTestCases: s.totalTestCases,
+        passedTestCases: s.passedTestCases,
+        executionTime: s.executionTime,
+        score: null,
+        maxScore: null,
+        totalItems: null,
+        correctItems: null,
+        pendingItems: null,
+        questionCount: null,
+        problemCount: null,
+        examId: null,
+        date: s.createdAt,
+      });
+    }
+
+    for (const s of examSessions) {
+      const totalItems = s.answers.length;
+      const correctItems = s.answers.filter((a: any) => a.isCorrect === true).length;
+      const pendingItems = s.answers.filter((a: any) => a.isCorrect === null).length;
+
+      unified.push({
+        id: s.id,
+        type: 'EXAM' as const,
+        title: s.exam?.title || 'Unknown Exam',
+        slug: null,
+        difficulty: null,
+        status: s.status,
+        language: null,
+        totalTestCases: null,
+        passedTestCases: null,
+        executionTime: null,
+        score: s.score,
+        maxScore: s.maxScore,
+        totalItems,
+        correctItems,
+        pendingItems,
+        questionCount: s.exam?.questionCount || 0,
+        problemCount: s.exam?.problemCount || 0,
+        examId: s.exam?.id || null,
+        date: s.startedAt,
+      });
+    }
+
+    // Sort by date
+    unified.sort((a, b) => {
+      const dateA = new Date(a.date).getTime();
+      const dateB = new Date(b.date).getTime();
+      return sortOrder === 'desc' ? dateB - dateA : dateA - dateB;
+    });
+
+    // Paginate
+    const total = unified.length;
+    const totalPages = Math.ceil(total / limit);
+    const start = (page - 1) * limit;
+    const data = unified.slice(start, start + limit);
+
+    return {
+      data,
+      total,
+      page,
+      limit,
+      totalPages,
+    };
   }
 
   /**

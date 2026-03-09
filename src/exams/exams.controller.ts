@@ -25,6 +25,8 @@ import { SaveAnswerSchema } from './dto/save-answer.dto';
 import type { SaveAnswerDto } from './dto/save-answer.dto';
 import { GradeSessionSchema } from './dto/grade-session.dto';
 import type { GradeSessionDto } from './dto/grade-session.dto';
+import { QueryExamSessionsSchema } from './dto/query-exam-sessions.dto';
+import type { QueryExamSessionsDto } from './dto/query-exam-sessions.dto';
 
 @Controller('exams')
 @UseGuards(AuthGuard('jwt'))
@@ -79,6 +81,16 @@ export class ExamsController {
   startSession(@Param('id') id: string, @Req() req) {
     const userId = req.user['sub'];
     return this.examsService.startSession(id, userId);
+  }
+
+  @Get('sessions')
+  listSessions(
+    @Query(new ZodValidationPipe(QueryExamSessionsSchema)) query: QueryExamSessionsDto,
+    @Req() req,
+  ) {
+    const userId = req.user['sub'];
+    const userRole = req.user['role'];
+    return this.examsService.findAllSessions(userId, userRole, query);
   }
 
   @Get('sessions/:sessionId')

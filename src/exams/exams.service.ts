@@ -4,8 +4,11 @@ import {
   ForbiddenException,
   BadRequestException,
   ConflictException,
+  Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { ExecutionService } from '../execution/execution.service';
+import { SubmissionsService } from '../submissions/submissions.service';
 import { Prisma } from '@prisma/client';
 import * as crypto from 'crypto';
 import { shuffleWithSeed } from './utils/shuffle';
@@ -15,6 +18,7 @@ import type { UpdateExamDto } from './dto/update-exam.dto';
 import type { QueryExamDto } from './dto/query-exam.dto';
 import type { SaveAnswerDto } from './dto/save-answer.dto';
 import type { GradeSessionDto } from './dto/grade-session.dto';
+import type { QueryExamSessionsDto } from './dto/query-exam-sessions.dto';
 import {
   ExamListItemDto,
   ExamDetailDto,
@@ -28,13 +32,21 @@ import {
   SessionAnswerDto,
   SessionResultDto,
   SessionResultItemDto,
+  ExamSessionListItemDto,
+  PaginatedExamSessionsDto,
 } from './dto/exam-response.dto';
 
 type Difficulty = 'EASY' | 'MEDIUM' | 'HARD';
 
 @Injectable()
 export class ExamsService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(ExamsService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly executionService: ExecutionService,
+    private readonly submissionsService: SubmissionsService,
+  ) {}
 
   // ==================== EXAM CRUD ====================
 
@@ -492,11 +504,17 @@ export class ExamsService {
         selectedChoiceIds: dto.selectedChoiceIds || [],
         textAnswer: dto.textAnswer || null,
         submissionId: dto.submissionId || null,
+        sourceCode: dto.sourceCode || null,
+        language: dto.language || null,
+        languageVersion: dto.languageVersion || null,
       },
       update: {
         selectedChoiceIds: dto.selectedChoiceIds || [],
         textAnswer: dto.textAnswer || null,
         submissionId: dto.submissionId || null,
+        sourceCode: dto.sourceCode || null,
+        language: dto.language || null,
+        languageVersion: dto.languageVersion || null,
       },
     });
 
@@ -506,13 +524,16 @@ export class ExamsService {
       selectedChoiceIds: answer.selectedChoiceIds,
       textAnswer: answer.textAnswer,
       submissionId: answer.submissionId,
+      sourceCode: answer.sourceCode,
+      language: answer.language,
+      languageVersion: answer.languageVersion,
       isCorrect: answer.isCorrect,
       score: answer.score,
     });
   }
 
   /**
-   * Submit a session: auto-score MC, mark others as pending.
+   * Submit a session: auto-score MC + auto-grade coding problems via code execution.
    */
   async submitSession(sessionId: string, userId: string): Promise<SessionResultDto> {
     const session = await this.prisma.examSession.findUnique({
@@ -524,7 +545,7 @@ export class ExamsService {
             examItem: {
               include: {
                 question: { include: { choices: true } },
-                problem: true,
+                problem: { include: { testCases: { orderBy: { order: 'asc' } } } },
               },
             },
           },
@@ -539,9 +560,9 @@ export class ExamsService {
       throw new BadRequestException('Phiên thi đã được nộp rồi');
     }
 
-    // Auto-score MC questions
+    // Auto-score MC questions + auto-grade coding problems
     let totalScore = 0;
-    const answerUpdates: { id: string; isCorrect: boolean; score: number }[] = [];
+    const answerUpdates: { id: string; isCorrect: boolean; score: number; submissionId?: string }[] = [];
 
     for (const answer of session.answers) {
       const item = answer.examItem;
@@ -573,7 +594,45 @@ export class ExamsService {
         }
         // SHORT_ANSWER left as null (pending manual grading)
       }
-      // PROBLEM items left as null (pending manual grading)
+
+      // Auto-grade PROBLEM items with source code
+      if (item.section === 'PROBLEM' && item.problem && answer.sourceCode && answer.language) {
+        try {
+          this.logger.log(
+            `Auto-grading problem "${item.problem.title}" for session ${sessionId}`,
+          );
+
+          // Create a Submission record via SubmissionsService (runs code execution)
+          const submission = await this.submissionsService.create(userId, {
+            language: answer.language,
+            version: answer.languageVersion || '*',
+            sourceCode: answer.sourceCode,
+            problemId: item.problem.id,
+          });
+
+          const isAccepted = submission.status === 'ACCEPTED';
+          const passRate =
+            submission.totalTestCases > 0
+              ? submission.passedTestCases / submission.totalTestCases
+              : 0;
+          // Proportional scoring: passedTestCases / totalTestCases × points
+          const itemScore = Math.round(passRate * item.points * 100) / 100;
+
+          totalScore += itemScore;
+
+          answerUpdates.push({
+            id: answer.id,
+            isCorrect: isAccepted,
+            score: itemScore,
+            submissionId: submission.id,
+          });
+        } catch (error) {
+          this.logger.error(
+            `Failed to auto-grade problem "${item.problem.title}": ${(error as Error).message}`,
+          );
+          // Leave as null (pending manual grading) if execution fails
+        }
+      }
     }
 
     // Update all answers and session in a transaction
@@ -581,14 +640,24 @@ export class ExamsService {
       for (const update of answerUpdates) {
         await tx.examSessionAnswer.update({
           where: { id: update.id },
-          data: { isCorrect: update.isCorrect, score: update.score },
+          data: {
+            isCorrect: update.isCorrect,
+            score: update.score,
+            ...(update.submissionId ? { submissionId: update.submissionId } : {}),
+          },
         });
       }
+
+      // Check if all items are graded
+      const allAnswers = await tx.examSessionAnswer.findMany({
+        where: { sessionId },
+      });
+      const allGraded = allAnswers.every((a) => a.isCorrect !== null);
 
       await tx.examSession.update({
         where: { id: sessionId },
         data: {
-          status: 'SUBMITTED',
+          status: allGraded ? 'GRADED' : 'SUBMITTED',
           finishedAt: new Date(),
           score: totalScore,
         },
@@ -722,6 +791,86 @@ export class ExamsService {
     return this.getSessionResult(sessionId, userId, userRole);
   }
 
+  // ==================== EXAM SESSIONS LIST ====================
+
+  /**
+   * List exam sessions for a user (or all sessions for lecturers/admins).
+   */
+  async findAllSessions(
+    userId: string,
+    userRole: string,
+    query: QueryExamSessionsDto,
+  ): Promise<PaginatedExamSessionsDto> {
+    const { page, limit, status, sortBy, sortOrder } = query;
+    const skip = (page - 1) * limit;
+
+    const where: Prisma.ExamSessionWhereInput = {};
+
+    // Students only see their own sessions
+    if (userRole === 'STUDENT') {
+      where.userId = userId;
+    }
+
+    if (status) {
+      where.status = status;
+    }
+
+    const [sessions, total] = await Promise.all([
+      this.prisma.examSession.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { [sortBy]: sortOrder },
+        include: {
+          exam: {
+            select: {
+              id: true,
+              title: true,
+              questionCount: true,
+              problemCount: true,
+            },
+          },
+          answers: {
+            select: {
+              isCorrect: true,
+            },
+          },
+        },
+      }),
+      this.prisma.examSession.count({ where }),
+    ]);
+
+    const data = sessions.map((s) => {
+      const totalItems = s.answers.length;
+      const correctItems = s.answers.filter((a) => a.isCorrect === true).length;
+      const pendingItems = s.answers.filter((a) => a.isCorrect === null).length;
+
+      return new ExamSessionListItemDto({
+        id: s.id,
+        examId: s.exam.id,
+        examTitle: s.exam.title,
+        status: s.status,
+        startedAt: s.startedAt,
+        finishedAt: s.finishedAt,
+        score: s.score,
+        maxScore: s.maxScore,
+        totalItems,
+        correctItems,
+        pendingItems,
+        questionCount: s.exam.questionCount,
+        problemCount: s.exam.problemCount,
+      });
+    });
+
+    return new PaginatedExamSessionsDto({
+      data,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    });
+  }
+
   // ==================== HELPER METHODS ====================
 
   /**
@@ -830,6 +979,9 @@ export class ExamsService {
           selectedChoiceIds: a.selectedChoiceIds,
           textAnswer: a.textAnswer,
           submissionId: a.submissionId,
+          sourceCode: a.sourceCode,
+          language: a.language,
+          languageVersion: a.languageVersion,
           isCorrect: a.isCorrect,
           score: a.score,
         }),

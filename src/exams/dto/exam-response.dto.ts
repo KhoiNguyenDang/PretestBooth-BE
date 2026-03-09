@@ -163,6 +163,9 @@ export class SessionAnswerDto {
   selectedChoiceIds: string[];
   textAnswer: string | null;
   submissionId: string | null;
+  sourceCode: string | null;
+  language: string | null;
+  languageVersion: string | null;
   isCorrect: boolean | null;
   score: number | null;
 
@@ -202,6 +205,40 @@ export class SessionResultItemDto {
   textAnswer: string | null;
 
   constructor(partial: Partial<SessionResultItemDto>) {
+    Object.assign(this, partial);
+  }
+}
+
+// ==================== Exam Session List DTOs ====================
+
+export class ExamSessionListItemDto {
+  id: string;
+  examId: string;
+  examTitle: string;
+  status: string;
+  startedAt: Date;
+  finishedAt: Date | null;
+  score: number | null;
+  maxScore: number | null;
+  totalItems: number;
+  correctItems: number;
+  pendingItems: number;
+  questionCount: number;
+  problemCount: number;
+
+  constructor(partial: Partial<ExamSessionListItemDto>) {
+    Object.assign(this, partial);
+  }
+}
+
+export class PaginatedExamSessionsDto {
+  data: ExamSessionListItemDto[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+
+  constructor(partial: Partial<PaginatedExamSessionsDto>) {
     Object.assign(this, partial);
   }
 }

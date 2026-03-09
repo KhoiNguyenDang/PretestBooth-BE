@@ -15,6 +15,8 @@ import { SubmissionsService } from './submissions.service';
 import { ZodValidationPipe } from '../common/zod/zod-validation.pipe';
 import { CreateSubmissionSchema, QuerySubmissionsSchema } from './dto/submission.dto';
 import type { CreateSubmissionDto, QuerySubmissionsDto } from './dto/submission.dto';
+import { QueryUnifiedSubmissionsSchema } from './dto/unified-submission.dto';
+import type { QueryUnifiedSubmissionsDto } from './dto/unified-submission.dto';
 
 @Controller('submissions')
 @UseGuards(AuthGuard('jwt'))
@@ -45,6 +47,19 @@ export class SubmissionsController {
     const userId = req.user['sub'];
     const userRole = req.user['role'];
     return this.submissionsService.findAll(userId, userRole, query);
+  }
+
+  /**
+   * Get unified list of both coding submissions and exam sessions
+   */
+  @Get('all')
+  async findAllUnified(
+    @Query(new ZodValidationPipe(QueryUnifiedSubmissionsSchema)) query: QueryUnifiedSubmissionsDto,
+    @Req() req,
+  ) {
+    const userId = req.user['sub'];
+    const userRole = req.user['role'];
+    return this.submissionsService.findAllUnified(userId, userRole, query);
   }
 
   /**
