@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-// Supported languages by Piston API
+// Supported languages (mapped to Judge0 language IDs in judge0-languages.ts)
 export const SupportedLanguages = [
   'javascript',
   'typescript',

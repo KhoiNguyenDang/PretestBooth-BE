@@ -1,4 +1,4 @@
-import { Injectable, HttpException, HttpStatus, NotFoundException } from '@nestjs/common';
+import { Injectable, HttpException, HttpStatus, NotFoundException, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import type {
@@ -11,30 +11,35 @@ import {
   TestCaseResultDto,
   SubmissionResultDto,
   LanguageInfoDto,
-  type PistonResponse,
 } from './dto/execution-response.dto';
 
 import { generateJavascriptDriver, generatePythonDriver, generateJavaDriver } from './drivers';
+import {
+  resolveLanguageId,
+  mapJudge0Status,
+  Judge0StatusId,
+  type Judge0SubmissionResponse,
+} from './judge0-languages';
 
 @Injectable()
 export class ExecutionService {
-  private readonly pistonUrl: string;
+  private readonly logger = new Logger(ExecutionService.name);
+  private readonly judge0Url: string;
 
   constructor(
     private readonly configService: ConfigService,
     private readonly prisma: PrismaService,
   ) {
-    // Default to public Piston API if not configured
-    this.pistonUrl =
-      this.configService.get<string>('PISTON_API_URL') || 'https://emkc.org/api/v2/piston';
+    this.judge0Url =
+      this.configService.get<string>('JUDGE0_API_URL') || 'http://localhost:2358';
   }
 
   /**
-   * Get list of available languages from Piston
+   * Get list of available languages from Judge0
    */
   async getAvailableLanguages(): Promise<LanguageInfoDto[]> {
     try {
-      const response = await fetch(`${this.pistonUrl}/runtimes`);
+      const response = await fetch(`${this.judge0Url}/languages`);
 
       if (!response.ok) {
         throw new HttpException(
@@ -43,30 +48,30 @@ export class ExecutionService {
         );
       }
 
-      const runtimes = (await response.json()) as Array<{
-        language: string;
-        version: string;
-        aliases: string[];
-        runtime?: string;
+      const languages = (await response.json()) as Array<{
+        id: number;
+        name: string;
       }>;
 
-      return runtimes.map(
-        (r) =>
+      return languages.map(
+        (l) =>
           new LanguageInfoDto({
-            language: r.language,
-            version: r.version,
-            aliases: r.aliases,
-            runtime: r.runtime,
+            language: l.name,
+            version: '',
+            aliases: [],
+            runtime: undefined,
+            languageId: l.id,
           }),
       );
     } catch (error) {
       if (error instanceof HttpException) throw error;
-      throw new HttpException('Piston service unavailable', HttpStatus.SERVICE_UNAVAILABLE);
+      this.logger.error(`Judge0 service unavailable: ${(error as Error).message}`);
+      throw new HttpException('Judge0 service unavailable', HttpStatus.SERVICE_UNAVAILABLE);
     }
   }
 
   /**
-   * Execute code with Piston API
+   * Execute code with Judge0 API
    */
   async executeCode(dto: ExecuteCodeInput): Promise<ExecutionResultDto> {
     const startTime = performance.now();
@@ -79,68 +84,75 @@ export class ExecutionService {
       dto.inputTypes || [],
     );
 
+    const languageId = resolveLanguageId(dto.language);
+
+    // Judge0 expects base64-encoded source code and stdin
     const payload = {
-      language: dto.language,
-      version: dto.version,
-      files: [{ content: source }],
-      stdin: dto.stdin || '',
-      args: dto.args || [],
-      compile_timeout: dto.compileTimeout || 10000,
-      run_timeout: dto.runTimeout || 5000,
-      compile_memory_limit: dto.compileMemoryLimit || -1,
-      run_memory_limit: dto.runMemoryLimit || -1,
+      language_id: languageId,
+      source_code: Buffer.from(source).toString('base64'),
+      stdin: dto.stdin ? Buffer.from(dto.stdin).toString('base64') : '',
+      cpu_time_limit: (dto.runTimeout || 5000) / 1000, // Convert ms to seconds
+      cpu_extra_time: 2,
+      wall_time_limit: ((dto.runTimeout || 5000) / 1000) + 5,
+      memory_limit: dto.runMemoryLimit && dto.runMemoryLimit > 0 ? dto.runMemoryLimit * 1024 : 256000, // Convert MB to KB
     };
 
     try {
       const execStartTime = performance.now();
-      const response = await fetch(`${this.pistonUrl}/execute`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
+      const response = await fetch(
+        `${this.judge0Url}/submissions?base64_encoded=true&wait=true`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        },
+      );
       const networkTime = performance.now() - execStartTime;
 
       if (!response.ok) {
         const errorBody = await response.text();
+        this.logger.error(`Judge0 execution failed: ${errorBody}`);
         throw new HttpException(`Execution failed: ${errorBody}`, HttpStatus.BAD_REQUEST);
       }
 
-      const result = (await response.json()) as PistonResponse;
+      const result = (await response.json()) as Judge0SubmissionResponse;
       const totalTime = performance.now() - startTime;
 
-      // Check for compile error - check both compile phase and stderr for compilation keywords
-      const hasCompilePhaseError =
-        result.compile && (result.compile.code !== 0 || result.compile.stderr);
-      const hasCompilationErrorInStderr =
-        result.run.stderr?.includes('error: compilation failed') ||
-        result.run.stderr?.includes('cannot find symbol') ||
-        (result.run.stderr?.includes('error:') && result.run.code === 1);
-      const isCompileError = hasCompilePhaseError || hasCompilationErrorInStderr;
+      // Decode base64 outputs
+      const stdout = result.stdout ? Buffer.from(result.stdout, 'base64').toString('utf-8') : '';
+      const stderr = result.stderr ? Buffer.from(result.stderr, 'base64').toString('utf-8') : '';
+      const compileOutput = result.compile_output
+        ? Buffer.from(result.compile_output, 'base64').toString('utf-8')
+        : undefined;
 
-      // Check for runtime error (only if not a compile error)
-      const isRuntimeError =
-        !isCompileError && (result.run.code !== 0 || result.run.signal !== null);
+      const statusId = result.status.id;
+      const isCompileError = statusId === Judge0StatusId.COMPILATION_ERROR;
+      const isRuntimeErr =
+        statusId >= Judge0StatusId.RUNTIME_ERROR_SIGSEGV &&
+        statusId <= Judge0StatusId.RUNTIME_ERROR_OTHER;
+      const isSuccess = statusId === Judge0StatusId.ACCEPTED;
+
+      // Parse execution time from Judge0 (seconds → ms)
+      const executionTimeMs = result.time ? Math.round(parseFloat(result.time) * 1000) : 0;
 
       return new ExecutionResultDto({
-        language: result.language,
-        version: result.version,
-        stdout: result.run.stdout?.trim() || '',
-        stderr: result.run.stderr?.trim() || '',
-        output: result.run.output?.trim() || '',
-        exitCode: result.run.code,
-        signal: result.run.signal,
-        isSuccess: !isCompileError && !isRuntimeError,
-        isCompileError: !!isCompileError,
-        compileOutput:
-          result.compile?.output?.trim() ||
-          result.compile?.stderr?.trim() ||
-          (isCompileError ? result.run.stderr?.trim() : undefined),
-        executionTime: Math.round(totalTime - networkTime), // Approximate execution time
+        language: dto.language,
+        version: '',
+        stdout: stdout.trim(),
+        stderr: stderr.trim(),
+        output: stdout.trim(),
+        exitCode: result.exit_code,
+        signal: result.exit_signal ? `signal ${result.exit_signal}` : null,
+        isSuccess,
+        isCompileError,
+        compileOutput: compileOutput?.trim(),
+        executionTime: executionTimeMs,
         networkTime: Math.round(networkTime),
         totalTime: Math.round(totalTime),
       });
     } catch (error) {
       if (error instanceof HttpException) throw error;
+      this.logger.error(`Judge0 execution error: ${(error as Error).message}`);
       throw new HttpException(
         `Execution service error: ${(error as Error).message}`,
         HttpStatus.SERVICE_UNAVAILABLE,
@@ -264,7 +276,7 @@ export class ExecutionService {
       } else {
         failedCount++;
         if (status === 'ACCEPTED') {
-          if (result.signal === 'SIGKILL' || result.exitCode === 137) {
+          if (result.signal || result.exitCode === 137) {
             status = 'TIME_LIMIT_EXCEEDED';
           } else if (!result.isSuccess) {
             status = 'RUNTIME_ERROR';
@@ -336,11 +348,8 @@ export class ExecutionService {
     if (result.isCompileError) {
       return 'Compile Error';
     }
-    if (result.signal === 'SIGKILL' || result.exitCode === 137) {
+    if (result.signal) {
       return 'Time Limit Exceeded';
-    }
-    if (result.signal === 'SIGSEGV') {
-      return 'Memory Limit Exceeded';
     }
     if (!result.isSuccess) {
       return `Runtime Error (exit code: ${result.exitCode})`;
@@ -379,12 +388,10 @@ export class ExecutionService {
         return generateJavaDriver(userSource, functionName, inputTypes);
 
       case 'cpp':
-        // return generateCppDriver(userSource, functionName, inputTypes);
-        return userSource; // Tạm thời
+        return userSource;
 
       case 'csharp':
-        // return generateCsharpDriver(userSource, functionName, inputTypes);
-        return userSource; // Tạm thời
+        return userSource;
 
       default:
         return userSource;

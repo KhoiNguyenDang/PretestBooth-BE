@@ -1,17 +1,18 @@
-// Piston API response types
-export interface PistonRunResult {
-  stdout: string;
-  stderr: string;
-  code: number | null;
-  signal: string | null;
-  output: string;
-}
-
-export interface PistonResponse {
-  language: string;
-  version: string;
-  run: PistonRunResult;
-  compile?: PistonRunResult;
+// Judge0 API response types (replaces Piston)
+export interface Judge0RunResult {
+  stdout: string | null;
+  stderr: string | null;
+  compile_output: string | null;
+  message: string | null;
+  exit_code: number | null;
+  exit_signal: number | null;
+  status: {
+    id: number;
+    description: string;
+  };
+  time: string | null;
+  wall_time: string | null;
+  memory: number | null;
 }
 
 // Single execution response
@@ -26,9 +27,9 @@ export class ExecutionResultDto {
   isSuccess: boolean;
   isCompileError: boolean;
   compileOutput?: string;
-  executionTime: number; // ms - actual execution time from Piston
-  networkTime: number; // ms - network latency
-  totalTime: number; // ms - Tnetwork + Texecution
+  executionTime: number; // ms
+  networkTime: number; // ms
+  totalTime: number; // ms
 
   constructor(partial: Partial<ExecutionResultDto>) {
     Object.assign(this, partial);
@@ -80,12 +81,13 @@ export class SubmissionResultDto {
   }
 }
 
-// Language info from Piston
+// Language info from Judge0
 export class LanguageInfoDto {
   language: string;
   version: string;
   aliases: string[];
   runtime?: string;
+  languageId?: number; // Judge0 language ID
 
   constructor(partial: Partial<LanguageInfoDto>) {
     Object.assign(this, partial);

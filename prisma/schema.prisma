@@ -19,21 +19,33 @@ model User {
   emailVerificationExpiry DateTime?
   resetPasswordCode String?
   resetPasswordExpiry DateTime?
+  
+  // Account management
+  isLocked      Boolean   @default(false)
+  lockedAt      DateTime?
+  lockedReason  String?
+  dateOfBirth   DateTime? @db.Date  // For default password generation (DDMM)
+  totalPoints   Int       @default(0)
+  
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   
   // Relations
-  createdProblems Problem[] @relation("ProblemCreator")
-  createdQuestions Question[] @relation("QuestionCreator")
-  submissions     Submission[]
-  createdExams    Exam[]        @relation("ExamCreator")
-  examSessions    ExamSession[]
+  createdProblems   Problem[]           @relation("ProblemCreator")
+  createdQuestions  Question[]          @relation("QuestionCreator")
+  submissions       Submission[]
+  createdExams      Exam[]              @relation("ExamCreator")
+  examSessions      ExamSession[]
+  bookings          Booking[]
+  pointTransactions PointTransaction[]
+  practiceSessions  PracticeSession[]
   
   // Indexes for common queries
   @@index([email])
   @@index([studentCode])
   @@index([role])
   @@index([isEmailVerified])
+  @@index([isLocked])
 }
 
 enum Role {
@@ -87,12 +99,17 @@ model Problem {
   topicId     String?
   topic       Topic?     @relation(fields: [topicId], references: [id])
   
+  // Classification (Category tree - parallel)
+  categoryId  String?
+  category    Category?  @relation(fields: [categoryId], references: [id])
+  
   // Relations
   creatorId   String
   creator     User       @relation("ProblemCreator", fields: [creatorId], references: [id])
   testCases   TestCase[]
   submissions Submission[]
   examItems   ExamItem[]  @relation("ProblemExamItems")
+  practiceItems PracticeSessionItem[]
   
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
@@ -102,6 +119,7 @@ model Problem {
   @@index([creatorId])
   @@index([subjectId])
   @@index([topicId])
+  @@index([categoryId])
 }
 
 // TestCase model with hidden test cases support
@@ -251,11 +269,22 @@ model Question {
   // Status
   isPublished   Boolean      @default(false)
   
-  // Classification
+  // Review & Quality tracking
+  lastReviewedAt DateTime?
+  reviewNotes    String?      @db.Text
+  qualityScore   Int?         // 1-5 quality rating
+  usageCount     Int          @default(0)
+  estimatedTime  Int?         // Estimated answer time in seconds
+  
+  // Classification (Subject/Topic - existing)
   subjectId     String
   subject       Subject      @relation(fields: [subjectId], references: [id])
   topicId       String?
   topic         Topic?       @relation(fields: [topicId], references: [id])
+  
+  // Classification (Category tree - parallel)
+  categoryId    String?
+  category      Category?    @relation(fields: [categoryId], references: [id])
   
   // Creator
   creatorId     String
@@ -264,6 +293,7 @@ model Question {
   // Relations
   choices       QuestionChoice[]
   examItems     ExamItem[]   @relation("QuestionExamItems")
+  practiceItems PracticeSessionItem[]
   
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
@@ -273,6 +303,7 @@ model Question {
   @@index([isPublished])
   @@index([subjectId])
   @@index([topicId])
+  @@index([categoryId])
   @@index([creatorId])
 }
 
@@ -416,7 +447,8 @@ model ExamSession {
   status    ExamSessionStatus @default(IN_PROGRESS)
   
   // Relations
-  answers   ExamSessionAnswer[]
+  answers           ExamSessionAnswer[]
+  proctoringEvents  ProctoringEvent[]
   
   createdAt DateTime          @default(now())
   
@@ -462,4 +494,252 @@ model ExamSessionAnswer {
   @@unique([sessionId, examItemId])
   @@index([sessionId])
   @@index([examItemId])
+}
+
+// ==================== HIERARCHICAL CATEGORY TREE ====================
+// Runs in parallel with existing Subject/Topic classification
+
+model Category {
+  id          String     @id @default(uuid())
+  name        String
+  description String?    @db.Text
+  level       Int        @default(0)
+  
+  // Self-referencing tree
+  parentId    String?
+  parent      Category?  @relation("CategoryTree", fields: [parentId], references: [id])
+  children    Category[] @relation("CategoryTree")
+  
+  // Relations
+  questions   Question[]
+  problems    Problem[]
+  
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  
+  @@unique([parentId, name])
+  @@index([parentId])
+  @@index([level])
+}
+
+// ==================== BOOTH MANAGEMENT ====================
+
+enum BoothStatus {
+  ACTIVE
+  MAINTENANCE
+  INACTIVE
+}
+
+model Booth {
+  id          String      @id @default(uuid())
+  name        String      @unique      // "Booth 01", "Booth 02", etc.
+  description String?
+  status      BoothStatus @default(ACTIVE)
+  location    String?                  // Room/building info
+  
+  bookings    Booking[]
+  
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  
+  @@index([status])
+}
+
+// ==================== BOOKING / SCHEDULING ====================
+
+enum BookingType {
+  PRACTICE
+  EXAM
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  CHECKED_IN
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+model Booking {
+  id           String        @id @default(uuid())
+  
+  // Who & Where
+  userId       String
+  user         User          @relation(fields: [userId], references: [id])
+  boothId      String
+  booth        Booth         @relation(fields: [boothId], references: [id])
+  
+  // What & When
+  type         BookingType
+  date         DateTime      @db.Date
+  startTime    DateTime      // Full datetime for the start
+  endTime      DateTime      // Full datetime for the end
+  
+  // Status tracking
+  status       BookingStatus @default(PENDING)
+  checkedInAt  DateTime?
+  checkedOutAt DateTime?
+  
+  // Optional link to practice/exam session
+  examSessionId    String?
+  practiceSessionId String?
+  
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  
+  @@index([userId])
+  @@index([boothId, date])
+  @@index([date, startTime])
+  @@index([status])
+}
+
+// ==================== CUMULATIVE POINTS ====================
+
+enum PointType {
+  PRACTICE_ATTENDANCE     // + points for attending practice on time
+  EXAM_COMPLETION         // + points for completing an exam
+  NO_SHOW_PENALTY         // - points for not showing up after booking
+  PROCTORING_WARNING      // - points for proctoring violations
+  EXAM_CANCELLED_PENALTY  // - points for exam cancellation due to cheating
+  MANUAL_ADJUSTMENT       // +/- points by admin
+}
+
+model PointTransaction {
+  id            String    @id @default(uuid())
+  
+  userId        String
+  user          User      @relation(fields: [userId], references: [id])
+  
+  type          PointType
+  points        Int        // Positive = earned, Negative = deducted
+  reason        String
+  
+  // Optional references
+  bookingId     String?
+  examSessionId String?
+  
+  createdAt     DateTime  @default(now())
+  
+  @@index([userId])
+  @@index([type])
+  @@index([createdAt])
+}
+
+// ==================== EXAM PROCTORING ====================
+
+model ProctoringEvent {
+  id           String      @id @default(uuid())
+  
+  sessionId    String
+  session      ExamSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  
+  eventType    String      // "TAB_SWITCH", "WINDOW_BLUR", "COPY_PASTE", "FULLSCREEN_EXIT"
+  warningLevel Int         @default(1)  // 1 = mild warning, 2 = severe, 3 = exam cancelled
+  metadata     Json?       // Additional event data
+  
+  timestamp    DateTime    @default(now())
+  
+  @@index([sessionId])
+  @@index([eventType])
+}
+
+// ==================== PRACTICE SESSION (Standalone) ====================
+
+enum PracticeSessionStatus {
+  IN_PROGRESS
+  COMPLETED
+  ABANDONED
+}
+
+model PracticeSession {
+  id          String                @id @default(uuid())
+  
+  // Who
+  userId      String
+  user        User                  @relation(fields: [userId], references: [id])
+  
+  // Configuration (what the student chose)
+  duration    Int                   // Duration in minutes
+  totalItems  Int                   // Total number of items
+  difficulty  Difficulty?           // Optional difficulty filter
+  
+  // Classification filters used
+  subjectId   String?
+  topicId     String?
+  categoryId  String?
+  
+  // Timing
+  startedAt   DateTime              @default(now())
+  finishedAt  DateTime?
+  
+  // Scoring
+  score       Float?
+  maxScore    Float?
+  
+  // Status
+  status      PracticeSessionStatus @default(IN_PROGRESS)
+  
+  // Relations
+  items       PracticeSessionItem[]
+  
+  createdAt   DateTime              @default(now())
+  
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// PracticeSessionItem - a question or problem in a practice session
+model PracticeSessionItem {
+  id          String          @id @default(uuid())
+  
+  sessionId   String
+  session     PracticeSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  
+  // Either a question or a problem
+  questionId  String?
+  question    Question?       @relation(fields: [questionId], references: [id])
+  problemId   String?
+  problem     Problem?        @relation(fields: [problemId], references: [id])
+  
+  order       Int             @default(0)
+  points      Float           @default(1.0)
+  
+  // Answer
+  answers     PracticeSessionAnswer[]
+  
+  createdAt   DateTime        @default(now())
+  
+  @@index([sessionId])
+}
+
+// PracticeSessionAnswer - student's answer in a practice session
+model PracticeSessionAnswer {
+  id                String              @id @default(uuid())
+  
+  itemId            String
+  item              PracticeSessionItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  
+  // For MC questions
+  selectedChoiceIds String[]
+  
+  // For short-answer questions
+  textAnswer        String?             @db.Text
+  
+  // For coding problems
+  sourceCode        String?             @db.Text
+  language          String?
+  languageVersion   String?
+  submissionId      String?
+  
+  // Grading
+  isCorrect         Boolean?
+  score             Float?
+  
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  
+  @@unique([itemId])
+  @@index([itemId])
 }

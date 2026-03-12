@@ -86,7 +86,7 @@ export class AuthService {
 
     const refreshToken = this.jwtService.sign(payload, {
       secret: process.env.JWT_REFRESH_SECRET,
-      expiresIn: '7d',
+      expiresIn: '90m',
     });
 
     return new TokenResponseDto({
@@ -102,6 +102,30 @@ export class AuthService {
 
     if (!user) {
       throw new UnauthorizedException('Sai email hoặc mật khẩu');
+    }
+
+    // Check if account is locked
+    if (user.isLocked) {
+      throw new ForbiddenException('Tài khoản đã bị khóa. Vui lòng liên hệ quản trị viên.');
+    }
+
+    // Auto-lock student accounts that are 6+ years past enrollment year
+    if (user.role === 'STUDENT' && user.studentCode) {
+      const enrollmentYear = 2000 + parseInt(user.studentCode.substring(0, 2), 10);
+      const currentYear = new Date().getFullYear();
+      if (currentYear - enrollmentYear >= 6) {
+        await this.prisma.user.update({
+          where: { id: user.id },
+          data: {
+            isLocked: true,
+            lockedAt: new Date(),
+            lockedReason: `Tài khoản tự động khóa: sinh viên khóa ${enrollmentYear} đã quá 6 năm`,
+          },
+        });
+        throw new ForbiddenException(
+          `Tài khoản đã bị khóa tự động. Sinh viên khóa ${enrollmentYear} đã quá thời hạn 6 năm sử dụng hệ thống.`,
+        );
+      }
     }
 
     const isValid = await bcrypt.compare(password, user.password);
