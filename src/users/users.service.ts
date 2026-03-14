@@ -9,6 +9,22 @@ import type { Prisma, Role } from '@prisma/client';
 export class UsersService {
   constructor(private readonly prisma: PrismaService) {}
 
+  private isSupportedImportFile(file: Express.Multer.File) {
+    const originalName = (file.originalname || '').toLowerCase();
+    const mimeType = (file.mimetype || '').toLowerCase();
+
+    const allowedExtensions = ['.csv', '.xlsx', '.xls'];
+    const extensionMatch = allowedExtensions.some((ext) => originalName.endsWith(ext));
+
+    const mimeLooksSupported =
+      mimeType.includes('csv') ||
+      mimeType.includes('excel') ||
+      mimeType.includes('spreadsheetml') ||
+      mimeType === 'application/octet-stream';
+
+    return extensionMatch || mimeLooksSupported;
+  }
+
   /**
    * Helper to format Date to DDMM for default passwords
    */
@@ -165,6 +181,9 @@ export class UsersService {
    */
   async importStudents(file: Express.Multer.File) {
     if (!file) throw new BadRequestException('Vui lòng upload file Excel/CSV');
+    if (!this.isSupportedImportFile(file)) {
+      throw new BadRequestException('Định dạng file không hợp lệ. Chỉ hỗ trợ CSV, XLS, XLSX');
+    }
 
     const workbook = xlsx.read(file.buffer, { type: 'buffer' });
     const sheetName = workbook.SheetNames[0];
