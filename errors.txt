@@ -1,0 +1,1 @@
+﻿src/practice/practice.service.ts(132,76): error TS2353: Object literal may only specify known properties, and 'inputFormat' does not exist in type 'ProblemSelect<DefaultArgs>'.

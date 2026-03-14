@@ -9,6 +9,9 @@ export class UserResponseDto {
   email: string;
 
   @Expose()
+  name?: string;
+
+  @Expose()
   role: string;
 
   constructor(partial: Partial<UserResponseDto>) {
@@ -23,6 +26,9 @@ export class TokenResponseDto {
 
   @Expose()
   refreshToken: string;
+
+  @Expose()
+  user?: UserResponseDto;
 
   constructor(partial: Partial<TokenResponseDto>) {
     Object.assign(this, partial);
