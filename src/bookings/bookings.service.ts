@@ -52,10 +52,15 @@ export class BookingsService {
       throw new BadRequestException('Phải đăng ký trước tối thiểu 1 tuần');
     }
 
-    // Rule 2: Time slot must be within 7:00 - 17:00
-    const startHour = startTime.getHours();
-    const endHour = endTime.getHours();
-    const endMinute = endTime.getMinutes();
+    // Rule 2: Time slot must be within 7:00 - 17:00 (Vietnam Time +07)
+    const startVNTimeOffset = startTime.getTime() + (7 * 60 * 60 * 1000);
+    const startVNDate = new Date(startVNTimeOffset);
+    const startHour = startVNDate.getUTCHours();
+    
+    const endVNTimeOffset = endTime.getTime() + (7 * 60 * 60 * 1000);
+    const endVNDate = new Date(endVNTimeOffset);
+    const endHour = endVNDate.getUTCHours();
+    const endMinute = endVNDate.getUTCMinutes();
 
     if (startHour < 7 || (endHour > 17 || (endHour === 17 && endMinute > 0))) {
       throw new BadRequestException('Khung giờ sử dụng booth: 7:00 - 17:00');
@@ -220,10 +225,11 @@ export class BookingsService {
     const slots: any[] = [];
     for (let hour = 7; hour < 17; hour++) {
       for (const minute of [0, 30]) {
-        const slotStart = new Date(date);
-        slotStart.setHours(hour, minute, 0, 0);
-        const slotEnd = new Date(slotStart);
-        slotEnd.setMinutes(slotEnd.getMinutes() + 30);
+        // Enforce VN timezone (+07:00) so that slot times are inherently timezone-independent
+        const isoStringStart = `${dateStr}T${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}:00.000+07:00`;
+        const slotStart = new Date(isoStringStart);
+        
+        const slotEnd = new Date(slotStart.getTime() + 30 * 60000);
 
         const booked = bookings.filter(
           (b) => b.startTime < slotEnd && b.endTime > slotStart,

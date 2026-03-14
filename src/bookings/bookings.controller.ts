@@ -66,4 +66,9 @@ export class BookingsController {
   checkOut(@Param('id') id: string, @Req() req) {
     return this.bookingsService.checkOut(id, req.user['role']);
   }
+
+  @Get('debug-db')
+  async debugDb() {
+    return this.bookingsService['prisma'].booking.findMany();
+  }
 }
