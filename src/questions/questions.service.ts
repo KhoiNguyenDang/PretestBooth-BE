@@ -6,6 +6,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import * as xlsx from 'xlsx';
 import type { CreateSubjectDto, UpdateSubjectDto } from './dto/create-subject.dto';
 import type { CreateTopicDto, UpdateTopicDto } from './dto/create-topic.dto';
 import type { CreateQuestionDto } from './dto/create-question.dto';
@@ -27,6 +28,197 @@ type Difficulty = 'EASY' | 'MEDIUM' | 'HARD';
 @Injectable()
 export class QuestionsService {
   constructor(private readonly prisma: PrismaService) {}
+
+  private isUuid(value: string): boolean {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+  }
+
+  private async resolveSubjectRef(ref: string) {
+    const value = ref.trim();
+    if (!value) return null;
+
+    if (this.isUuid(value)) {
+      const byId = await this.prisma.subject.findUnique({ where: { id: value } });
+      if (byId) return byId;
+    }
+
+    const matches = await this.prisma.subject.findMany({
+      where: { name: { equals: value, mode: 'insensitive' } },
+      take: 2,
+    });
+
+    if (matches.length === 1) return matches[0];
+    if (matches.length > 1) throw new Error(`Nhiều subject trùng tên: ${value}`);
+    return null;
+  }
+
+  private async resolveTopicRef(ref: string, subjectId?: string | null) {
+    const value = ref.trim();
+    if (!value) return null;
+
+    if (this.isUuid(value)) {
+      const byId = await this.prisma.topic.findUnique({ where: { id: value } });
+      if (byId) return byId;
+    }
+
+    const where: Prisma.TopicWhereInput = {
+      name: { equals: value, mode: 'insensitive' },
+      ...(subjectId ? { subjectId } : {}),
+    };
+
+    const matches = await this.prisma.topic.findMany({ where, take: 2 });
+    if (matches.length === 1) return matches[0];
+    if (matches.length > 1) throw new Error(`Nhiều topic trùng tên: ${value}`);
+    return null;
+  }
+
+  private parseBooleanValue(value: unknown, defaultValue = false): boolean {
+    if (value === null || value === undefined || value === '') return defaultValue;
+    if (typeof value === 'boolean') return value;
+    const text = String(value).trim().toLowerCase();
+    return ['1', 'true', 'yes', 'y'].includes(text);
+  }
+
+  private normalizeQuestionType(value: unknown): QuestionType {
+    const raw = String(value || 'SINGLE_CHOICE').trim().toUpperCase();
+    if (raw === 'SINGLE' || raw === 'SINGLE_CHOICE') return 'SINGLE_CHOICE';
+    if (raw === 'MULTIPLE' || raw === 'MULTIPLE_CHOICE') return 'MULTIPLE_CHOICE';
+    if (raw === 'SHORT' || raw === 'SHORT_ANSWER') return 'SHORT_ANSWER';
+    throw new Error('questionType không hợp lệ');
+  }
+
+  private normalizeDifficulty(value: unknown): Difficulty {
+    const raw = String(value || 'MEDIUM').trim().toUpperCase();
+    if (['EASY', 'MEDIUM', 'HARD'].includes(raw)) return raw as Difficulty;
+    throw new Error('difficulty không hợp lệ (EASY/MEDIUM/HARD)');
+  }
+
+  private parseCorrectIndexes(correctAnswer: string): number[] {
+    return correctAnswer
+      .split(',')
+      .map((part) => part.trim().toUpperCase())
+      .map((token) => {
+        if (/^\d+$/.test(token)) return parseInt(token, 10) - 1;
+        if (/^[A-Z]$/.test(token)) return token.charCodeAt(0) - 'A'.charCodeAt(0);
+        return NaN;
+      })
+      .filter((idx) => Number.isInteger(idx) && idx >= 0);
+  }
+
+  async importQuestions(file: Express.Multer.File, creatorId: string, userRole: string) {
+    if (!['LECTURER', 'ADMIN'].includes(userRole)) {
+      throw new ForbiddenException('Chỉ giảng viên và quản trị viên mới có thể import câu hỏi');
+    }
+
+    if (!file) throw new BadRequestException('Vui lòng upload file CSV/Excel');
+
+    const workbook = xlsx.read(file.buffer, { type: 'buffer' });
+    const sheetName = workbook.SheetNames[0];
+    const sheet = workbook.Sheets[sheetName];
+    const rows = xlsx.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' });
+
+    if (rows.length === 0) {
+      throw new BadRequestException('File không có dữ liệu');
+    }
+
+    const result = {
+      total: rows.length,
+      success: 0,
+      failed: 0,
+      errors: [] as string[],
+    };
+
+    for (const [index, row] of rows.entries()) {
+      const rowNum = index + 2;
+
+      try {
+        const content = String(row.content || '').trim();
+        const questionType = this.normalizeQuestionType(row.questionType);
+        const difficulty = this.normalizeDifficulty(row.difficulty || 'MEDIUM');
+        const subjectRef = String(row.subjectId || row.subjectRef || row.subjectName || row.subject || '').trim();
+        const topicRef = String(row.topicId || row.topicRef || row.topicName || row.topic || '').trim();
+        const explanation = String(row.explanation || '').trim() || null;
+        const isPublished = this.parseBooleanValue(row.isPublished, false);
+        const correctAnswerRaw = String(row.correctAnswer || '').trim();
+
+        if (!content || !subjectRef) {
+          throw new Error('Thiếu trường bắt buộc (content, subjectRef/subjectId/subjectName)');
+        }
+
+        const subject = await this.resolveSubjectRef(subjectRef);
+        if (!subject) throw new Error(`Không tìm thấy subject: ${subjectRef}`);
+        const subjectId = subject.id;
+
+        const topic = topicRef ? await this.resolveTopicRef(topicRef, subjectId) : null;
+        const topicId = topic?.id || null;
+
+        if (topicRef && !topicId) {
+          throw new Error(`Không tìm thấy topic: ${topicRef}`);
+        }
+
+        if (topic && topic.subjectId !== subjectId) {
+          throw new Error('topic không thuộc subject đã chọn');
+        }
+
+        await this.prisma.$transaction(async (tx) => {
+          const createdQuestion = await tx.question.create({
+            data: {
+              content,
+              questionType,
+              difficulty,
+              subjectId,
+              topicId,
+              explanation,
+              isPublished,
+              correctAnswer: questionType === 'SHORT_ANSWER' ? correctAnswerRaw : null,
+              creatorId,
+            },
+          });
+
+          if (questionType === 'SHORT_ANSWER') {
+            if (!correctAnswerRaw) {
+              throw new Error('SHORT_ANSWER yêu cầu correctAnswer');
+            }
+            return;
+          }
+
+          const optionValues = [row.optionA, row.optionB, row.optionC, row.optionD]
+            .map((opt) => String(opt || '').trim())
+            .filter((opt) => opt.length > 0);
+
+          if (optionValues.length < 2) {
+            throw new Error('Câu hỏi trắc nghiệm cần ít nhất 2 lựa chọn (optionA, optionB, ...)');
+          }
+
+          const correctIndexes = this.parseCorrectIndexes(correctAnswerRaw);
+
+          if (questionType === 'SINGLE_CHOICE' && correctIndexes.length !== 1) {
+            throw new Error('SINGLE_CHOICE yêu cầu đúng 1 đáp án đúng (correctAnswer)');
+          }
+
+          if (questionType === 'MULTIPLE_CHOICE' && correctIndexes.length < 2) {
+            throw new Error('MULTIPLE_CHOICE yêu cầu ít nhất 2 đáp án đúng (correctAnswer)');
+          }
+
+          await tx.questionChoice.createMany({
+            data: optionValues.map((content, i) => ({
+              questionId: createdQuestion.id,
+              content,
+              isCorrect: correctIndexes.includes(i),
+              order: i,
+            })),
+          });
+        });
+
+        result.success++;
+      } catch (err) {
+        result.failed++;
+        result.errors.push(`Dòng ${rowNum}: ${(err as Error).message}`);
+      }
+    }
+
+    return result;
+  }
 
   // ==================== SUBJECT CRUD ====================
 

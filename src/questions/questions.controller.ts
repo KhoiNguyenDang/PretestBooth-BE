@@ -12,8 +12,13 @@ import {
   Req,
   HttpCode,
   HttpStatus,
+  UseInterceptors,
+  UploadedFile,
+  ParseFilePipe,
+  MaxFileSizeValidator,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { QuestionsService } from './questions.service';
 import { ZodValidationPipe } from '../common/zod/zod-validation.pipe';
 import { CreateSubjectSchema, UpdateSubjectSchema } from './dto/create-subject.dto';
@@ -152,5 +157,21 @@ export class QuestionsController {
     const userId = req.user['sub'];
     const userRole = req.user['role'];
     return this.questionsService.togglePublish(id, userId, userRole);
+  }
+
+  @Post('import')
+  @UseInterceptors(FileInterceptor('file'))
+  importQuestions(
+    @UploadedFile(
+      new ParseFilePipe({
+        validators: [new MaxFileSizeValidator({ maxSize: 5 * 1024 * 1024 })],
+      }),
+    )
+    file: Express.Multer.File,
+    @Req() req,
+  ) {
+    const userId = req.user['sub'];
+    const userRole = req.user['role'];
+    return this.questionsService.importQuestions(file, userId, userRole);
   }
 }
