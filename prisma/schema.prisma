@@ -7,16 +7,84 @@ datasource db {
 }
 
 model User {
-  id        String   @id @default(uuid())
-  email     String   @unique
-  password  String
-  role      Role     @default(STUDENT)
-  refreshToken  String?
-  createdAt DateTime @default(now())
+  id           String    @id @default(uuid())
+  email        String    @unique
+  password     String
+  role         Role      @default(STUDENT)
+  refreshToken String?
+  createdAt    DateTime  @default(now())
+
+  bookings Booking[]
+
+  @@index([role])
 }
 
 enum Role {
   STUDENT
   LECTURER
   ADMIN
+}
+
+// ==================== BOOTH MANAGEMENT ====================
+
+enum BoothStatus {
+  ACTIVE
+  MAINTENANCE
+  INACTIVE
+}
+
+model Booth {
+  id          String      @id @default(uuid())
+  name        String      @unique
+  description String?
+  status      BoothStatus @default(ACTIVE)
+  location    String?
+
+  bookings Booking[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+}
+
+// ==================== BOOKING / SCHEDULING ====================
+
+enum BookingType {
+  PRACTICE
+  EXAM
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  CHECKED_IN
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+model Booking {
+  id      String @id @default(uuid())
+  userId  String
+  user    User   @relation(fields: [userId], references: [id])
+  boothId String
+  booth   Booth  @relation(fields: [boothId], references: [id])
+
+  type      BookingType
+  date      DateTime      @db.Date
+  startTime DateTime
+  endTime   DateTime
+  status    BookingStatus @default(PENDING)
+
+  checkedInAt  DateTime?
+  checkedOutAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([boothId, date])
+  @@index([date, startTime])
+  @@index([status])
 }
