@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Post,
+  Get,
   HttpCode,
   HttpStatus,
   UseGuards,
@@ -34,7 +35,7 @@ export class AuthController {
     @Body(new ZodValidationPipe(RegisterSchema))
     dto: RegisterDto,
   ) {
-    return this.authService.register(dto.email, dto.password);
+    return this.authService.register(dto.email, dto.password, dto.name);
   }
 
   @Post('login')
@@ -61,6 +62,14 @@ export class AuthController {
   logout(@Req() req) {
     const userId = req.user['sub'];
     return this.authService.logout(userId);
+  }
+
+  @UseGuards(AuthGuard('jwt'))
+  @Get('me')
+  @HttpCode(HttpStatus.OK)
+  getMe(@Req() req) {
+    const userId = req.user['sub'];
+    return this.authService.getUser(userId);
   }
 
   @Post('verify-email')
