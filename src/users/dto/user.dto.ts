@@ -24,8 +24,11 @@ export const CreateUserSchema = z.object({
 export type CreateUserDto = z.output<typeof CreateUserSchema>;
 
 export const UpdateUserSchema = z.object({
+  email: z.string().email('Email không hợp lệ').optional(),
+  studentCode: z.string().optional(),
   name: z.string().min(1).optional(),
   className: z.string().optional(),
+  dateOfBirth: z.string().refine((val) => !isNaN(Date.parse(val)), 'Ngày sinh không hợp lệ').optional(),
   isLocked: z.boolean().optional(),
   lockedReason: z.string().optional(),
 });

@@ -1,5 +1,5 @@
 import {
-  Controller, Get, Post, Patch, Body, Param, Query,
+  Controller, Get, Post, Patch, Delete, Body, Param, Query, Req,
   UseGuards, UseInterceptors, UploadedFile, ParseFilePipe, MaxFileSizeValidator
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
@@ -13,34 +13,45 @@ import { Roles } from '../common/decorators/roles.decorator';
 
 @Controller('users')
 @UseGuards(AuthGuard('jwt'), RolesGuard)
-@Roles('ADMIN') // Protect the entire controller to ADMIN only
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
   @Get()
-  findAll(@Query(new ZodValidationPipe(QueryUserSchema)) query: QueryUserDto) {
-    return this.usersService.findAll(query);
+  @Roles('ADMIN', 'LECTURER')
+  findAll(@Query(new ZodValidationPipe(QueryUserSchema)) query: QueryUserDto, @Req() req) {
+    return this.usersService.findAll(query, req.user['role']);
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.usersService.findOne(id);
+  @Roles('ADMIN', 'LECTURER', 'STUDENT')
+  findOne(@Param('id') id: string, @Req() req) {
+    return this.usersService.findOne(id, req.user['sub'], req.user['role']);
   }
 
   @Post()
-  create(@Body(new ZodValidationPipe(CreateUserSchema)) dto: CreateUserDto) {
-    return this.usersService.create(dto);
+  @Roles('ADMIN', 'LECTURER')
+  create(@Body(new ZodValidationPipe(CreateUserSchema)) dto: CreateUserDto, @Req() req) {
+    return this.usersService.create(dto, req.user['role']);
   }
 
   @Patch(':id')
+  @Roles('ADMIN', 'LECTURER', 'STUDENT')
   update(
     @Param('id') id: string,
     @Body(new ZodValidationPipe(UpdateUserSchema)) dto: UpdateUserDto,
+    @Req() req,
   ) {
-    return this.usersService.update(id, dto);
+    return this.usersService.update(id, dto, req.user['sub'], req.user['role']);
+  }
+
+  @Delete(':id')
+  @Roles('ADMIN', 'LECTURER', 'STUDENT')
+  remove(@Param('id') id: string, @Req() req) {
+    return this.usersService.remove(id, req.user['sub'], req.user['role']);
   }
 
   @Post('import')
+  @Roles('ADMIN', 'LECTURER')
   @UseInterceptors(FileInterceptor('file'))
   importStudents(
     @UploadedFile(
@@ -51,7 +62,8 @@ export class UsersController {
       }),
     )
     file: Express.Multer.File,
+    @Req() req,
   ) {
-    return this.usersService.importStudents(file);
+    return this.usersService.importStudents(file, req.user['role']);
   }
 }
