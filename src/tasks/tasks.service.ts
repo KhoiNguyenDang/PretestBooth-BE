@@ -1,12 +1,16 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
+import { BookingsService } from '../bookings/bookings.service';
 
 @Injectable()
 export class TasksService {
   private readonly logger = new Logger(TasksService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly bookingsService: BookingsService,
+  ) {}
 
   /**
    * Run every day at midnight (00:00)
@@ -51,5 +55,16 @@ export class TasksService {
     }
 
     this.logger.debug(`Account auto-lock cron job finished. Locked ${lockedCount} accounts.`);
+  }
+
+  /**
+   * Run every minute to auto check-out bookings that passed their endTime.
+   */
+  @Cron(CronExpression.EVERY_MINUTE)
+  async handleBookingAutoCheckout() {
+    const count = await this.bookingsService.autoCheckOutExpiredBookings();
+    if (count > 0) {
+      this.logger.log(`Auto checked out ${count} expired booking(s).`);
+    }
   }
 }

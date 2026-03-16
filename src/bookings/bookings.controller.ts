@@ -61,6 +61,12 @@ export class BookingsController {
     return this.bookingsService.checkIn(id, req.user['role']);
   }
 
+  @Patch(':id/auto-check-in')
+  @HttpCode(HttpStatus.OK)
+  autoCheckIn(@Param('id') id: string, @Req() req) {
+    return this.bookingsService.autoCheckIn(id, req.user['sub'], req.user['role']);
+  }
+
   @Patch(':id/check-out')
   @HttpCode(HttpStatus.OK)
   checkOut(@Param('id') id: string, @Req() req) {

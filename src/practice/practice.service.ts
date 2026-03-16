@@ -3,19 +3,33 @@ import {
   NotFoundException,
   BadRequestException,
   ForbiddenException,
+  ConflictException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { BookingsService } from '../bookings/bookings.service';
 import type { Prisma } from '@prisma/client';
 import type { CreatePracticeSessionDto, SubmitPracticeAnswerDto } from './dto/practice.dto';
 
 @Injectable()
 export class PracticeService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly bookingsService: BookingsService,
+  ) {}
 
   /**
    * Auto-generate a new practice session based on student config
    */
   async createSession(userId: string, dto: CreatePracticeSessionDto) {
+    const activeBooking = await this.bookingsService.requireActiveCheckedInBooking(
+      userId,
+      'PRACTICE',
+    );
+
+    if (activeBooking.practiceSessionId) {
+      throw new ConflictException('Booking này đã được gắn với một phiên luyện tập');
+    }
+
     // 1. Fetch eligible items
     if (!dto.includeQuestions && !dto.includeProblems) {
       throw new BadRequestException('Phải chọn ít nhất một loại bài tập');
@@ -110,6 +124,11 @@ export class PracticeService {
       await tx.practiceSession.update({
         where: { id: session.id },
         data: { maxScore: totalScore },
+      });
+
+      await tx.booking.update({
+        where: { id: activeBooking.id },
+        data: { practiceSessionId: session.id },
       });
 
       return { sessionId: session.id, totalItems: totalActualItems };

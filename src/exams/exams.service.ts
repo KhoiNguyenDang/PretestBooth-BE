@@ -9,6 +9,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { ExecutionService } from '../execution/execution.service';
 import { SubmissionsService } from '../submissions/submissions.service';
+import { BookingsService } from '../bookings/bookings.service';
 import { Prisma } from '@prisma/client';
 import * as crypto from 'crypto';
 import { shuffleWithSeed } from './utils/shuffle';
@@ -46,6 +47,7 @@ export class ExamsService {
     private readonly prisma: PrismaService,
     private readonly executionService: ExecutionService,
     private readonly submissionsService: SubmissionsService,
+    private readonly bookingsService: BookingsService,
   ) {}
 
   // ==================== EXAM CRUD ====================
@@ -392,6 +394,21 @@ export class ExamsService {
    * Generates a random seed and returns shuffled items.
    */
   async startSession(examId: string, userId: string): Promise<ShuffledSessionDto> {
+    const activeBooking = await this.bookingsService.requireActiveCheckedInBooking(
+      userId,
+      'EXAM',
+    );
+
+    if (activeBooking.examSessionId) {
+      const linkedSession = await this.prisma.examSession.findUnique({
+        where: { id: activeBooking.examSessionId },
+      });
+
+      if (linkedSession && linkedSession.status !== 'SUBMITTED' && linkedSession.status !== 'GRADED') {
+        return this.getSessionData(linkedSession.id, userId);
+      }
+    }
+
     const exam = await this.prisma.exam.findUnique({
       where: { id: examId },
       include: {
@@ -432,6 +449,11 @@ export class ExamsService {
         seed,
         maxScore: exam.items.reduce((sum, item) => sum + item.points, 0),
       },
+    });
+
+    await this.prisma.booking.update({
+      where: { id: activeBooking.id },
+      data: { examSessionId: session.id },
     });
 
     return this.buildShuffledSession(session, exam);
