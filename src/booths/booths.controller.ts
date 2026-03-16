@@ -59,7 +59,12 @@ export class BoothsController {
     @Body(new ZodValidationPipe(UpdateBoothSchema)) dto: UpdateBoothDto,
     @Req() req,
   ) {
-    return this.boothsService.update(id, dto, req.user['role']);
+    return this.boothsService.update(id, dto, req.user['role'], req.user['sub']);
+  }
+
+  @Get(':id/status-logs')
+  getStatusLogs(@Param('id') id: string) {
+    return this.boothsService.getStatusLogs(id);
   }
 
   @Delete(':id')

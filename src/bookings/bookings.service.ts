@@ -12,10 +12,20 @@ import type { Prisma, BookingStatus, BookingType } from '@prisma/client';
 
 @Injectable()
 export class BookingsService {
+  private static readonly AUTO_CHECKIN_EARLY_MINUTES = 15;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly boothsService: BoothsService,
   ) {}
+
+  private isWithinAutoCheckInWindow(startTime: Date, endTime: Date, now: Date) {
+    const earliestCheckIn = new Date(
+      startTime.getTime() - BookingsService.AUTO_CHECKIN_EARLY_MINUTES * 60 * 1000,
+    );
+
+    return now >= earliestCheckIn && now <= endTime;
+  }
 
   /**
    * Create a booking with full business rule validation:
@@ -310,5 +320,95 @@ export class BookingsService {
       where: { id: bookingId },
       data: { status: 'COMPLETED', checkedOutAt: new Date() },
     });
+  }
+
+  /**
+   * Student auto check-in for their own booking in valid time window.
+   */
+  async autoCheckIn(bookingId: string, userId: string, userRole: string) {
+    if (userRole !== 'STUDENT') {
+      throw new ForbiddenException('Chỉ sinh viên mới có thể tự check-in');
+    }
+
+    const booking = await this.prisma.booking.findUnique({ where: { id: bookingId } });
+    if (!booking) throw new NotFoundException('Booking không tồn tại');
+
+    if (booking.userId !== userId) {
+      throw new ForbiddenException('Bạn không có quyền check-in booking này');
+    }
+
+    if (booking.status === 'CHECKED_IN') {
+      return booking;
+    }
+
+    if (booking.status !== 'CONFIRMED') {
+      throw new BadRequestException('Chỉ có thể tự check-in booking ở trạng thái CONFIRMED');
+    }
+
+    const now = new Date();
+    if (!this.isWithinAutoCheckInWindow(booking.startTime, booking.endTime, now)) {
+      const earliestCheckIn = new Date(
+        booking.startTime.getTime() - BookingsService.AUTO_CHECKIN_EARLY_MINUTES * 60 * 1000,
+      );
+
+      if (now < earliestCheckIn) {
+        throw new BadRequestException('Bạn chỉ có thể check-in trước tối đa 15 phút so với giờ bắt đầu');
+      }
+
+      throw new BadRequestException('Đã quá khung giờ check-in của booking này');
+    }
+
+    return this.prisma.booking.update({
+      where: { id: bookingId },
+      data: { status: 'CHECKED_IN', checkedInAt: now },
+    });
+  }
+
+  /**
+   * Require an active checked-in booking to start practice/exam.
+   */
+  async requireActiveCheckedInBooking(userId: string, type: BookingType) {
+    await this.autoCheckOutExpiredBookings();
+
+    const now = new Date();
+    const booking = await this.prisma.booking.findFirst({
+      where: {
+        userId,
+        type,
+        status: 'CHECKED_IN',
+        startTime: { lte: now },
+        endTime: { gte: now },
+      },
+      orderBy: { startTime: 'asc' },
+    });
+
+    if (!booking) {
+      throw new ForbiddenException(
+        type === 'EXAM'
+          ? 'Bạn cần check-in booth đúng lịch trước khi bắt đầu thi'
+          : 'Bạn cần check-in booth đúng lịch trước khi bắt đầu luyện tập',
+      );
+    }
+
+    return booking;
+  }
+
+  /**
+   * Auto complete bookings that were checked-in but already passed end time.
+   */
+  async autoCheckOutExpiredBookings() {
+    const now = new Date();
+    const result = await this.prisma.booking.updateMany({
+      where: {
+        status: 'CHECKED_IN',
+        endTime: { lt: now },
+      },
+      data: {
+        status: 'COMPLETED',
+        checkedOutAt: now,
+      },
+    });
+
+    return result.count;
   }
 }

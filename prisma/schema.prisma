@@ -12,6 +12,7 @@ model User {
   name      String?  // User's full name
   password  String
   studentCode String?  @unique
+  className   String?
   role      Role     @default(STUDENT)
   refreshToken  String?
   isEmailVerified Boolean @default(false)
@@ -37,6 +38,7 @@ model User {
   createdExams      Exam[]              @relation("ExamCreator")
   examSessions      ExamSession[]
   bookings          Booking[]
+  boothStatusLogs   BoothStatusLog[]
   pointTransactions PointTransaction[]
   practiceSessions  PracticeSession[]
   
@@ -538,11 +540,27 @@ model Booth {
   location    String?                  // Room/building info
   
   bookings    Booking[]
+  statusLogs  BoothStatusLog[]
   
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
   
   @@index([status])
+}
+
+model BoothStatusLog {
+  id              String      @id @default(uuid())
+  boothId         String
+  booth           Booth       @relation(fields: [boothId], references: [id], onDelete: Cascade)
+  fromStatus      BoothStatus
+  toStatus        BoothStatus
+  note            String      @db.Text
+  changedByUserId String?
+  changedByUser   User?       @relation(fields: [changedByUserId], references: [id], onDelete: SetNull)
+  changedAt       DateTime    @default(now())
+
+  @@index([boothId, changedAt])
+  @@index([changedByUserId])
 }
 
 // ==================== BOOKING / SCHEDULING ====================

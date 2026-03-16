@@ -1,4 +1,10 @@
-import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ConflictException,
+  BadRequestException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import * as bcrypt from 'bcrypt';
 import * as xlsx from 'xlsx';
@@ -37,20 +43,27 @@ export class UsersService {
   /**
    * Find all users with pagination and filtering
    */
-  async findAll(query: QueryUserDto) {
-    const { page, limit, role, search, isLocked, sortOrder } = query;
+  async findAll(query: QueryUserDto, requesterRole: string) {
+    if (!['ADMIN', 'LECTURER'].includes(requesterRole)) {
+      throw new ForbiddenException('Bạn không có quyền xem danh sách sinh viên');
+    }
+
+    const { page, limit, role, search, className, isLocked, sortOrder } = query;
     const skip = (page - 1) * limit;
 
     const where: Prisma.UserWhereInput = {};
 
-    if (role) where.role = role as Role;
+    // This endpoint is scoped to student data for admin/lecturer management.
+    where.role = role ? (role as Role) : 'STUDENT';
     if (isLocked !== undefined) where.isLocked = isLocked;
+    if (className) where.className = { contains: className, mode: 'insensitive' };
 
     if (search) {
       where.OR = [
         { email: { contains: search, mode: 'insensitive' } },
         { name: { contains: search, mode: 'insensitive' } },
         { studentCode: { contains: search, mode: 'insensitive' } },
+        { className: { contains: search, mode: 'insensitive' } },
       ];
     }
 
@@ -65,6 +78,7 @@ export class UsersService {
           email: true,
           name: true,
           studentCode: true,
+          className: true,
           role: true,
           isEmailVerified: true,
           isLocked: true,
@@ -90,24 +104,41 @@ export class UsersService {
   /**
    * Get single user
    */
-  async findOne(id: string) {
+  async findOne(id: string, requesterId: string, requesterRole: string) {
     const user = await this.prisma.user.findUnique({
       where: { id },
       select: {
-        id: true, email: true, name: true, studentCode: true, role: true,
+        id: true, email: true, name: true, studentCode: true, className: true, role: true,
         isEmailVerified: true, isLocked: true, lockedAt: true, lockedReason: true,
         dateOfBirth: true, totalPoints: true, createdAt: true,
       },
     });
 
     if (!user) throw new NotFoundException('Người dùng không tồn tại');
+
+    if (requesterRole === 'STUDENT' && requesterId !== id) {
+      throw new ForbiddenException('Sinh viên chỉ có thể xem thông tin của chính mình');
+    }
+
+    if (['ADMIN', 'LECTURER'].includes(requesterRole) && user.role !== 'STUDENT') {
+      throw new ForbiddenException('Chỉ được thao tác với dữ liệu sinh viên');
+    }
+
     return user;
   }
 
   /**
    * Create single user (Admin/Lecturer)
    */
-  async create(dto: CreateUserDto) {
+  async create(dto: CreateUserDto, requesterRole: string) {
+    if (!['ADMIN', 'LECTURER'].includes(requesterRole)) {
+      throw new ForbiddenException('Bạn không có quyền tạo dữ liệu sinh viên');
+    }
+
+    if (dto.role !== 'STUDENT') {
+      throw new BadRequestException('Chỉ được tạo tài khoản với vai trò STUDENT');
+    }
+
     const existing = await this.prisma.user.findFirst({
       where: {
         OR: [
@@ -139,6 +170,7 @@ export class UsersService {
         name: dto.name,
         role: dto.role as Role,
         studentCode: dto.studentCode,
+        className: dto.role === 'STUDENT' ? (dto.className || null) : null,
         password: hashedPassword,
         dateOfBirth: dobDate,
         isEmailVerified: true, // Created by admin = verified
@@ -156,30 +188,131 @@ export class UsersService {
   /**
    * Update user status (lock/unlock)
    */
-  async update(id: string, dto: UpdateUserDto) {
+  async update(id: string, dto: UpdateUserDto, requesterId: string, requesterRole: string) {
     const user = await this.prisma.user.findUnique({ where: { id } });
     if (!user) throw new NotFoundException('Người dùng không tồn tại');
+
+    const isStudentSelf = requesterRole === 'STUDENT' && requesterId === id;
+
+    if (requesterRole === 'STUDENT') {
+      if (!isStudentSelf) {
+        throw new ForbiddenException('Sinh viên chỉ có thể cập nhật thông tin của chính mình');
+      }
+
+      if (dto.isLocked !== undefined || dto.lockedReason !== undefined) {
+        throw new ForbiddenException('Sinh viên không có quyền khóa/mở khóa tài khoản');
+      }
+
+      if (dto.email !== undefined || dto.studentCode !== undefined) {
+        throw new ForbiddenException('Sinh viên không có quyền đổi email hoặc MSSV');
+      }
+    } else {
+      if (!['ADMIN', 'LECTURER'].includes(requesterRole)) {
+        throw new ForbiddenException('Bạn không có quyền cập nhật người dùng');
+      }
+
+      if (user.role !== 'STUDENT') {
+        throw new ForbiddenException('Chỉ được thao tác với dữ liệu sinh viên');
+      }
+    }
+
+    if (dto.email && dto.email !== user.email) {
+      const emailExists = await this.prisma.user.findUnique({ where: { email: dto.email } });
+      if (emailExists) {
+        throw new ConflictException('Email đã tồn tại');
+      }
+    }
+
+    if (dto.studentCode !== undefined && dto.studentCode !== user.studentCode) {
+      if (dto.studentCode) {
+        const studentCodeExists = await this.prisma.user.findUnique({ where: { studentCode: dto.studentCode } });
+        if (studentCodeExists) {
+          throw new ConflictException('MSSV đã tồn tại');
+        }
+      }
+    }
+
+    const parsedDob = dto.dateOfBirth ? new Date(dto.dateOfBirth) : undefined;
+    const shouldUpdatePasswordByDob =
+      !isStudentSelf &&
+      user.role === 'STUDENT' &&
+      dto.dateOfBirth !== undefined &&
+      parsedDob &&
+      !Number.isNaN(parsedDob.getTime());
+
+    let newPasswordHash: string | undefined;
+    if (shouldUpdatePasswordByDob && parsedDob) {
+      newPasswordHash = await bcrypt.hash(this.formatDDMM(parsedDob), 10);
+    }
 
     // Only update allowed fields
     return this.prisma.user.update({
       where: { id },
       data: {
+        ...(dto.email !== undefined && { email: dto.email }),
+        ...(dto.studentCode !== undefined && { studentCode: dto.studentCode || null }),
         ...(dto.name && { name: dto.name }),
+        ...(dto.className !== undefined && { className: dto.className || null }),
+        ...(dto.dateOfBirth !== undefined && { dateOfBirth: parsedDob }),
+        ...(newPasswordHash && { password: newPasswordHash }),
         ...(dto.isLocked !== undefined && {
           isLocked: dto.isLocked,
           lockedAt: dto.isLocked ? new Date() : null,
           lockedReason: dto.isLocked ? dto.lockedReason || 'Khóa bởi quản trị viên' : null,
         }),
       },
-      select: { id: true, name: true, isLocked: true, lockedReason: true },
+      select: {
+        id: true,
+        email: true,
+        studentCode: true,
+        name: true,
+        className: true,
+        dateOfBirth: true,
+        isLocked: true,
+        lockedReason: true,
+      },
     });
+  }
+
+  async remove(id: string, requesterId: string, requesterRole: string) {
+    const user = await this.prisma.user.findUnique({ where: { id } });
+    if (!user) throw new NotFoundException('Người dùng không tồn tại');
+
+    if (requesterRole === 'STUDENT') {
+      if (requesterId !== id) {
+        throw new ForbiddenException('Sinh viên chỉ có thể xóa tài khoản của chính mình');
+      }
+    } else {
+      if (!['ADMIN', 'LECTURER'].includes(requesterRole)) {
+        throw new ForbiddenException('Bạn không có quyền xóa người dùng');
+      }
+
+      if (user.role !== 'STUDENT') {
+        throw new ForbiddenException('Chỉ được thao tác với dữ liệu sinh viên');
+      }
+    }
+
+    try {
+      await this.prisma.user.delete({ where: { id } });
+    } catch (err: any) {
+      if (err?.code === 'P2003') {
+        throw new BadRequestException('Không thể xóa tài khoản vì còn dữ liệu liên quan');
+      }
+      throw err;
+    }
+
+    return { message: 'Xóa người dùng thành công' };
   }
 
   /**
    * Import students from CSV/Excel
-   * Expected columns: studentCode, email, name, dateOfBirth (YYYY-MM-DD or DD/MM/YYYY)
+  * Expected columns: studentCode, email, name, className?, dateOfBirth (YYYY-MM-DD or DD/MM/YYYY)
    */
-  async importStudents(file: Express.Multer.File) {
+  async importStudents(file: Express.Multer.File, requesterRole: string) {
+    if (!['ADMIN', 'LECTURER'].includes(requesterRole)) {
+      throw new ForbiddenException('Bạn không có quyền import dữ liệu sinh viên');
+    }
+
     if (!file) throw new BadRequestException('Vui lòng upload file Excel/CSV');
     if (!this.isSupportedImportFile(file)) {
       throw new BadRequestException('Định dạng file không hợp lệ. Chỉ hỗ trợ CSV, XLS, XLSX');
@@ -210,6 +343,7 @@ export class UsersService {
         const studentCode = row.studentCode?.toString()?.trim();
         const email = row.email?.toString()?.trim()?.toLowerCase();
         const name = row.name?.toString()?.trim();
+        const className = row.className?.toString()?.trim();
         const dobStr = row.dateOfBirth?.toString()?.trim();
 
         if (!studentCode || !email || !name) {
@@ -254,6 +388,7 @@ export class UsersService {
             name,
             role: 'STUDENT',
             password: hashedPassword,
+            className: className || null,
             dateOfBirth: !isNaN(dobDate.getTime()) ? dobDate : undefined,
             isEmailVerified: true, // Imported lists are assumed verified
           },

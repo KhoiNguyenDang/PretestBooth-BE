@@ -51,6 +51,13 @@ export class BoothsService {
       where: { id },
       include: {
         _count: { select: { bookings: true } },
+        statusLogs: {
+          orderBy: { changedAt: 'desc' },
+          take: 20,
+          include: {
+            changedByUser: { select: { id: true, email: true, name: true } },
+          },
+        },
       },
     });
 
@@ -58,7 +65,7 @@ export class BoothsService {
     return booth;
   }
 
-  async update(id: string, dto: UpdateBoothDto, userRole: string) {
+  async update(id: string, dto: UpdateBoothDto, userRole: string, userId: string) {
     if (!['ADMIN'].includes(userRole)) {
       throw new ForbiddenException('Chỉ quản trị viên mới có thể cập nhật booth');
     }
@@ -71,13 +78,44 @@ export class BoothsService {
       if (nameExists) throw new ConflictException(`Tên booth "${dto.name}" đã tồn tại`);
     }
 
-    return this.prisma.booth.update({
-      where: { id },
-      data: {
-        ...(dto.name && { name: dto.name }),
-        ...(dto.description !== undefined && { description: dto.description }),
-        ...(dto.location !== undefined && { location: dto.location }),
-        ...(dto.status && { status: dto.status as BoothStatus }),
+    const isStatusChanged = dto.status && dto.status !== booth.status;
+
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.booth.update({
+        where: { id },
+        data: {
+          ...(dto.name && { name: dto.name }),
+          ...(dto.description !== undefined && { description: dto.description }),
+          ...(dto.location !== undefined && { location: dto.location }),
+          ...(dto.status && { status: dto.status as BoothStatus }),
+        },
+      });
+
+      if (isStatusChanged) {
+        await tx.boothStatusLog.create({
+          data: {
+            boothId: booth.id,
+            fromStatus: booth.status,
+            toStatus: dto.status as BoothStatus,
+            note: dto.statusNote || '',
+            changedByUserId: userId,
+          },
+        });
+      }
+
+      return updated;
+    });
+  }
+
+  async getStatusLogs(boothId: string) {
+    const booth = await this.prisma.booth.findUnique({ where: { id: boothId } });
+    if (!booth) throw new NotFoundException('Booth không tồn tại');
+
+    return this.prisma.boothStatusLog.findMany({
+      where: { boothId },
+      orderBy: { changedAt: 'desc' },
+      include: {
+        changedByUser: { select: { id: true, email: true, name: true } },
       },
     });
   }
