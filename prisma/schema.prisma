@@ -12,6 +12,7 @@ model User {
   name      String?  // User's full name
   password  String
   studentCode String?  @unique
+  className   String?
   role      Role     @default(STUDENT)
   refreshToken  String?
   isEmailVerified Boolean @default(false)

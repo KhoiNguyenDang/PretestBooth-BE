@@ -51,6 +51,7 @@ export class UsersService {
         { email: { contains: search, mode: 'insensitive' } },
         { name: { contains: search, mode: 'insensitive' } },
         { studentCode: { contains: search, mode: 'insensitive' } },
+        { className: { contains: search, mode: 'insensitive' } },
       ];
     }
 
@@ -65,6 +66,7 @@ export class UsersService {
           email: true,
           name: true,
           studentCode: true,
+          className: true,
           role: true,
           isEmailVerified: true,
           isLocked: true,
@@ -94,7 +96,7 @@ export class UsersService {
     const user = await this.prisma.user.findUnique({
       where: { id },
       select: {
-        id: true, email: true, name: true, studentCode: true, role: true,
+        id: true, email: true, name: true, studentCode: true, className: true, role: true,
         isEmailVerified: true, isLocked: true, lockedAt: true, lockedReason: true,
         dateOfBirth: true, totalPoints: true, createdAt: true,
       },
@@ -139,6 +141,7 @@ export class UsersService {
         name: dto.name,
         role: dto.role as Role,
         studentCode: dto.studentCode,
+        className: dto.role === 'STUDENT' ? (dto.className || null) : null,
         password: hashedPassword,
         dateOfBirth: dobDate,
         isEmailVerified: true, // Created by admin = verified
@@ -165,6 +168,7 @@ export class UsersService {
       where: { id },
       data: {
         ...(dto.name && { name: dto.name }),
+        ...(dto.className !== undefined && { className: dto.className || null }),
         ...(dto.isLocked !== undefined && {
           isLocked: dto.isLocked,
           lockedAt: dto.isLocked ? new Date() : null,
@@ -177,7 +181,7 @@ export class UsersService {
 
   /**
    * Import students from CSV/Excel
-   * Expected columns: studentCode, email, name, dateOfBirth (YYYY-MM-DD or DD/MM/YYYY)
+  * Expected columns: studentCode, email, name, className?, dateOfBirth (YYYY-MM-DD or DD/MM/YYYY)
    */
   async importStudents(file: Express.Multer.File) {
     if (!file) throw new BadRequestException('Vui lòng upload file Excel/CSV');
@@ -210,6 +214,7 @@ export class UsersService {
         const studentCode = row.studentCode?.toString()?.trim();
         const email = row.email?.toString()?.trim()?.toLowerCase();
         const name = row.name?.toString()?.trim();
+        const className = row.className?.toString()?.trim();
         const dobStr = row.dateOfBirth?.toString()?.trim();
 
         if (!studentCode || !email || !name) {
@@ -254,6 +259,7 @@ export class UsersService {
             name,
             role: 'STUDENT',
             password: hashedPassword,
+            className: className || null,
             dateOfBirth: !isNaN(dobDate.getTime()) ? dobDate : undefined,
             isEmailVerified: true, // Imported lists are assumed verified
           },

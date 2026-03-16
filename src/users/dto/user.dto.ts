@@ -16,6 +16,7 @@ export const CreateUserSchema = z.object({
   name: z.string().min(1, 'Tên không được để trống'),
   role: z.enum(['STUDENT', 'LECTURER', 'ADMIN']),
   studentCode: z.string().optional(),
+  className: z.string().optional(),
   dateOfBirth: z.string().refine((val) => !isNaN(Date.parse(val)), 'Ngày sinh không hợp lệ').optional(),
 });
 
@@ -23,6 +24,7 @@ export type CreateUserDto = z.output<typeof CreateUserSchema>;
 
 export const UpdateUserSchema = z.object({
   name: z.string().min(1).optional(),
+  className: z.string().optional(),
   isLocked: z.boolean().optional(),
   lockedReason: z.string().optional(),
 });
