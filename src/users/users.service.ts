@@ -38,13 +38,14 @@ export class UsersService {
    * Find all users with pagination and filtering
    */
   async findAll(query: QueryUserDto) {
-    const { page, limit, role, search, isLocked, sortOrder } = query;
+    const { page, limit, role, search, className, isLocked, sortOrder } = query;
     const skip = (page - 1) * limit;
 
     const where: Prisma.UserWhereInput = {};
 
     if (role) where.role = role as Role;
     if (isLocked !== undefined) where.isLocked = isLocked;
+    if (className) where.className = { contains: className, mode: 'insensitive' };
 
     if (search) {
       where.OR = [

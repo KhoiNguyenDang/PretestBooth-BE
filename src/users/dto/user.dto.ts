@@ -5,6 +5,7 @@ export const QueryUserSchema = z.object({
   limit: z.coerce.number().int().positive().max(50).default(10),
   role: z.enum(['STUDENT', 'LECTURER', 'ADMIN']).optional(),
   search: z.string().optional(),
+  className: z.string().optional(),
   isLocked: z.preprocess((val) => val === 'true' ? true : val === 'false' ? false : undefined, z.boolean().optional()),
   sortOrder: z.enum(['asc', 'desc']).default('desc'),
 });
