@@ -11,8 +11,13 @@ import {
   Req,
   HttpCode,
   HttpStatus,
+  UseInterceptors,
+  UploadedFile,
+  ParseFilePipe,
+  MaxFileSizeValidator,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { ProblemsService } from './problems.service';
 import { ZodValidationPipe } from '../common/zod/zod-validation.pipe';
 import { CreateProblemSchema } from './dto/create-problem.dto';
@@ -134,5 +139,22 @@ export class ProblemsController {
     const userId = req.user['sub'];
     const userRole = req.user['role'];
     return this.problemsService.removeTestCase(testCaseId, userId, userRole);
+  }
+
+  @Post('import')
+  @UseGuards(AuthGuard('jwt'))
+  @UseInterceptors(FileInterceptor('file'))
+  importProblems(
+    @UploadedFile(
+      new ParseFilePipe({
+        validators: [new MaxFileSizeValidator({ maxSize: 5 * 1024 * 1024 })],
+      }),
+    )
+    file: Express.Multer.File,
+    @Req() req,
+  ) {
+    const userId = req.user['sub'];
+    const userRole = req.user['role'];
+    return this.problemsService.importProblems(file, userId, userRole);
   }
 }

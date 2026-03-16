@@ -1,6 +1,6 @@
 import {
   Controller, Get, Post, Patch, Body, Param, Query,
-  UseGuards, UseInterceptors, UploadedFile, ParseFilePipe, MaxFileSizeValidator, FileTypeValidator
+  UseGuards, UseInterceptors, UploadedFile, ParseFilePipe, MaxFileSizeValidator
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -47,8 +47,6 @@ export class UsersController {
       new ParseFilePipe({
         validators: [
           new MaxFileSizeValidator({ maxSize: 5 * 1024 * 1024 }), // 5MB limit
-          // Accept CSV and Excel variants
-          new FileTypeValidator({ fileType: /.*(csv|excel|spreadsheetml).*/ }),
         ],
       }),
     )

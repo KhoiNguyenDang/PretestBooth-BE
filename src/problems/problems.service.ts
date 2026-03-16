@@ -3,8 +3,10 @@ import {
   NotFoundException,
   ConflictException,
   ForbiddenException,
+  BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import * as xlsx from 'xlsx';
 import type { CreateProblemDto } from './dto/create-problem.dto';
 import type { UpdateProblemDto } from './dto/update-problem.dto';
 import type { CreateTestCaseDto, CreateBulkTestCasesDto } from './dto/create-testcase.dto';
@@ -23,6 +25,181 @@ type Difficulty = 'EASY' | 'MEDIUM' | 'HARD';
 @Injectable()
 export class ProblemsService {
   constructor(private readonly prisma: PrismaService) {}
+
+  private isUuid(value: string): boolean {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+  }
+
+  private async resolveSubjectRef(ref: string) {
+    const value = ref.trim();
+    if (!value) return null;
+
+    if (this.isUuid(value)) {
+      const byId = await this.prisma.subject.findUnique({ where: { id: value } });
+      if (byId) return byId;
+    }
+
+    const matches = await this.prisma.subject.findMany({
+      where: { name: { equals: value, mode: 'insensitive' } },
+      take: 2,
+    });
+
+    if (matches.length === 1) return matches[0];
+    if (matches.length > 1) throw new Error(`Nhiều subject trùng tên: ${value}`);
+    return null;
+  }
+
+  private async resolveTopicRef(ref: string, subjectId?: string | null) {
+    const value = ref.trim();
+    if (!value) return null;
+
+    if (this.isUuid(value)) {
+      const byId = await this.prisma.topic.findUnique({ where: { id: value } });
+      if (byId) return byId;
+    }
+
+    const where: Prisma.TopicWhereInput = {
+      name: { equals: value, mode: 'insensitive' },
+      ...(subjectId ? { subjectId } : {}),
+    };
+
+    const matches = await this.prisma.topic.findMany({ where, take: 2 });
+    if (matches.length === 1) return matches[0];
+    if (matches.length > 1) throw new Error(`Nhiều topic trùng tên: ${value}`);
+    return null;
+  }
+
+  private parseBooleanValue(value: unknown, defaultValue = false): boolean {
+    if (value === null || value === undefined || value === '') return defaultValue;
+    if (typeof value === 'boolean') return value;
+    const text = String(value).trim().toLowerCase();
+    return ['1', 'true', 'yes', 'y'].includes(text);
+  }
+
+  private normalizeDifficulty(value: unknown): Difficulty {
+    const raw = String(value || 'MEDIUM').trim().toUpperCase();
+    if (['EASY', 'MEDIUM', 'HARD'].includes(raw)) return raw as Difficulty;
+    throw new Error('difficulty không hợp lệ (EASY/MEDIUM/HARD)');
+  }
+
+  private parseListValue(value: unknown): string[] {
+    const raw = String(value || '').trim();
+    if (!raw) return [];
+    return raw
+      .split(',')
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0);
+  }
+
+  async importProblems(file: Express.Multer.File, creatorId: string, userRole: string) {
+    if (!['LECTURER', 'ADMIN'].includes(userRole)) {
+      throw new ForbiddenException('Chỉ giảng viên và quản trị viên mới có thể import bài tập');
+    }
+
+    if (!file) throw new BadRequestException('Vui lòng upload file CSV/Excel');
+
+    const workbook = xlsx.read(file.buffer, { type: 'buffer' });
+    const sheetName = workbook.SheetNames[0];
+    const sheet = workbook.Sheets[sheetName];
+    const rows = xlsx.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' });
+
+    if (rows.length === 0) {
+      throw new BadRequestException('File không có dữ liệu');
+    }
+
+    const result = {
+      total: rows.length,
+      success: 0,
+      failed: 0,
+      errors: [] as string[],
+    };
+
+    for (const [index, row] of rows.entries()) {
+      const rowNum = index + 2;
+
+      try {
+        const title = String(row.title || '').trim();
+        const slug = String(row.slug || '').trim().toLowerCase();
+        const description = String(row.description || '').trim();
+        const difficulty = this.normalizeDifficulty(row.difficulty || 'MEDIUM');
+        const functionName = String(row.functionName || 'solution').trim() || 'solution';
+        const outputType = String(row.outputType || 'void').trim() || 'void';
+        const timeLimit = Number(row.timeLimit || 1000);
+        const memoryLimit = Number(row.memoryLimit || 256);
+        const constraints = String(row.constraints || '').trim() || null;
+        const isPublished = this.parseBooleanValue(row.isPublished, false);
+        const subjectRef = String(row.subjectId || row.subjectRef || row.subjectName || row.subject || '').trim();
+        const topicRef = String(row.topicId || row.topicRef || row.topicName || row.topic || '').trim();
+
+        if (!title || !slug || !description) {
+          throw new Error('Thiếu trường bắt buộc (title, slug, description)');
+        }
+
+        if (!/^[a-z0-9-]+$/.test(slug)) {
+          throw new Error('slug chỉ chứa chữ thường, số và dấu gạch ngang');
+        }
+
+        if (!Number.isInteger(timeLimit) || timeLimit <= 0) {
+          throw new Error('timeLimit phải là số nguyên dương');
+        }
+
+        if (!Number.isInteger(memoryLimit) || memoryLimit <= 0) {
+          throw new Error('memoryLimit phải là số nguyên dương');
+        }
+
+        const existing = await this.prisma.problem.findUnique({ where: { slug } });
+        if (existing) {
+          throw new Error(`slug đã tồn tại: ${slug}`);
+        }
+
+        const subject = subjectRef ? await this.resolveSubjectRef(subjectRef) : null;
+        const subjectId = subject?.id || null;
+
+        if (subjectRef && !subjectId) {
+          throw new Error(`Không tìm thấy subject: ${subjectRef}`);
+        }
+
+        const topic = topicRef ? await this.resolveTopicRef(topicRef, subjectId) : null;
+        const topicId = topic?.id || null;
+
+        if (topicRef && !topicId) {
+          throw new Error(`Không tìm thấy topic: ${topicRef}`);
+        }
+
+        if (topic && subjectId && topic.subjectId !== subjectId) {
+          throw new Error('topic không thuộc subject đã chọn');
+        }
+
+        await this.prisma.problem.create({
+          data: {
+            title,
+            slug,
+            description,
+            difficulty,
+            functionName,
+            outputType,
+            timeLimit,
+            memoryLimit,
+            constraints,
+            isPublished,
+            inputTypes: this.parseListValue(row.inputTypes),
+            argNames: this.parseListValue(row.argNames),
+            hints: this.parseListValue(row.hints),
+            subjectId,
+            topicId,
+            creatorId,
+          },
+        });
+
+        result.success++;
+      } catch (err) {
+        result.failed++;
+        result.errors.push(`Dòng ${rowNum}: ${(err as Error).message}`);
+      }
+    }
+
+    return result;
+  }
 
   // ==================== PROBLEM CRUD ====================
 
