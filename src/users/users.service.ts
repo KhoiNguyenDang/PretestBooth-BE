@@ -15,6 +15,27 @@ import type { Prisma, Role } from '@prisma/client';
 export class UsersService {
   constructor(private readonly prisma: PrismaService) {}
 
+  private buildStudentWhere(query: QueryUserDto): Prisma.UserWhereInput {
+    const { role, search, className, isLocked } = query;
+    const where: Prisma.UserWhereInput = {};
+
+    // This module is scoped to student data management.
+    where.role = role ? (role as Role) : 'STUDENT';
+    if (isLocked !== undefined) where.isLocked = isLocked;
+    if (className) where.className = { contains: className, mode: 'insensitive' };
+
+    if (search) {
+      where.OR = [
+        { email: { contains: search, mode: 'insensitive' } },
+        { name: { contains: search, mode: 'insensitive' } },
+        { studentCode: { contains: search, mode: 'insensitive' } },
+        { className: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+
+    return where;
+  }
+
   private isSupportedImportFile(file: Express.Multer.File) {
     const originalName = (file.originalname || '').toLowerCase();
     const mimeType = (file.mimetype || '').toLowerCase();
@@ -51,21 +72,16 @@ export class UsersService {
     const { page, limit, role, search, className, isLocked, sortOrder } = query;
     const skip = (page - 1) * limit;
 
-    const where: Prisma.UserWhereInput = {};
-
-    // This endpoint is scoped to student data for admin/lecturer management.
-    where.role = role ? (role as Role) : 'STUDENT';
-    if (isLocked !== undefined) where.isLocked = isLocked;
-    if (className) where.className = { contains: className, mode: 'insensitive' };
-
-    if (search) {
-      where.OR = [
-        { email: { contains: search, mode: 'insensitive' } },
-        { name: { contains: search, mode: 'insensitive' } },
-        { studentCode: { contains: search, mode: 'insensitive' } },
-        { className: { contains: search, mode: 'insensitive' } },
-      ];
-    }
+    const where = this.buildStudentWhere({
+      page,
+      limit,
+      role,
+      search,
+      className,
+      isLocked,
+      sortOrder,
+      format: query.format,
+    });
 
     const [users, total] = await Promise.all([
       this.prisma.user.findMany({
@@ -98,6 +114,97 @@ export class UsersService {
       page,
       limit,
       totalPages: Math.ceil(total / limit),
+    };
+  }
+
+  async exportStudents(query: QueryUserDto, requesterRole: string) {
+    if (!['ADMIN', 'LECTURER'].includes(requesterRole)) {
+      throw new ForbiddenException('Bạn không có quyền xuất danh sách sinh viên');
+    }
+
+    const where = this.buildStudentWhere(query);
+    const students = await this.prisma.user.findMany({
+      where,
+      orderBy: { createdAt: query.sortOrder || 'desc' },
+      select: {
+        studentCode: true,
+        email: true,
+        name: true,
+        className: true,
+        dateOfBirth: true,
+        isLocked: true,
+        lockedReason: true,
+        totalPoints: true,
+        createdAt: true,
+      },
+    });
+
+    const rows = students.map((student) => ({
+      studentCode: student.studentCode || '',
+      email: student.email,
+      name: student.name || '',
+      className: student.className || '',
+      dateOfBirth: student.dateOfBirth
+        ? student.dateOfBirth.toISOString().slice(0, 10)
+        : '',
+      status: student.isLocked ? 'LOCKED' : 'ACTIVE',
+      lockedReason: student.lockedReason || '',
+      totalPoints: student.totalPoints,
+      createdAt: student.createdAt.toISOString(),
+    }));
+
+    const now = new Date();
+    const dateStamp = `${now.getFullYear()}${(now.getMonth() + 1)
+      .toString()
+      .padStart(2, '0')}${now.getDate().toString().padStart(2, '0')}`;
+    const format = query.format || 'xlsx';
+
+    if (format === 'csv') {
+      const headers = [
+        'studentCode',
+        'email',
+        'name',
+        'className',
+        'dateOfBirth',
+        'status',
+        'lockedReason',
+        'totalPoints',
+        'createdAt',
+      ];
+
+      const escapeCsv = (value: string | number) => {
+        const text = String(value ?? '');
+        if (text.includes(',') || text.includes('"') || text.includes('\n')) {
+          return `"${text.replace(/"/g, '""')}"`;
+        }
+        return text;
+      };
+
+      const csvLines = [
+        headers.join(','),
+        ...rows.map((row) =>
+          headers.map((key) => escapeCsv((row as any)[key] ?? '')).join(','),
+        ),
+      ];
+
+      const csvWithBom = `\uFEFF${csvLines.join('\r\n')}`;
+      return {
+        fileName: `students_${dateStamp}.csv`,
+        contentType: 'text/csv; charset=utf-8',
+        buffer: Buffer.from(csvWithBom, 'utf8'),
+      };
+    }
+
+    const workbook = xlsx.utils.book_new();
+    const worksheet = xlsx.utils.json_to_sheet(rows);
+    xlsx.utils.book_append_sheet(workbook, worksheet, 'Students');
+
+    const buffer = xlsx.write(workbook, { bookType: 'xlsx', type: 'buffer' }) as Buffer;
+    return {
+      fileName: `students_${dateStamp}.xlsx`,
+      contentType:
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      buffer,
     };
   }
 
