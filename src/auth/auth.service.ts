@@ -164,7 +164,11 @@ export class AuthService {
     };
   }
 
-  async boothLogout(boothSessionToken: string) {
+  async boothLogout(boothSessionToken: string, role?: string) {
+    if (role !== 'ADMIN') {
+      throw new ForbiddenException('Chỉ ADMIN mới được phép đăng xuất booth');
+    }
+
     return this.boothsService.deactivateBoothSession(boothSessionToken);
   }
 

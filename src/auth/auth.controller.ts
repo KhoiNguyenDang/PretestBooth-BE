@@ -72,12 +72,14 @@ export class AuthController {
   }
 
   @Post('booth-logout')
+  @UseGuards(AuthGuard('jwt'))
   @HttpCode(HttpStatus.OK)
   boothLogout(
+    @Req() req,
     @Body(new ZodValidationPipe(BoothLogoutSchema))
     dto: BoothLogoutDto,
   ) {
-    return this.authService.boothLogout(dto.boothSessionToken);
+    return this.authService.boothLogout(dto.boothSessionToken, req.user?.role);
   }
 
   @Get('booth-session')
