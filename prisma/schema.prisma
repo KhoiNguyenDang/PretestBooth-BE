@@ -535,9 +535,20 @@ enum BoothStatus {
 model Booth {
   id          String      @id @default(uuid())
   name        String      @unique      // "Booth 01", "Booth 02", etc.
+  code        String?     @unique      // Human-friendly booth code used for OTP activation
   description String?
   status      BoothStatus @default(ACTIVE)
   location    String?                  // Room/building info
+
+  // OTP activation state (admin issues OTP, kiosk activates by booth code + OTP)
+  activationOtpHash      String?
+  activationOtpExpiresAt DateTime?
+  activationOtpUsedAt    DateTime?
+  activationOtpAttempts  Int         @default(0)
+
+  // Current active booth session
+  sessionTokenHash String?
+  sessionActivatedAt DateTime?
   
   bookings    Booking[]
   statusLogs  BoothStatusLog[]

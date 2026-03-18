@@ -55,24 +55,6 @@ export class BookingsController {
     return this.bookingsService.cancel(id, req.user['sub'], req.user['role']);
   }
 
-  @Patch(':id/check-in')
-  @HttpCode(HttpStatus.OK)
-  checkIn(@Param('id') id: string, @Req() req) {
-    return this.bookingsService.checkIn(id, req.user['role']);
-  }
-
-  @Patch(':id/auto-check-in')
-  @HttpCode(HttpStatus.OK)
-  autoCheckIn(@Param('id') id: string, @Req() req) {
-    return this.bookingsService.autoCheckIn(id, req.user['sub'], req.user['role']);
-  }
-
-  @Patch(':id/check-out')
-  @HttpCode(HttpStatus.OK)
-  checkOut(@Param('id') id: string, @Req() req) {
-    return this.bookingsService.checkOut(id, req.user['role']);
-  }
-
   @Get('debug-db')
   async debugDb() {
     return this.bookingsService['prisma'].booking.findMany();

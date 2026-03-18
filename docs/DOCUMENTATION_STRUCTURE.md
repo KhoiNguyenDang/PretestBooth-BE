@@ -20,6 +20,10 @@ Complete documentation for authentication endpoints including:
 
 - `POST /auth/register`
 - `POST /auth/login`
+- `POST /auth/booth-activate`
+- `POST /auth/booth-login`
+- `POST /auth/booth-logout`
+- `GET /auth/booth-session`
 - `POST /auth/logout`
 - `POST /auth/refresh`
 - `POST /auth/verify-email`
