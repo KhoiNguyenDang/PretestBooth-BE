@@ -8,6 +8,7 @@ export const QueryUserSchema = z.object({
   className: z.string().optional(),
   isLocked: z.preprocess((val) => val === 'true' ? true : val === 'false' ? false : undefined, z.boolean().optional()),
   sortOrder: z.enum(['asc', 'desc']).default('desc'),
+  format: z.enum(['csv', 'xlsx']).optional(),
 });
 
 export type QueryUserDto = z.output<typeof QueryUserSchema>;

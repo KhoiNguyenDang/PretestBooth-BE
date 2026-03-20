@@ -1,7 +1,8 @@
 import {
-  Controller, Get, Post, Patch, Delete, Body, Param, Query, Req,
+  Controller, Get, Post, Patch, Delete, Body, Param, Query, Req, Res,
   UseGuards, UseInterceptors, UploadedFile, ParseFilePipe, MaxFileSizeValidator
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { AuthGuard } from '@nestjs/passport';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { UsersService } from './users.service';
@@ -20,6 +21,20 @@ export class UsersController {
   @Roles('ADMIN', 'LECTURER')
   findAll(@Query(new ZodValidationPipe(QueryUserSchema)) query: QueryUserDto, @Req() req) {
     return this.usersService.findAll(query, req.user['role']);
+  }
+
+  @Get('export')
+  @Roles('ADMIN', 'LECTURER')
+  async exportStudents(
+    @Query(new ZodValidationPipe(QueryUserSchema)) query: QueryUserDto,
+    @Req() req,
+    @Res() res: Response,
+  ) {
+    const file = await this.usersService.exportStudents(query, req.user['role']);
+
+    res.setHeader('Content-Type', file.contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${file.fileName}"`);
+    return res.send(file.buffer);
   }
 
   @Get(':id')
