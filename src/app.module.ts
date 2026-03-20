@@ -16,6 +16,7 @@ import { PracticeModule } from './practice/practice.module';
 import { ProctoringModule } from './proctoring/proctoring.module';
 import { TasksModule } from './tasks/tasks.module';
 import { DashboardModule } from './dashboard/dashboard.module';
+import { BookingDurationsModule } from './booking-durations/booking-durations.module';
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { DashboardModule } from './dashboard/dashboard.module';
     ProctoringModule,
     TasksModule,
     DashboardModule,
+    BookingDurationsModule,
   ],
 })
 export class AppModule {}

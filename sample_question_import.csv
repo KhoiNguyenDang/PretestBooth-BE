@@ -1,0 +1,4 @@
+content,questionType,difficulty,correctAnswer,explanation,subjectId,topicId,A,B,C,D,Đáp án đúng
+Câu hỏi mẫu 1,SINGLE_CHOICE,EASY,A,Đáp án đúng là A,subject1,topic1,Đáp án A,Đáp án B,Đáp án C,Đáp án D,A
+Câu hỏi mẫu 2,SINGLE_CHOICE,MEDIUM,B,Đáp án đúng là B,subject1,topic2,Đáp án A,Đáp án B,Đáp án C,Đáp án D,B
+Câu hỏi mẫu 3,SINGLE_CHOICE,HARD,C,Đáp án đúng là C,subject2,topic3,Đáp án A,Đáp án B,Đáp án C,Đáp án D,C

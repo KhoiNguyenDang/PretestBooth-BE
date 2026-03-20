@@ -62,7 +62,7 @@ export class BookingsService {
    * Create a booking with full business rule validation:
    * - Must book at least 7 days in advance
    * - Time slot must be within 7:00 - 17:00
-   * - PRACTICE: 30-60 min, EXAM: 30-75 min
+    * - Duration must be in admin-configured options (stored in DB)
    * - 15 min gap between consecutive sessions for same student
    * - Cannot exceed active booth count at any time slot
    * - Student account must be active (not locked)
@@ -107,20 +107,46 @@ export class BookingsService {
       throw new BadRequestException('Khung giờ sử dụng booth: 7:00 - 17:00');
     }
 
-    // Rule 3: Duration constraints
+    // Rule 3: Duration must be in admin-configured options
     const durationMs = endTime.getTime() - startTime.getTime();
     const durationMin = durationMs / (1000 * 60);
 
-    if (durationMin < 30) {
-      throw new BadRequestException('Thời gian sử dụng booth tối thiểu 30 phút');
+    if (durationMs <= 0) {
+      throw new BadRequestException('Thời gian kết thúc phải sau thời gian bắt đầu');
     }
 
-    if (dto.type === 'PRACTICE' && durationMin > 60) {
-      throw new BadRequestException('Thời gian luyện tập tối đa 60 phút');
+    if (!Number.isInteger(durationMin)) {
+      throw new BadRequestException('Thời lượng phải theo đơn vị phút');
     }
 
-    if (dto.type === 'EXAM' && durationMin > 75) {
-      throw new BadRequestException('Thời gian kiểm tra tối đa 75 phút');
+    const allowedDuration = await this.prisma.bookingDurationOption.findFirst({
+      where: {
+        type: dto.type,
+        durationMinutes: durationMin,
+        isActive: true,
+      },
+    });
+
+    if (!allowedDuration) {
+      const options = await this.prisma.bookingDurationOption.findMany({
+        where: {
+          type: dto.type,
+          isActive: true,
+        },
+        orderBy: [{ displayOrder: 'asc' }, { durationMinutes: 'asc' }],
+        select: { durationMinutes: true },
+      });
+
+      if (options.length === 0) {
+        throw new BadRequestException(
+          `Hiện chưa có cấu hình thời lượng khả dụng cho loại ${dto.type}. Vui lòng liên hệ quản trị viên.`,
+        );
+      }
+
+      const optionText = options.map((item) => `${item.durationMinutes} phút`).join(', ');
+      throw new BadRequestException(
+        `Thời lượng không hợp lệ cho ${dto.type}. Các mốc hiện có: ${optionText}.`,
+      );
     }
 
     // Rule 4: 15 min gap between consecutive sessions
