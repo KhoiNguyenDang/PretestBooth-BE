@@ -15,8 +15,18 @@ import {
 import { AuthGuard } from '@nestjs/passport';
 import { BoothsService } from './booths.service';
 import { ZodValidationPipe } from '../common/zod/zod-validation.pipe';
-import { CreateBoothSchema, UpdateBoothSchema, QueryBoothSchema } from './dto/booth.dto';
-import type { CreateBoothDto, UpdateBoothDto, QueryBoothDto } from './dto/booth.dto';
+import {
+  CreateBoothSchema,
+  UpdateBoothSchema,
+  QueryBoothSchema,
+  GenerateActivationOtpSchema,
+} from './dto/booth.dto';
+import type {
+  CreateBoothDto,
+  UpdateBoothDto,
+  QueryBoothDto,
+  GenerateActivationOtpDto,
+} from './dto/booth.dto';
 
 @Controller('booths')
 @UseGuards(AuthGuard('jwt'))
@@ -65,6 +75,15 @@ export class BoothsController {
   @Get(':id/status-logs')
   getStatusLogs(@Param('id') id: string) {
     return this.boothsService.getStatusLogs(id);
+  }
+
+  @Post('activation-otp')
+  @HttpCode(HttpStatus.OK)
+  generateActivationOtp(
+    @Body(new ZodValidationPipe(GenerateActivationOtpSchema)) dto: GenerateActivationOtpDto,
+    @Req() req,
+  ) {
+    return this.boothsService.generateActivationOtp(dto.boothCode, req.user['role']);
   }
 
   @Delete(':id')

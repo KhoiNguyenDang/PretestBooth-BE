@@ -12,6 +12,8 @@ import * as bcrypt from 'bcrypt';
 import { JwtService } from '@nestjs/jwt';
 import { UserResponseDto, TokenResponseDto, LogoutResponseDto } from './dto/auth-response.dto';
 import * as crypto from 'crypto';
+import { BoothsService } from '../booths/booths.service';
+import { BookingsService } from '../bookings/bookings.service';
 
 @Injectable()
 export class AuthService {
@@ -19,6 +21,8 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
     private readonly mailService: MailService,
+    private readonly boothsService: BoothsService,
+    private readonly bookingsService: BookingsService,
   ) {}
 
   async register(email: string, password: string, name?: string) {
@@ -96,6 +100,83 @@ export class AuthService {
   }
 
   async login(email: string, password: string) {
+    const user = await this.validateUserCredentials(email, password);
+
+    const tokens = await this.generateTokens(user.id, user.role);
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        refreshToken: await bcrypt.hash(tokens.refreshToken, 10),
+      },
+    });
+
+    return new TokenResponseDto({
+      ...tokens,
+      user: new UserResponseDto({
+        id: user.id,
+        email: user.email,
+        name: user.name || undefined,
+        role: user.role,
+      }),
+    });
+  }
+
+  async activateBooth(boothCode: string, otp: string) {
+    return this.boothsService.activateBoothSession(boothCode, otp);
+  }
+
+  async boothLogin(email: string, password: string, boothSessionToken: string) {
+    const user = await this.validateUserCredentials(email, password);
+
+    if (user.role !== 'STUDENT') {
+      throw new ForbiddenException('Booth login chỉ áp dụng cho sinh viên');
+    }
+
+    const booth = await this.boothsService.validateBoothSessionToken(boothSessionToken);
+    const checkedInBooking = await this.bookingsService.autoCheckInByBooth(user.id, booth.id);
+
+    const tokens = await this.generateTokens(user.id, user.role);
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        refreshToken: await bcrypt.hash(tokens.refreshToken, 10),
+      },
+    });
+
+    return {
+      ...new TokenResponseDto({
+        ...tokens,
+        user: new UserResponseDto({
+          id: user.id,
+          email: user.email,
+          name: user.name || undefined,
+          role: user.role,
+        }),
+      }),
+      booth: {
+        id: booth.id,
+        code: booth.code || booth.name,
+        name: booth.name,
+      },
+      checkedInBooking,
+    };
+  }
+
+  async boothLogout(boothSessionToken: string, role?: string) {
+    if (role !== 'ADMIN') {
+      throw new ForbiddenException('Chỉ ADMIN mới được phép đăng xuất booth');
+    }
+
+    return this.boothsService.deactivateBoothSession(boothSessionToken);
+  }
+
+  async getBoothSessionStatus(boothSessionToken: string) {
+    return this.boothsService.getBoothSessionStatus(boothSessionToken);
+  }
+
+  private async validateUserCredentials(email: string, password: string) {
     const user = await this.prisma.user.findUnique({
       where: { email },
     });
@@ -104,12 +185,10 @@ export class AuthService {
       throw new UnauthorizedException('Sai email hoặc mật khẩu');
     }
 
-    // Check if account is locked
     if (user.isLocked) {
       throw new ForbiddenException('Tài khoản đã bị khóa. Vui lòng liên hệ quản trị viên.');
     }
 
-    // Auto-lock student accounts that are 6+ years past enrollment year
     if (user.role === 'STUDENT' && user.studentCode) {
       const enrollmentYear = 2000 + parseInt(user.studentCode.substring(0, 2), 10);
       const currentYear = new Date().getFullYear();
@@ -137,24 +216,7 @@ export class AuthService {
       throw new ForbiddenException('Vui lòng xác thực email trước khi đăng nhập');
     }
 
-    const tokens = await this.generateTokens(user.id, user.role);
-
-    await this.prisma.user.update({
-      where: { id: user.id },
-      data: {
-        refreshToken: await bcrypt.hash(tokens.refreshToken, 10),
-      },
-    });
-
-    return new TokenResponseDto({
-      ...tokens,
-      user: new UserResponseDto({
-        id: user.id,
-        email: user.email,
-        name: user.name || undefined,
-        role: user.role,
-      }),
-    });
+    return user;
   }
 
   async refresh(refreshToken: string) {

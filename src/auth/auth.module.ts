@@ -6,9 +6,18 @@ import { PassportModule } from '@nestjs/passport';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { PrismaModule } from '../prisma/prisma.module';
 import { MailModule } from '../mail/mail.module';
+import { BoothsModule } from '../booths/booths.module';
+import { BookingsModule } from '../bookings/bookings.module';
 
 @Module({
-  imports: [PrismaModule, PassportModule, JwtModule.register({}), MailModule],
+  imports: [
+    PrismaModule,
+    PassportModule,
+    JwtModule.register({}),
+    MailModule,
+    BoothsModule,
+    BookingsModule,
+  ],
   controllers: [AuthController],
   providers: [AuthService, JwtStrategy],
 })

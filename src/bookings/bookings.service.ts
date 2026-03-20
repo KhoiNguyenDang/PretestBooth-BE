@@ -12,19 +12,50 @@ import type { Prisma, BookingStatus, BookingType } from '@prisma/client';
 
 @Injectable()
 export class BookingsService {
-  private static readonly AUTO_CHECKIN_EARLY_MINUTES = 15;
-
   constructor(
     private readonly prisma: PrismaService,
     private readonly boothsService: BoothsService,
   ) {}
 
-  private isWithinAutoCheckInWindow(startTime: Date, endTime: Date, now: Date) {
-    const earliestCheckIn = new Date(
-      startTime.getTime() - BookingsService.AUTO_CHECKIN_EARLY_MINUTES * 60 * 1000,
-    );
+  private getCheckInEarlyMinutes() {
+    return Number(process.env.CHECKIN_EARLY_MINUTES || 15);
+  }
 
-    return now >= earliestCheckIn && now <= endTime;
+  private getCheckInLateMinutes() {
+    return Number(process.env.CHECKIN_LATE_MINUTES || 0);
+  }
+
+  private isWithinAutoCheckInWindow(startTime: Date, endTime: Date, now: Date) {
+    const earliestCheckIn = new Date(startTime.getTime() - this.getCheckInEarlyMinutes() * 60 * 1000);
+    const latestCheckIn = new Date(endTime.getTime() + this.getCheckInLateMinutes() * 60 * 1000);
+
+    return now >= earliestCheckIn && now <= latestCheckIn;
+  }
+
+  // Project convention: booking/check-in timestamps are being stored/handled as Vietnam local wall-clock.
+  // Keep runtime "now" aligned with that convention to avoid -7h mismatches during comparisons.
+  private getNowInVietnamConvention() {
+    return new Date(Date.now() + 7 * 60 * 60 * 1000);
+  }
+
+  private formatUtcDateTime(date: Date) {
+    return date.toISOString().replace('T', ' ').slice(0, 19);
+  }
+
+  private formatVnDateTime(date: Date) {
+    const parts = new Intl.DateTimeFormat('sv-SE', {
+      timeZone: 'Asia/Ho_Chi_Minh',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    }).formatToParts(date);
+
+    const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
+    return `${get('year')}-${get('month')}-${get('day')} ${get('hour')}:${get('minute')}:${get('second')}`;
   }
 
   /**
@@ -51,7 +82,7 @@ export class BookingsService {
     const bookingDate = new Date(dto.date);
     const startTime = new Date(dto.startTime);
     const endTime = new Date(dto.endTime);
-    const now = new Date();
+    const now = this.getNowInVietnamConvention();
 
     // Rule 1: Must book at least 7 days in advance
     const minBookingDate = new Date(now);
@@ -280,87 +311,121 @@ export class BookingsService {
     });
   }
 
-  /**
-   * Check-in to a booth
-   */
-  async checkIn(bookingId: string, userRole: string) {
-    if (!['ADMIN', 'LECTURER'].includes(userRole)) {
-      throw new ForbiddenException('Chỉ quản trị viên mới có thể check-in');
-    }
+  async autoCheckInByBooth(userId: string, boothId: string) {
+    const now = this.getNowInVietnamConvention();
+    const earlyMs = this.getCheckInEarlyMinutes() * 60 * 1000;
+    const lateMs = this.getCheckInLateMinutes() * 60 * 1000;
 
-    const booking = await this.prisma.booking.findUnique({ where: { id: bookingId } });
-    if (!booking) throw new NotFoundException('Booking không tồn tại');
-
-    if (booking.status !== 'CONFIRMED') {
-      throw new BadRequestException('Booking chưa được xác nhận hoặc đã check-in');
-    }
-
-    return this.prisma.booking.update({
-      where: { id: bookingId },
-      data: { status: 'CHECKED_IN', checkedInAt: new Date() },
+    const candidates = await this.prisma.booking.findMany({
+      where: {
+        userId,
+        boothId,
+        type: { in: ['EXAM', 'PRACTICE'] },
+        status: { in: ['CONFIRMED', 'CHECKED_IN'] },
+        startTime: { lte: new Date(now.getTime() + earlyMs) },
+        endTime: { gte: new Date(now.getTime() - lateMs) },
+      },
+      orderBy: { startTime: 'asc' },
     });
-  }
 
-  /**
-   * Check-out from a booth
-   */
-  async checkOut(bookingId: string, userRole: string) {
-    if (!['ADMIN', 'LECTURER'].includes(userRole)) {
-      throw new ForbiddenException('Chỉ quản trị viên mới có thể check-out');
-    }
+    const booking = candidates
+      .filter((item) => this.isWithinAutoCheckInWindow(item.startTime, item.endTime, now))
+      .sort(
+        (a, b) =>
+          Math.abs(a.startTime.getTime() - now.getTime()) -
+          Math.abs(b.startTime.getTime() - now.getTime()),
+      )[0];
 
-    const booking = await this.prisma.booking.findUnique({ where: { id: bookingId } });
-    if (!booking) throw new NotFoundException('Booking không tồn tại');
+    if (!booking) {
+      const windowBookings = await this.prisma.booking.findMany({
+        where: {
+          userId,
+          type: { in: ['EXAM', 'PRACTICE'] },
+          status: { in: ['CONFIRMED', 'CHECKED_IN'] },
+          startTime: { lte: new Date(now.getTime() + earlyMs) },
+          endTime: { gte: new Date(now.getTime() - lateMs) },
+        },
+        include: {
+          booth: { select: { id: true, name: true, code: true } },
+        },
+        orderBy: { startTime: 'asc' },
+      });
 
-    if (booking.status !== 'CHECKED_IN') {
-      throw new BadRequestException('Booking chưa check-in');
-    }
+      if (windowBookings.length > 0) {
+        const nearest = windowBookings.sort(
+          (a, b) =>
+            Math.abs(a.startTime.getTime() - now.getTime()) -
+            Math.abs(b.startTime.getTime() - now.getTime()),
+        )[0];
 
-    return this.prisma.booking.update({
-      where: { id: bookingId },
-      data: { status: 'COMPLETED', checkedOutAt: new Date() },
-    });
-  }
+        const currentBooth = await this.prisma.booth.findUnique({
+          where: { id: boothId },
+          select: { name: true, code: true },
+        });
 
-  /**
-   * Student auto check-in for their own booking in valid time window.
-   */
-  async autoCheckIn(bookingId: string, userId: string, userRole: string) {
-    if (userRole !== 'STUDENT') {
-      throw new ForbiddenException('Chỉ sinh viên mới có thể tự check-in');
-    }
+        const bookedBoothLabel = `${nearest.booth.name}${nearest.booth.code ? ` (${nearest.booth.code})` : ''}`;
+        const currentBoothLabel = currentBooth
+          ? `${currentBooth.name}${currentBooth.code ? ` (${currentBooth.code})` : ''}`
+          : boothId;
 
-    const booking = await this.prisma.booking.findUnique({ where: { id: bookingId } });
-    if (!booking) throw new NotFoundException('Booking không tồn tại');
+        throw new ForbiddenException(
+          `Bạn đang đăng nhập tại ${currentBoothLabel}, nhưng lịch hợp lệ hiện tại thuộc ${bookedBoothLabel}. Vui lòng đến đúng booth đã đặt.`,
+        );
+      }
 
-    if (booking.userId !== userId) {
-      throw new ForbiddenException('Bạn không có quyền check-in booking này');
+      const upcomingSameBooth = await this.prisma.booking.findFirst({
+        where: {
+          userId,
+          boothId,
+          type: { in: ['EXAM', 'PRACTICE'] },
+          status: { in: ['CONFIRMED', 'CHECKED_IN'] },
+          endTime: { gte: new Date(now.getTime() - 24 * 60 * 60 * 1000) },
+        },
+        orderBy: { startTime: 'asc' },
+      });
+
+      if (upcomingSameBooth) {
+        const startLabel = this.formatUtcDateTime(upcomingSameBooth.startTime);
+        const endLabel = this.formatUtcDateTime(upcomingSameBooth.endTime);
+        const startLabelVn = this.formatVnDateTime(upcomingSameBooth.startTime);
+        const endLabelVn = this.formatVnDateTime(upcomingSameBooth.endTime);
+        const earliestCheckIn = new Date(
+          upcomingSameBooth.startTime.getTime() - this.getCheckInEarlyMinutes() * 60 * 1000,
+        );
+        const latestCheckIn = new Date(
+          upcomingSameBooth.endTime.getTime() + this.getCheckInLateMinutes() * 60 * 1000,
+        );
+
+        if (now < earliestCheckIn) {
+          throw new ForbiddenException(
+            `Chưa đến giờ check-in. Mở check-in từ UTC ${this.formatUtcDateTime(earliestCheckIn)} (VN ${this.formatVnDateTime(earliestCheckIn)}). Lịch của bạn: UTC ${startLabel} - ${endLabel} (VN ${startLabelVn} - ${endLabelVn}). Hiện tại: UTC ${this.formatUtcDateTime(now)} (VN ${this.formatVnDateTime(now)}).`,
+          );
+        }
+
+        if (now > latestCheckIn) {
+          throw new ForbiddenException(
+            `Đã quá giờ check-in. Khung check-in kết thúc UTC ${this.formatUtcDateTime(latestCheckIn)} (VN ${this.formatVnDateTime(latestCheckIn)}). Lịch của bạn: UTC ${startLabel} - ${endLabel} (VN ${startLabelVn} - ${endLabelVn}).`,
+          );
+        }
+
+        throw new ForbiddenException(
+          `Không nằm trong khung giờ check-in. Lịch gần nhất của bạn: UTC ${startLabel} - ${endLabel} (VN ${startLabelVn} - ${endLabelVn}). Hiện tại: UTC ${this.formatUtcDateTime(now)} (VN ${this.formatVnDateTime(now)}).`,
+        );
+      }
+
+      throw new ForbiddenException('Không có booking hợp lệ theo booth và khung giờ để check-in');
     }
 
     if (booking.status === 'CHECKED_IN') {
       return booking;
     }
 
-    if (booking.status !== 'CONFIRMED') {
-      throw new BadRequestException('Chỉ có thể tự check-in booking ở trạng thái CONFIRMED');
-    }
-
-    const now = new Date();
-    if (!this.isWithinAutoCheckInWindow(booking.startTime, booking.endTime, now)) {
-      const earliestCheckIn = new Date(
-        booking.startTime.getTime() - BookingsService.AUTO_CHECKIN_EARLY_MINUTES * 60 * 1000,
-      );
-
-      if (now < earliestCheckIn) {
-        throw new BadRequestException('Bạn chỉ có thể check-in trước tối đa 15 phút so với giờ bắt đầu');
-      }
-
-      throw new BadRequestException('Đã quá khung giờ check-in của booking này');
-    }
-
     return this.prisma.booking.update({
-      where: { id: bookingId },
-      data: { status: 'CHECKED_IN', checkedInAt: now },
+      where: { id: booking.id },
+      data: {
+        status: 'CHECKED_IN',
+        checkedInAt: now,
+      },
     });
   }
 
@@ -370,7 +435,7 @@ export class BookingsService {
   async requireActiveCheckedInBooking(userId: string, type: BookingType) {
     await this.autoCheckOutExpiredBookings();
 
-    const now = new Date();
+    const now = this.getNowInVietnamConvention();
     const booking = await this.prisma.booking.findFirst({
       where: {
         userId,
@@ -383,6 +448,42 @@ export class BookingsService {
     });
 
     if (!booking) {
+      const activeOtherType = await this.prisma.booking.findFirst({
+        where: {
+          userId,
+          status: 'CHECKED_IN',
+          checkedOutAt: null,
+          type: { not: type },
+          endTime: { gte: new Date(now.getTime() - 12 * 60 * 60 * 1000) },
+        },
+        orderBy: { checkedInAt: 'desc' },
+      });
+
+      if (activeOtherType) {
+        const currentTypeLabel = activeOtherType.type === 'PRACTICE' ? 'luyện tập' : 'thi';
+        const targetTypeLabel = type === 'PRACTICE' ? 'luyện tập' : 'thi';
+        throw new ForbiddenException(
+          `Bạn đã check-in ca ${currentTypeLabel}. Vui lòng vào đúng module ${currentTypeLabel}, hoặc check-in lại lịch ${targetTypeLabel}.`,
+        );
+      }
+
+      // Fallback: in case of mixed timezone conventions in legacy data,
+      // still allow a checked-in session if it has not been checked out and its endTime is near/future.
+      const checkedInFallback = await this.prisma.booking.findFirst({
+        where: {
+          userId,
+          type,
+          status: 'CHECKED_IN',
+          checkedOutAt: null,
+          endTime: { gte: new Date(now.getTime() - 12 * 60 * 60 * 1000) },
+        },
+        orderBy: { checkedInAt: 'desc' },
+      });
+
+      if (checkedInFallback) {
+        return checkedInFallback;
+      }
+
       throw new ForbiddenException(
         type === 'EXAM'
           ? 'Bạn cần check-in booth đúng lịch trước khi bắt đầu thi'
@@ -397,7 +498,7 @@ export class BookingsService {
    * Auto complete bookings that were checked-in but already passed end time.
    */
   async autoCheckOutExpiredBookings() {
-    const now = new Date();
+    const now = this.getNowInVietnamConvention();
     const result = await this.prisma.booking.updateMany({
       where: {
         status: 'CHECKED_IN',
