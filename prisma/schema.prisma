@@ -590,6 +590,20 @@ enum BookingStatus {
   NO_SHOW
 }
 
+model BookingDurationOption {
+  id              String      @id @default(uuid())
+  type            BookingType
+  durationMinutes Int
+  isActive        Boolean     @default(true)
+  displayOrder    Int?
+
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  @@unique([type, durationMinutes])
+  @@index([type, isActive])
+}
+
 model Booking {
   id           String        @id @default(uuid())
   
