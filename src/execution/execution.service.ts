@@ -27,6 +27,7 @@ import {
   Judge0StatusId,
   type Judge0SubmissionResponse,
 } from './judge0-languages';
+import { spawn } from 'child_process';
 
 @Injectable()
 export class ExecutionService implements OnModuleInit {
@@ -188,13 +189,28 @@ export class ExecutionService implements OnModuleInit {
 
     const languageId = resolveLanguageId(dto.language);
     const isJava = dto.language.toLowerCase() === 'java';
+    const isJavascript = dto.language.toLowerCase() === 'javascript';
     const defaultMemoryLimitKb = isJava ? 1024000 : 256000;
+
+    if (isJavascript) {
+      return this.executeJavascriptLocally(
+        source,
+        dto.stdin || '',
+        dto.runTimeout || 5000,
+        0,
+      );
+    }
 
     // Judge0 expects base64-encoded source code and stdin
     const payload = {
       language_id: languageId,
       source_code: Buffer.from(source).toString('base64'),
-      stdin: dto.stdin ? Buffer.from(dto.stdin).toString('base64') : '',
+      stdin:
+        isJavascript
+          ? ''
+          : dto.stdin
+            ? Buffer.from(dto.stdin).toString('base64')
+            : '',
       cpu_time_limit: (dto.runTimeout || 5000) / 1000, // Convert ms to seconds
       cpu_extra_time: 2,
       wall_time_limit: ((dto.runTimeout || 5000) / 1000) + 5,
@@ -203,6 +219,8 @@ export class ExecutionService implements OnModuleInit {
           ? dto.runMemoryLimit * 1024
           : defaultMemoryLimitKb, // Convert MB to KB
       compiler_options: this.getCompilerOptions(dto.language),
+      command_line_arguments:
+        isJavascript ? Buffer.from(dto.stdin || '').toString('base64') : undefined,
     };
 
     try {
@@ -232,6 +250,19 @@ export class ExecutionService implements OnModuleInit {
       const isCompileError = mappedStatus === 'COMPILE_ERROR';
       const isSuccess = mappedStatus === 'ACCEPTED';
       const normalizedStderr = stderr || judge0Message;
+
+      if (this.shouldUseJavascriptLocalFallback(dto.language, result, stdout, normalizedStderr)) {
+        this.logger.warn(
+          `Judge0 returned suspicious JS wall-clock TLE for token ${result.token}, falling back to local runtime`,
+        );
+
+        return await this.executeJavascriptLocally(
+          source,
+          dto.stdin || '',
+          dto.runTimeout || 5000,
+          Math.round(performance.now() - startTime),
+        );
+      }
 
       // Parse execution time from Judge0 (seconds → ms)
       const executionTimeMs = result.time ? Math.round(parseFloat(result.time) * 1000) : 0;
@@ -513,6 +544,121 @@ export class ExecutionService implements OnModuleInit {
       );
       return '';
     }
+  }
+
+  private shouldUseJavascriptLocalFallback(
+    language: string,
+    result: Judge0SubmissionResponse,
+    stdout: string,
+    stderr: string,
+  ): boolean {
+    if (language.toLowerCase() !== 'javascript') {
+      return false;
+    }
+
+    return (
+      result.status.id === Judge0StatusId.TIME_LIMIT_EXCEEDED &&
+      (result.exit_code ?? 0) === 0 &&
+      stdout.trim().length === 0 &&
+      stderr.trim().length === 0
+    );
+  }
+
+  private async executeJavascriptLocally(
+    source: string,
+    stdin: string,
+    runTimeoutMs: number,
+    elapsedBeforeFallbackMs: number,
+  ): Promise<ExecutionResultDto> {
+    const inputB64 = Buffer.from(stdin).toString('base64');
+    const start = performance.now();
+
+    const localResult = await new Promise<{
+      stdout: string;
+      stderr: string;
+      exitCode: number | null;
+      timedOut: boolean;
+      elapsedMs: number;
+    }>((resolve) => {
+      const child = spawn(process.execPath, ['-e', source, inputB64], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+
+      let stdout = '';
+      let stderr = '';
+      let settled = false;
+      let timedOut = false;
+
+      const timeout = setTimeout(() => {
+        timedOut = true;
+        child.kill('SIGKILL');
+      }, runTimeoutMs + 200);
+
+      child.stdout.on('data', (chunk: Buffer | string) => {
+        stdout += chunk.toString();
+      });
+
+      child.stderr.on('data', (chunk: Buffer | string) => {
+        stderr += chunk.toString();
+      });
+
+      child.on('close', (code) => {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        clearTimeout(timeout);
+
+        resolve({
+          stdout,
+          stderr,
+          exitCode: code,
+          timedOut,
+          elapsedMs: Math.round(performance.now() - start),
+        });
+      });
+
+      child.on('error', (error) => {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        clearTimeout(timeout);
+
+        resolve({
+          stdout: '',
+          stderr: `Local JS runtime error: ${error.message}`,
+          exitCode: 1,
+          timedOut: false,
+          elapsedMs: Math.round(performance.now() - start),
+        });
+      });
+    });
+
+    const status = localResult.timedOut
+      ? 'TIME_LIMIT_EXCEEDED'
+      : localResult.exitCode === 0
+        ? 'ACCEPTED'
+        : 'RUNTIME_ERROR';
+
+    return new ExecutionResultDto({
+      language: 'javascript',
+      version: '',
+      status,
+      stdout: localResult.stdout.trim(),
+      stderr: localResult.stderr.trim(),
+      output: localResult.stdout.trim(),
+      exitCode: localResult.exitCode,
+      signal: localResult.timedOut ? 'signal SIGKILL' : null,
+      isSuccess: status === 'ACCEPTED',
+      isCompileError: false,
+      compileOutput: undefined,
+      executionTime: localResult.elapsedMs,
+      networkTime: 0,
+      totalTime: elapsedBeforeFallbackMs + localResult.elapsedMs,
+    });
   }
 
   /**

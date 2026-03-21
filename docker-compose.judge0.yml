@@ -26,6 +26,7 @@ services:
       # Worker configuration
       ENABLE_WAIT_RESULT: "true"
       ENABLE_BATCHED_SUBMISSIONS: "true"
+      ENABLE_COMMAND_LINE_ARGUMENTS: "true"
       # Resource limits
       CPU_TIME_LIMIT: 10
       CPU_EXTRA_TIME: 5
@@ -59,6 +60,7 @@ services:
       REDIS_HOST: judge0-redis
       REDIS_PORT: 6379
       ENABLE_WAIT_RESULT: "true"
+      ENABLE_COMMAND_LINE_ARGUMENTS: "true"
       ENABLE_PER_PROCESS_AND_THREAD_TIME_LIMIT: "true"
       ENABLE_PER_PROCESS_AND_THREAD_MEMORY_LIMIT: "true"
     depends_on:
