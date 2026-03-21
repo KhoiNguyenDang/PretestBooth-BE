@@ -12,6 +12,7 @@ import type { BoothStatus, Prisma } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { JwtService } from '@nestjs/jwt';
 import * as crypto from 'crypto';
+import { RealtimeService } from '../realtime/realtime.service';
 
 @Injectable()
 export class BoothsService {
@@ -20,6 +21,7 @@ export class BoothsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
+    private readonly realtimeService: RealtimeService,
   ) {}
 
   private getOtpTtlMinutes() {
@@ -145,7 +147,7 @@ export class BoothsService {
 
     const isStatusChanged = dto.status && dto.status !== booth.status;
 
-    return this.prisma.$transaction(async (tx) => {
+    const txResult = await this.prisma.$transaction(async (tx) => {
       const updated = await tx.booth.update({
         where: { id },
         data: {
@@ -157,8 +159,12 @@ export class BoothsService {
         },
       });
 
+      let statusLog: {
+        changedAt: Date;
+      } | null = null;
+
       if (isStatusChanged) {
-        await tx.boothStatusLog.create({
+        statusLog = await tx.boothStatusLog.create({
           data: {
             boothId: booth.id,
             fromStatus: booth.status,
@@ -166,11 +172,27 @@ export class BoothsService {
             note: dto.statusNote || '',
             changedByUserId: userId,
           },
+          select: {
+            changedAt: true,
+          },
         });
       }
 
-      return updated;
+      return { updated, statusLog };
     });
+
+    if (isStatusChanged && txResult.statusLog) {
+      this.realtimeService.boothStatusUpdated({
+        boothId: txResult.updated.id,
+        status: txResult.updated.status,
+        previousStatus: booth.status,
+        note: dto.statusNote || '',
+        changedByUserId: userId,
+        changedAt: txResult.statusLog.changedAt.toISOString(),
+      });
+    }
+
+    return txResult.updated;
   }
 
   async getStatusLogs(boothId: string) {

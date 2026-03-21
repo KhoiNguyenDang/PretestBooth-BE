@@ -9,12 +9,14 @@ import { PrismaService } from '../prisma/prisma.service';
 import { BoothsService } from '../booths/booths.service';
 import type { CreateBookingDto, QueryBookingDto } from './dto/booking.dto';
 import type { Prisma, BookingStatus, BookingType } from '@prisma/client';
+import { RealtimeService } from '../realtime/realtime.service';
 
 @Injectable()
 export class BookingsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly boothsService: BoothsService,
+    private readonly realtimeService: RealtimeService,
   ) {}
 
   private getCheckInEarlyMinutes() {
@@ -446,13 +448,35 @@ export class BookingsService {
       return booking;
     }
 
-    return this.prisma.booking.update({
+    const checkedInBooking = await this.prisma.booking.update({
       where: { id: booking.id },
       data: {
         status: 'CHECKED_IN',
         checkedInAt: now,
       },
     });
+
+    this.realtimeService.bookingCheckin({
+      bookingId: checkedInBooking.id,
+      boothId: checkedInBooking.boothId,
+      userId: checkedInBooking.userId,
+      status: 'CHECKED_IN',
+      type: checkedInBooking.type,
+      startTime: checkedInBooking.startTime.toISOString(),
+      endTime: checkedInBooking.endTime.toISOString(),
+      checkedInAt: checkedInBooking.checkedInAt?.toISOString(),
+      emittedAt: new Date().toISOString(),
+    });
+
+    this.realtimeService.notify({
+      userId: checkedInBooking.userId,
+      boothId: checkedInBooking.boothId,
+      message: 'Check-in thành công. Phiên sử dụng booth đã bắt đầu.',
+      level: 'success',
+      emittedAt: new Date().toISOString(),
+    });
+
+    return checkedInBooking;
   }
 
   /**
@@ -525,16 +549,48 @@ export class BookingsService {
    */
   async autoCheckOutExpiredBookings() {
     const now = this.getNowInVietnamConvention();
-    const result = await this.prisma.booking.updateMany({
+    const expiredBookings = await this.prisma.booking.findMany({
       where: {
         status: 'CHECKED_IN',
         endTime: { lt: now },
+      },
+      select: {
+        id: true,
+        boothId: true,
+        userId: true,
+        type: true,
+        startTime: true,
+        endTime: true,
+      },
+    });
+
+    if (expiredBookings.length === 0) {
+      return 0;
+    }
+
+    const result = await this.prisma.booking.updateMany({
+      where: {
+        id: { in: expiredBookings.map((booking) => booking.id) },
       },
       data: {
         status: 'COMPLETED',
         checkedOutAt: now,
       },
     });
+
+    for (const booking of expiredBookings) {
+      this.realtimeService.bookingCheckout({
+        bookingId: booking.id,
+        boothId: booking.boothId,
+        userId: booking.userId,
+        status: 'COMPLETED',
+        type: booking.type,
+        startTime: booking.startTime.toISOString(),
+        endTime: booking.endTime.toISOString(),
+        checkedOutAt: now.toISOString(),
+        emittedAt: new Date().toISOString(),
+      });
+    }
 
     return result.count;
   }

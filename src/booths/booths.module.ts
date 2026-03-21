@@ -3,9 +3,10 @@ import { JwtModule } from '@nestjs/jwt';
 import { BoothsController } from './booths.controller';
 import { BoothsService } from './booths.service';
 import { PrismaModule } from '../prisma/prisma.module';
+import { RealtimeModule } from '../realtime/realtime.module';
 
 @Module({
-  imports: [PrismaModule, JwtModule.register({})],
+  imports: [PrismaModule, JwtModule.register({}), RealtimeModule],
   controllers: [BoothsController],
   providers: [BoothsService],
   exports: [BoothsService],

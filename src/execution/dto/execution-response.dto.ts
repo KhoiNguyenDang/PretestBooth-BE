@@ -19,6 +19,7 @@ export interface Judge0RunResult {
 export class ExecutionResultDto {
   language: string;
   version: string;
+  status?: 'ACCEPTED' | 'WRONG_ANSWER' | 'COMPILE_ERROR' | 'RUNTIME_ERROR' | 'TIME_LIMIT_EXCEEDED';
   stdout: string;
   stderr: string;
   output: string;

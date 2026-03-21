@@ -17,6 +17,7 @@ import { ProctoringModule } from './proctoring/proctoring.module';
 import { TasksModule } from './tasks/tasks.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { BookingDurationsModule } from './booking-durations/booking-durations.module';
+import { RealtimeModule } from './realtime/realtime.module';
 
 @Module({
   imports: [
@@ -38,6 +39,7 @@ import { BookingDurationsModule } from './booking-durations/booking-durations.mo
     TasksModule,
     DashboardModule,
     BookingDurationsModule,
+    RealtimeModule,
   ],
 })
 export class AppModule {}
