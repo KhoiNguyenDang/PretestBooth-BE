@@ -9,7 +9,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import type { CreateBoothDto, UpdateBoothDto, QueryBoothDto } from './dto/booth.dto';
 import type { BoothStatus, Prisma } from '@prisma/client';
-import * as bcrypt from 'bcrypt';
+import * as bcrypt from 'bcryptjs';
 import { JwtService } from '@nestjs/jwt';
 import * as crypto from 'crypto';
 import { RealtimeService } from '../realtime/realtime.service';
