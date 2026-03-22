@@ -4,8 +4,17 @@ export const generateJavascriptDriver = (userSource: string, functionName: strin
 ${userSource}
 /* --- USER CODE END --- */
 
-const fs = require('fs');
-const rawInput = fs.readFileSync(0, 'utf8').trim();
+let rawInput = '';
+
+// Prefer command-line base64 input to avoid occasional stdin pipe blocking.
+const cliInputB64 = process.argv[2] || process.argv[1] || '';
+if (cliInputB64) {
+  try {
+    rawInput = Buffer.from(cliInputB64, 'base64').toString('utf8').trim();
+  } catch {
+    rawInput = '';
+  }
+}
 
 let args = [];
 if (rawInput.length > 0) {

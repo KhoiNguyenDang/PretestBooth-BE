@@ -584,6 +584,7 @@ export class ExamsService {
 
     // Auto-score MC questions + auto-grade coding problems
     let totalScore = 0;
+    const failedAutoGradeItemIds = new Set<string>();
     const answerUpdates: {
       id: string;
       isCorrect: boolean;
@@ -625,7 +626,9 @@ export class ExamsService {
       // Auto-grade PROBLEM items with source code
       if (item.section === 'PROBLEM' && item.problem && answer.sourceCode && answer.language) {
         try {
-          this.logger.log(`Auto-grading problem "${item.problem.title}" for session ${sessionId}`);
+          this.logger.log(
+            `Auto-grading problem "${item.problem.title}" for session ${sessionId}, answer ${answer.id}`,
+          );
 
           // Create a Submission record via SubmissionsService (runs code execution)
           const submission = await this.submissionsService.create(userId, {
@@ -651,13 +654,24 @@ export class ExamsService {
             score: itemScore,
             submissionId: submission.id,
           });
+
+          this.logger.log(
+            `Auto-graded answer ${answer.id} with submission ${submission.id}: ${submission.status} (${submission.passedTestCases}/${submission.totalTestCases})`,
+          );
         } catch (error) {
+          failedAutoGradeItemIds.add(answer.id);
           this.logger.error(
-            `Failed to auto-grade problem "${item.problem.title}": ${(error as Error).message}`,
+            `Failed to auto-grade problem "${item.problem.title}" for session ${sessionId}, answer ${answer.id}: ${(error as Error).message}`,
           );
           // Leave as null (pending manual grading) if execution fails
         }
       }
+    }
+
+    if (failedAutoGradeItemIds.size > 0) {
+      this.logger.warn(
+        `Session ${sessionId} has ${failedAutoGradeItemIds.size} coding answer(s) pending manual grading due to execution failures`,
+      );
     }
 
     // Update all answers and session in a transaction

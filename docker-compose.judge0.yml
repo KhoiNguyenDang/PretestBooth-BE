@@ -1,16 +1,16 @@
-version: "3.8"
-
 # Judge0 CE - Code Execution Engine (Local Development)
 # Usage: docker-compose -f docker-compose.judge0.yml up -d
 # API: http://localhost:2358
 
 services:
   judge0-server:
-    image: judge0/judge0:1.13.1
+    image: judge0/judge0:latest
     container_name: judge0-server
     ports:
       - "2358:2358"
     privileged: true
+    tmpfs:
+      - /box:exec,mode=1777,size=512m
     environment:
       POSTGRES_HOST: judge0-db
       POSTGRES_DB: judge0
@@ -26,14 +26,18 @@ services:
       # Worker configuration
       ENABLE_WAIT_RESULT: "true"
       ENABLE_BATCHED_SUBMISSIONS: "true"
+      ENABLE_COMMAND_LINE_ARGUMENTS: "true"
       # Resource limits
       CPU_TIME_LIMIT: 10
       CPU_EXTRA_TIME: 5
       WALL_TIME_LIMIT: 20
-      MEMORY_LIMIT: 256000
+      MEMORY_LIMIT: 2048000
+      MAX_MEMORY_LIMIT: 4096000
       STACK_LIMIT: 64000
       MAX_PROCESSES_AND_OR_THREADS: 60
       MAX_FILE_SIZE: 4096
+      ENABLE_PER_PROCESS_AND_THREAD_TIME_LIMIT: "true"
+      ENABLE_PER_PROCESS_AND_THREAD_MEMORY_LIMIT: "true"
     depends_on:
       judge0-db:
         condition: service_healthy
@@ -42,10 +46,12 @@ services:
     restart: unless-stopped
 
   judge0-workers:
-    image: judge0/judge0:1.13.1
+    image: judge0/judge0:latest
     container_name: judge0-workers
     command: ["./scripts/workers"]
     privileged: true
+    tmpfs:
+      - /box:exec,mode=1777,size=512m
     environment:
       POSTGRES_HOST: judge0-db
       POSTGRES_DB: judge0
@@ -54,6 +60,9 @@ services:
       REDIS_HOST: judge0-redis
       REDIS_PORT: 6379
       ENABLE_WAIT_RESULT: "true"
+      ENABLE_COMMAND_LINE_ARGUMENTS: "true"
+      ENABLE_PER_PROCESS_AND_THREAD_TIME_LIMIT: "true"
+      ENABLE_PER_PROCESS_AND_THREAD_MEMORY_LIMIT: "true"
     depends_on:
       judge0-db:
         condition: service_healthy
@@ -76,6 +85,24 @@ services:
       timeout: 5s
       retries: 10
     restart: unless-stopped
+
+  judge0-configurator:
+    image: postgres:16-alpine
+    container_name: judge0-configurator
+    depends_on:
+      judge0-db:
+        condition: service_healthy
+      judge0-server:
+        condition: service_started
+    environment:
+      PGPASSWORD: judge0password
+    command:
+      - sh
+      - -c
+      - |
+        sleep 12
+        psql -h judge0-db -U judge0 -d judge0 -c "UPDATE languages SET compile_cmd='/usr/local/openjdk13/bin/javac -J-Xms16m -J-Xmx64m -J-XX:MaxMetaspaceSize=64m -J-XX:ReservedCodeCacheSize=32m %s Main.java', run_cmd='/usr/local/openjdk13/bin/java -Xms16m -Xmx64m -XX:MaxMetaspaceSize=64m -XX:ReservedCodeCacheSize=32m Main' WHERE id=62;"
+    restart: "no"
 
   judge0-redis:
     image: redis:7-alpine

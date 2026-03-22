@@ -6,7 +6,7 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import * as bcrypt from 'bcrypt';
+import * as bcrypt from 'bcryptjs';
 import * as xlsx from 'xlsx';
 import type { QueryUserDto, CreateUserDto, UpdateUserDto } from './dto/user.dto';
 import type { Prisma, Role } from '@prisma/client';

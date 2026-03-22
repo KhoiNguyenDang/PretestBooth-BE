@@ -1,4 +1,11 @@
-import { Injectable, HttpException, HttpStatus, NotFoundException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  HttpException,
+  HttpStatus,
+  NotFoundException,
+  Logger,
+  OnModuleInit,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import type {
@@ -20,11 +27,15 @@ import {
   Judge0StatusId,
   type Judge0SubmissionResponse,
 } from './judge0-languages';
+import { spawn } from 'child_process';
 
 @Injectable()
-export class ExecutionService {
+export class ExecutionService implements OnModuleInit {
   private readonly logger = new Logger(ExecutionService.name);
   private readonly judge0Url: string;
+  private static readonly JUDGE0_EXEC_TIMEOUT_MS = 30_000;
+  private static readonly JUDGE0_HEALTHCHECK_TIMEOUT_MS = 5_000;
+  private static readonly JUDGE0_EXEC_RETRIES = 2;
 
   constructor(
     private readonly configService: ConfigService,
@@ -34,12 +45,45 @@ export class ExecutionService {
       this.configService.get<string>('JUDGE0_API_URL') || 'http://localhost:2358';
   }
 
+  async onModuleInit(): Promise<void> {
+    if (!this.judge0Url) {
+      throw new Error('JUDGE0_API_URL is not configured');
+    }
+
+    try {
+      // Validate URL shape early to fail fast on invalid config.
+      // eslint-disable-next-line no-new
+      new URL(this.judge0Url);
+    } catch {
+      throw new Error(`Invalid JUDGE0_API_URL: ${this.judge0Url}`);
+    }
+
+    try {
+      const response = await this.fetchWithTimeout(
+        `${this.judge0Url}/languages`,
+        { method: 'GET' },
+        ExecutionService.JUDGE0_HEALTHCHECK_TIMEOUT_MS,
+      );
+
+      if (!response.ok) {
+        throw new Error(`Judge0 healthcheck failed with status ${response.status}`);
+      }
+    } catch (error) {
+      this.logger.error(`Judge0 healthcheck failed: ${(error as Error).message}`);
+      throw new Error(`Judge0 is unavailable at ${this.judge0Url}`);
+    }
+  }
+
   /**
    * Get list of available languages from Judge0
    */
   async getAvailableLanguages(): Promise<LanguageInfoDto[]> {
     try {
-      const response = await fetch(`${this.judge0Url}/languages`);
+      const response = await this.fetchWithTimeout(
+        `${this.judge0Url}/languages`,
+        { method: 'GET' },
+        ExecutionService.JUDGE0_HEALTHCHECK_TIMEOUT_MS,
+      );
 
       if (!response.ok) {
         throw new HttpException(
@@ -54,14 +98,16 @@ export class ExecutionService {
       }>;
 
       return languages.map(
-        (l) =>
-          new LanguageInfoDto({
-            language: l.name,
-            version: '',
-            aliases: [],
-            runtime: undefined,
+        (l) => {
+          const parsed = this.parseJudge0LanguageInfo(l.name);
+          return new LanguageInfoDto({
+            language: parsed.language,
+            version: parsed.version,
+            aliases: parsed.aliases,
+            runtime: parsed.runtime,
             languageId: l.id,
-          }),
+          });
+        },
       );
     } catch (error) {
       if (error instanceof HttpException) throw error;
@@ -70,13 +116,70 @@ export class ExecutionService {
     }
   }
 
+  private parseJudge0LanguageInfo(name: string): {
+    language: string;
+    version: string;
+    aliases: string[];
+    runtime: string;
+  } {
+    const runtime = name.trim();
+    const match = runtime.match(/^(.+?)(?:\s*\(([^)]+)\))?$/);
+    const rawBase = (match?.[1] || runtime).trim().toLowerCase();
+    const version = (match?.[2] || '').trim();
+
+    let language = rawBase;
+    if (rawBase.includes('c++')) language = 'cpp';
+    else if (rawBase === 'c') language = 'c';
+    else if (rawBase.includes('c#')) language = 'csharp';
+    else if (rawBase.includes('javascript') || rawBase.includes('node.js')) language = 'javascript';
+    else if (rawBase.includes('typescript')) language = 'typescript';
+    else if (rawBase.startsWith('python')) language = 'python';
+    else if (rawBase.startsWith('java')) language = 'java';
+    else if (rawBase.startsWith('go')) language = 'go';
+    else if (rawBase.startsWith('rust')) language = 'rust';
+    else if (rawBase.startsWith('ruby')) language = 'ruby';
+    else if (rawBase.startsWith('php')) language = 'php';
+    else if (rawBase.startsWith('swift')) language = 'swift';
+    else if (rawBase.startsWith('kotlin')) language = 'kotlin';
+
+    const aliases = new Set<string>([language, rawBase, runtime.toLowerCase()]);
+    if (language === 'python') {
+      aliases.add('python3');
+      aliases.add('py');
+    }
+    if (language === 'javascript') {
+      aliases.add('js');
+      aliases.add('node');
+    }
+    if (language === 'cpp') {
+      aliases.add('c++');
+      aliases.add('g++');
+    }
+
+    return {
+      language,
+      version,
+      aliases: [...aliases],
+      runtime,
+    };
+  }
+
+  private getCompilerOptions(language: string): string | undefined {
+    if (language.toLowerCase() === 'java') {
+      // Keep javac memory bounded for self-hosted Judge0 environments.
+      return '-J-Xms16m -J-Xmx64m -J-XX:MaxMetaspaceSize=64m -J-XX:ReservedCodeCacheSize=32m';
+    }
+
+    return undefined;
+  }
+
   /**
    * Execute code with Judge0 API
    */
   async executeCode(dto: ExecuteCodeInput): Promise<ExecutionResultDto> {
     const startTime = performance.now();
 
-    const functionName = dto.functionName || this.extractFunctionName(dto.language, dto.source);
+    const functionName = this.resolveFunctionName(dto.language, dto.functionName, dto.source);
     const source = this.generateDriverCode(
       dto.language,
       functionName,
@@ -85,28 +188,44 @@ export class ExecutionService {
     );
 
     const languageId = resolveLanguageId(dto.language);
+    const isJava = dto.language.toLowerCase() === 'java';
+    const isJavascript = dto.language.toLowerCase() === 'javascript';
+    const defaultMemoryLimitKb = isJava ? 1024000 : 256000;
+
+    if (isJavascript) {
+      return this.executeJavascriptLocally(
+        source,
+        dto.stdin || '',
+        dto.runTimeout || 5000,
+        0,
+      );
+    }
 
     // Judge0 expects base64-encoded source code and stdin
     const payload = {
       language_id: languageId,
       source_code: Buffer.from(source).toString('base64'),
-      stdin: dto.stdin ? Buffer.from(dto.stdin).toString('base64') : '',
+      stdin:
+        isJavascript
+          ? ''
+          : dto.stdin
+            ? Buffer.from(dto.stdin).toString('base64')
+            : '',
       cpu_time_limit: (dto.runTimeout || 5000) / 1000, // Convert ms to seconds
       cpu_extra_time: 2,
       wall_time_limit: ((dto.runTimeout || 5000) / 1000) + 5,
-      memory_limit: dto.runMemoryLimit && dto.runMemoryLimit > 0 ? dto.runMemoryLimit * 1024 : 256000, // Convert MB to KB
+      memory_limit:
+        dto.runMemoryLimit && dto.runMemoryLimit > 0
+          ? dto.runMemoryLimit * 1024
+          : defaultMemoryLimitKb, // Convert MB to KB
+      compiler_options: this.getCompilerOptions(dto.language),
+      command_line_arguments:
+        isJavascript ? Buffer.from(dto.stdin || '').toString('base64') : undefined,
     };
 
     try {
       const execStartTime = performance.now();
-      const response = await fetch(
-        `${this.judge0Url}/submissions?base64_encoded=true&wait=true`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        },
-      );
+      const response = await this.submitToJudge0WithRetry(payload);
       const networkTime = performance.now() - execStartTime;
 
       if (!response.ok) {
@@ -119,18 +238,31 @@ export class ExecutionService {
       const totalTime = performance.now() - startTime;
 
       // Decode base64 outputs
-      const stdout = result.stdout ? Buffer.from(result.stdout, 'base64').toString('utf-8') : '';
-      const stderr = result.stderr ? Buffer.from(result.stderr, 'base64').toString('utf-8') : '';
+      const stdout = this.safeDecodeBase64(result.stdout, 'stdout');
+      const stderr = this.safeDecodeBase64(result.stderr, 'stderr');
       const compileOutput = result.compile_output
-        ? Buffer.from(result.compile_output, 'base64').toString('utf-8')
+        ? this.safeDecodeBase64(result.compile_output, 'compile_output')
         : undefined;
+      const judge0Message = this.safeDecodeBase64(result.message, 'message');
 
       const statusId = result.status.id;
-      const isCompileError = statusId === Judge0StatusId.COMPILATION_ERROR;
-      const isRuntimeErr =
-        statusId >= Judge0StatusId.RUNTIME_ERROR_SIGSEGV &&
-        statusId <= Judge0StatusId.RUNTIME_ERROR_OTHER;
-      const isSuccess = statusId === Judge0StatusId.ACCEPTED;
+      const mappedStatus = mapJudge0Status(statusId);
+      const isCompileError = mappedStatus === 'COMPILE_ERROR';
+      const isSuccess = mappedStatus === 'ACCEPTED';
+      const normalizedStderr = stderr || judge0Message;
+
+      if (this.shouldUseJavascriptLocalFallback(dto.language, result, stdout, normalizedStderr)) {
+        this.logger.warn(
+          `Judge0 returned suspicious JS wall-clock TLE for token ${result.token}, falling back to local runtime`,
+        );
+
+        return await this.executeJavascriptLocally(
+          source,
+          dto.stdin || '',
+          dto.runTimeout || 5000,
+          Math.round(performance.now() - startTime),
+        );
+      }
 
       // Parse execution time from Judge0 (seconds → ms)
       const executionTimeMs = result.time ? Math.round(parseFloat(result.time) * 1000) : 0;
@@ -138,8 +270,9 @@ export class ExecutionService {
       return new ExecutionResultDto({
         language: dto.language,
         version: '',
+        status: mappedStatus,
         stdout: stdout.trim(),
-        stderr: stderr.trim(),
+        stderr: normalizedStderr.trim(),
         output: stdout.trim(),
         exitCode: result.exit_code,
         signal: result.exit_signal ? `signal ${result.exit_signal}` : null,
@@ -152,6 +285,9 @@ export class ExecutionService {
       });
     } catch (error) {
       if (error instanceof HttpException) throw error;
+      if ((error as Error).name === 'AbortError') {
+        throw new HttpException('Execution timed out while waiting for Judge0', HttpStatus.GATEWAY_TIMEOUT);
+      }
       this.logger.error(`Judge0 execution error: ${(error as Error).message}`);
       throw new HttpException(
         `Execution service error: ${(error as Error).message}`,
@@ -335,10 +471,194 @@ export class ExecutionService {
    * Handles whitespace normalization
    */
   private compareOutput(actual: string, expected: string): boolean {
-    // Normalize whitespace: trim and normalize line endings
-    const normalize = (str: string) => str.replace(/\s+/g, '');
+    // Keep token boundaries to avoid matching "1 2 3" with "123".
+    const normalize = (str: string) => str.replace(/\r\n/g, '\n').trim().replace(/[ \t\f\v]+/g, ' ');
 
     return normalize(actual) === normalize(expected);
+  }
+
+  private async fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      return await fetch(url, {
+        ...init,
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  private async submitToJudge0WithRetry(payload: object): Promise<Response> {
+    let attempt = 0;
+    let lastError: Error | null = null;
+
+    while (attempt <= ExecutionService.JUDGE0_EXEC_RETRIES) {
+      try {
+        const response = await this.fetchWithTimeout(
+          `${this.judge0Url}/submissions?base64_encoded=true&wait=true`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          },
+          ExecutionService.JUDGE0_EXEC_TIMEOUT_MS,
+        );
+
+        const shouldRetry = response.status >= 500 && response.status <= 599;
+        if (!shouldRetry || attempt === ExecutionService.JUDGE0_EXEC_RETRIES) {
+          return response;
+        }
+      } catch (error) {
+        const err = error as Error;
+        lastError = err;
+        if (err.name !== 'AbortError' && attempt === ExecutionService.JUDGE0_EXEC_RETRIES) {
+          throw err;
+        }
+      }
+
+      const waitMs = 300 * Math.pow(2, attempt);
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
+      attempt += 1;
+    }
+
+    if (lastError) {
+      throw lastError;
+    }
+
+    throw new Error('Judge0 request failed after retries');
+  }
+
+  private safeDecodeBase64(value: string | null, fieldName: string): string {
+    if (!value) {
+      return '';
+    }
+
+    try {
+      return Buffer.from(value, 'base64').toString('utf-8');
+    } catch (error) {
+      this.logger.warn(
+        `Failed to decode Judge0 ${fieldName}: ${(error as Error).message}`,
+      );
+      return '';
+    }
+  }
+
+  private shouldUseJavascriptLocalFallback(
+    language: string,
+    result: Judge0SubmissionResponse,
+    stdout: string,
+    stderr: string,
+  ): boolean {
+    if (language.toLowerCase() !== 'javascript') {
+      return false;
+    }
+
+    return (
+      result.status.id === Judge0StatusId.TIME_LIMIT_EXCEEDED &&
+      (result.exit_code ?? 0) === 0 &&
+      stdout.trim().length === 0 &&
+      stderr.trim().length === 0
+    );
+  }
+
+  private async executeJavascriptLocally(
+    source: string,
+    stdin: string,
+    runTimeoutMs: number,
+    elapsedBeforeFallbackMs: number,
+  ): Promise<ExecutionResultDto> {
+    const inputB64 = Buffer.from(stdin).toString('base64');
+    const start = performance.now();
+
+    const localResult = await new Promise<{
+      stdout: string;
+      stderr: string;
+      exitCode: number | null;
+      timedOut: boolean;
+      elapsedMs: number;
+    }>((resolve) => {
+      const child = spawn(process.execPath, ['-e', source, inputB64], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+
+      let stdout = '';
+      let stderr = '';
+      let settled = false;
+      let timedOut = false;
+
+      const timeout = setTimeout(() => {
+        timedOut = true;
+        child.kill('SIGKILL');
+      }, runTimeoutMs + 200);
+
+      child.stdout.on('data', (chunk: Buffer | string) => {
+        stdout += chunk.toString();
+      });
+
+      child.stderr.on('data', (chunk: Buffer | string) => {
+        stderr += chunk.toString();
+      });
+
+      child.on('close', (code) => {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        clearTimeout(timeout);
+
+        resolve({
+          stdout,
+          stderr,
+          exitCode: code,
+          timedOut,
+          elapsedMs: Math.round(performance.now() - start),
+        });
+      });
+
+      child.on('error', (error) => {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        clearTimeout(timeout);
+
+        resolve({
+          stdout: '',
+          stderr: `Local JS runtime error: ${error.message}`,
+          exitCode: 1,
+          timedOut: false,
+          elapsedMs: Math.round(performance.now() - start),
+        });
+      });
+    });
+
+    const status = localResult.timedOut
+      ? 'TIME_LIMIT_EXCEEDED'
+      : localResult.exitCode === 0
+        ? 'ACCEPTED'
+        : 'RUNTIME_ERROR';
+
+    return new ExecutionResultDto({
+      language: 'javascript',
+      version: '',
+      status,
+      stdout: localResult.stdout.trim(),
+      stderr: localResult.stderr.trim(),
+      output: localResult.stdout.trim(),
+      exitCode: localResult.exitCode,
+      signal: localResult.timedOut ? 'signal SIGKILL' : null,
+      isSuccess: status === 'ACCEPTED',
+      isCompileError: false,
+      compileOutput: undefined,
+      executionTime: localResult.elapsedMs,
+      networkTime: 0,
+      totalTime: elapsedBeforeFallbackMs + localResult.elapsedMs,
+    });
   }
 
   /**
@@ -348,14 +668,17 @@ export class ExecutionService {
     if (result.isCompileError) {
       return 'Compile Error';
     }
-    if (result.signal) {
+    if (result.status === 'TIME_LIMIT_EXCEEDED' || result.signal) {
       return 'Time Limit Exceeded';
-    }
-    if (!result.isSuccess) {
-      return `Runtime Error (exit code: ${result.exitCode})`;
     }
     if (!isCorrect) {
       return 'Wrong Answer';
+    }
+    if (!result.isSuccess) {
+      const hasExitCode = typeof result.exitCode === 'number';
+      return hasExitCode
+        ? `Runtime Error (exit code: ${result.exitCode})`
+        : 'Runtime Error';
     }
     return 'Accepted';
   }
@@ -423,5 +746,52 @@ export class ExecutionService {
     }
 
     return undefined;
+  }
+
+  private resolveFunctionName(
+    language: string,
+    requestedFunctionName: string | undefined,
+    source: string,
+  ): string | undefined {
+    const extracted = this.extractFunctionName(language, source);
+
+    if (!requestedFunctionName) {
+      return extracted;
+    }
+
+    const normalized = language.toLowerCase();
+
+    if (normalized === 'python') {
+      const hasRequestedDef = new RegExp(
+        `\\bdef\\s+${this.escapeRegExp(requestedFunctionName)}\\s*\\(`,
+      ).test(source);
+
+      if (hasRequestedDef) {
+        return requestedFunctionName;
+      }
+
+      return extracted || requestedFunctionName;
+    }
+
+    if (normalized === 'javascript') {
+      const hasRequestedFn = new RegExp(
+        `\\bfunction\\s+${this.escapeRegExp(requestedFunctionName)}\\s*\\(`,
+      ).test(source);
+      const hasRequestedVar = new RegExp(
+        `\\b(const|let|var)\\s+${this.escapeRegExp(requestedFunctionName)}\\s*=`,
+      ).test(source);
+
+      if (hasRequestedFn || hasRequestedVar) {
+        return requestedFunctionName;
+      }
+
+      return extracted || requestedFunctionName;
+    }
+
+    return requestedFunctionName;
+  }
+
+  private escapeRegExp(value: string): string {
+    return value.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&');
   }
 }
