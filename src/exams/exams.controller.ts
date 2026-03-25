@@ -35,6 +35,26 @@ export class ExamsController {
 
   // ==================== EXAM CRUD ====================
 
+  @Post('create-random')
+  createRandomExam(
+    @Body(new ZodValidationPipe(CreateExamSchema)) dto: CreateExamDto,
+    @Req() req,
+  ) {
+    const userId = req.user['sub'];
+    const userRole = req.user['role'];
+    return this.examsService.createRandom(userId, userRole, dto);
+  }
+
+  @Post('create-manual')
+  createManualExam(
+    @Body(new ZodValidationPipe(CreateExamSchema)) dto: CreateExamDto,
+    @Req() req,
+  ) {
+    const userId = req.user['sub'];
+    const userRole = req.user['role'];
+    return this.examsService.createManual(userId, userRole, dto);
+  }
+
   @Post()
   createExam(@Body(new ZodValidationPipe(CreateExamSchema)) dto: CreateExamDto, @Req() req) {
     const userId = req.user['sub'];

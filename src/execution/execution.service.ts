@@ -33,6 +33,7 @@ import { spawn } from 'child_process';
 export class ExecutionService implements OnModuleInit {
   private readonly logger = new Logger(ExecutionService.name);
   private readonly judge0Url: string;
+  private readonly judge0FailFast: boolean;
   private static readonly JUDGE0_EXEC_TIMEOUT_MS = 30_000;
   private static readonly JUDGE0_HEALTHCHECK_TIMEOUT_MS = 5_000;
   private static readonly JUDGE0_EXEC_RETRIES = 2;
@@ -43,6 +44,9 @@ export class ExecutionService implements OnModuleInit {
   ) {
     this.judge0Url =
       this.configService.get<string>('JUDGE0_API_URL') || 'http://localhost:2358';
+
+    this.judge0FailFast =
+      this.configService.get<string>('JUDGE0_FAIL_FAST', 'false')?.toLowerCase() === 'true';
   }
 
   async onModuleInit(): Promise<void> {
@@ -68,9 +72,18 @@ export class ExecutionService implements OnModuleInit {
       if (!response.ok) {
         throw new Error(`Judge0 healthcheck failed with status ${response.status}`);
       }
+
+      this.logger.log(`Judge0 healthcheck passed at ${this.judge0Url}`);
     } catch (error) {
       this.logger.error(`Judge0 healthcheck failed: ${(error as Error).message}`);
-      throw new Error(`Judge0 is unavailable at ${this.judge0Url}`);
+
+      if (this.judge0FailFast) {
+        throw new Error(`Judge0 is unavailable at ${this.judge0Url}`);
+      }
+
+      this.logger.warn(
+        `Continuing startup without Judge0. Set JUDGE0_FAIL_FAST=true to require Judge0 at boot.`,
+      );
     }
   }
 

@@ -38,6 +38,8 @@ import {
 } from './dto/exam-response.dto';
 
 type Difficulty = 'EASY' | 'MEDIUM' | 'HARD';
+type AllocationPolicy = 'STRICT' | 'FLEXIBLE';
+type ExamVisibility = 'PRIVATE' | 'PUBLIC';
 
 @Injectable()
 export class ExamsService {
@@ -52,6 +54,36 @@ export class ExamsService {
 
   // ==================== EXAM CRUD ====================
 
+  async createRandom(
+    creatorId: string,
+    userRole: string,
+    dto: CreateExamDto,
+  ): Promise<ExamDetailDto> {
+    return this.create(creatorId, userRole, {
+      ...dto,
+      generationMode: 'RANDOM',
+      questionIds: undefined,
+      problemIds: undefined,
+    });
+  }
+
+  async createManual(
+    creatorId: string,
+    userRole: string,
+    dto: CreateExamDto,
+  ): Promise<ExamDetailDto> {
+    return this.create(creatorId, userRole, {
+      ...dto,
+      generationMode: 'MANUAL',
+      allocationPolicy: 'STRICT',
+      questionCount: 0,
+      problemCount: 0,
+      difficulty: null,
+      questionDifficultyDistribution: undefined,
+      questionAllocationRules: undefined,
+    });
+  }
+
   /**
    * Generate and save an exam by randomly selecting questions/problems matching filters.
    */
@@ -60,98 +92,193 @@ export class ExamsService {
       throw new ForbiddenException('Chỉ giảng viên và quản trị viên mới có thể tạo đề thi');
     }
 
-    // Validate subject if provided
-    if (dto.subjectId) {
-      const subject = await this.prisma.subject.findUnique({ where: { id: dto.subjectId } });
-      if (!subject) throw new NotFoundException('Môn học không tồn tại');
+    const selectedSubjectIds = dto.subjectIds?.length
+      ? dto.subjectIds
+      : dto.subjectId
+        ? [dto.subjectId]
+        : [];
+    const ruleSubjectIds = dto.questionAllocationRules?.map((r) => r.subjectId) || [];
+    const subjectIdsToValidate = [...new Set([...selectedSubjectIds, ...ruleSubjectIds])];
+    const allocationPolicy: AllocationPolicy = dto.allocationPolicy || 'STRICT';
+    const isFlexibleAllocation = allocationPolicy === 'FLEXIBLE';
+    let subjectNameById: Record<string, string> = {};
+
+    // Validate subjects if provided
+    if (subjectIdsToValidate.length > 0) {
+      const subjects = await this.prisma.subject.findMany({
+        where: { id: { in: subjectIdsToValidate } },
+        select: { id: true, name: true },
+      });
+      subjectNameById = Object.fromEntries(subjects.map((s) => [s.id, s.name]));
+      const found = new Set(subjects.map((s) => s.id));
+      const missing = subjectIdsToValidate.filter((id) => !found.has(id));
+      if (missing.length > 0) {
+        throw new NotFoundException(`Môn học không tồn tại: ${missing.join(', ')}`);
+      }
     }
 
     // Validate topic if provided
     if (dto.topicId) {
       const topic = await this.prisma.topic.findUnique({ where: { id: dto.topicId } });
       if (!topic) throw new NotFoundException('Chủ đề không tồn tại');
-      if (dto.subjectId && topic.subjectId !== dto.subjectId) {
+      if (subjectIdsToValidate.length > 0 && !subjectIdsToValidate.includes(topic.subjectId)) {
         throw new BadRequestException('Chủ đề không thuộc môn học đã chọn');
       }
     }
 
-    // Determine if manual selection or random selection
-    const isManualQuestions = dto.questionIds && dto.questionIds.length > 0;
-    const isManualProblems = dto.problemIds && dto.problemIds.length > 0;
+    // Determine generation mode
+    const isManual = dto.generationMode === 'MANUAL';
+
+    if (isManual && (!dto.questionIds?.length && !dto.problemIds?.length)) {
+      throw new BadRequestException('MANUAL mode yêu cầu questionIds hoặc problemIds');
+    }
+
+    if (!isManual && (dto.questionIds?.length || dto.problemIds?.length)) {
+      throw new BadRequestException('RANDOM mode không hỗ trợ questionIds/problemIds');
+    }
+
+    if (isManual && dto.questionDifficultyDistribution) {
+      throw new BadRequestException('MANUAL mode không hỗ trợ questionDifficultyDistribution');
+    }
+
+    if (isManual && dto.questionAllocationRules?.length) {
+      throw new BadRequestException('MANUAL mode không hỗ trợ questionAllocationRules');
+    }
+
+    if (isManual && dto.problemDifficultyDistribution) {
+      throw new BadRequestException('MANUAL mode không hỗ trợ problemDifficultyDistribution');
+    }
+
+    const isManualQuestions = isManual && dto.questionIds && dto.questionIds.length > 0;
+    const isManualProblems = isManual && dto.problemIds && dto.problemIds.length > 0;
 
     let finalQuestionIds: string[] = [];
     let finalProblemIds: string[] = [];
 
     if (isManualQuestions) {
+      const distinctQuestionIds = [...new Set(dto.questionIds!)];
+      if (distinctQuestionIds.length !== dto.questionIds!.length) {
+        throw new BadRequestException('Danh sách questionIds bị trùng');
+      }
+
       // Validate all provided question IDs exist and are published
       const foundQuestions = await this.prisma.question.findMany({
-        where: { id: { in: dto.questionIds! }, isPublished: true },
+        where: { id: { in: distinctQuestionIds }, isPublished: true },
         select: { id: true },
       });
       const foundIds = new Set(foundQuestions.map((q) => q.id));
-      const missing = dto.questionIds!.filter((id) => !foundIds.has(id));
+      const missing = distinctQuestionIds.filter((id) => !foundIds.has(id));
       if (missing.length > 0) {
         throw new BadRequestException(
           `Các câu hỏi không tồn tại hoặc chưa được xuất bản: ${missing.join(', ')}`,
         );
       }
-      finalQuestionIds = dto.questionIds!;
+      finalQuestionIds = distinctQuestionIds;
     } else if (dto.questionCount > 0) {
-      // Random selection (existing logic)
-      const questionWhere: Prisma.QuestionWhereInput = { isPublished: true };
-      if (dto.subjectId) questionWhere.subjectId = dto.subjectId;
-      if (dto.topicId) questionWhere.topicId = dto.topicId;
-      if (dto.difficulty) questionWhere.difficulty = dto.difficulty as Difficulty;
+      if (dto.questionAllocationRules?.length) {
+        finalQuestionIds = await this.pickRandomQuestionIdsBySubjectRules(
+          dto.questionAllocationRules,
+          {
+            topicId: dto.topicId || undefined,
+            defaultDifficulty: (dto.difficulty as Difficulty) || undefined,
+            subjectNameById,
+          },
+          allocationPolicy,
+        );
+      } else {
+      const useQuestionDetailDistribution = Boolean(dto.questionDifficultyDistribution);
+      const questionFilter = {
+        subjectIds: selectedSubjectIds.length > 0 ? selectedSubjectIds : undefined,
+        topicId: dto.topicId || undefined,
+        difficulty: useQuestionDetailDistribution
+          ? undefined
+          : ((dto.difficulty as Difficulty) || undefined),
+      };
 
-      const allQuestionIds = (
-        await this.prisma.question.findMany({ where: questionWhere, select: { id: true } })
-      ).map((q) => q.id);
+        if (dto.questionDifficultyDistribution) {
+          finalQuestionIds = await this.pickRandomQuestionIdsByDifficultyDistribution(
+            questionFilter,
+            dto.questionDifficultyDistribution,
+            allocationPolicy,
+          );
+        } else {
+          finalQuestionIds = await this.pickRandomQuestionIdsBySql(questionFilter, dto.questionCount);
+        }
+      }
 
-      if (allQuestionIds.length < dto.questionCount) {
-        throw new BadRequestException(
-          `Không đủ câu hỏi. Yêu cầu ${dto.questionCount}, hiện có ${allQuestionIds.length} câu hỏi phù hợp.`,
+      if (finalQuestionIds.length < dto.questionCount) {
+        if (!isFlexibleAllocation) {
+          throw new BadRequestException(
+            `Không đủ câu hỏi. Yêu cầu ${dto.questionCount}, hiện có ${finalQuestionIds.length} câu hỏi phù hợp.`,
+          );
+        }
+        this.logger.warn(
+          `Tạo đề thi ở chế độ FLEXIBLE: số câu hỏi thực tế ${finalQuestionIds.length}/${dto.questionCount}`,
         );
       }
-      finalQuestionIds = this.pickRandom(allQuestionIds, dto.questionCount);
     }
 
     if (isManualProblems) {
+      const distinctProblemIds = [...new Set(dto.problemIds!)];
+      if (distinctProblemIds.length !== dto.problemIds!.length) {
+        throw new BadRequestException('Danh sách problemIds bị trùng');
+      }
+
       // Validate all provided problem IDs exist and are published
       const foundProblems = await this.prisma.problem.findMany({
-        where: { id: { in: dto.problemIds! }, isPublished: true },
+        where: { id: { in: distinctProblemIds }, isPublished: true },
         select: { id: true },
       });
       const foundIds = new Set(foundProblems.map((p) => p.id));
-      const missing = dto.problemIds!.filter((id) => !foundIds.has(id));
+      const missing = distinctProblemIds.filter((id) => !foundIds.has(id));
       if (missing.length > 0) {
         throw new BadRequestException(
           `Các bài code không tồn tại hoặc chưa được xuất bản: ${missing.join(', ')}`,
         );
       }
-      finalProblemIds = dto.problemIds!;
+      finalProblemIds = distinctProblemIds;
     } else if (dto.problemCount > 0) {
-      // Random selection (existing logic)
-      const problemWhere: Prisma.ProblemWhereInput = { isPublished: true };
-      if (dto.includeProblemsRelatedToQuestions) {
-        if (dto.subjectId) problemWhere.subjectId = dto.subjectId;
-        if (dto.topicId) problemWhere.topicId = dto.topicId;
+      const useProblemDetailDistribution = Boolean(dto.problemDifficultyDistribution);
+      const problemFilter = {
+        subjectIds:
+          dto.includeProblemsRelatedToQuestions && selectedSubjectIds.length > 0
+            ? selectedSubjectIds
+            : undefined,
+        topicId: dto.includeProblemsRelatedToQuestions ? dto.topicId || undefined : undefined,
+        difficulty: useProblemDetailDistribution
+          ? undefined
+          : ((dto.difficulty as Difficulty) || undefined),
+      };
+
+      if (dto.problemDifficultyDistribution) {
+        finalProblemIds = await this.pickRandomProblemIdsByDifficultyDistribution(
+          problemFilter,
+          dto.problemDifficultyDistribution,
+          allocationPolicy,
+        );
+      } else {
+        finalProblemIds = await this.pickRandomProblemIdsBySql(problemFilter, dto.problemCount);
       }
-      if (dto.difficulty) problemWhere.difficulty = dto.difficulty as Difficulty;
 
-      const allProblemIds = (
-        await this.prisma.problem.findMany({ where: problemWhere, select: { id: true } })
-      ).map((p) => p.id);
-
-      if (allProblemIds.length < dto.problemCount) {
-        throw new BadRequestException(
-          `Không đủ bài code. Yêu cầu ${dto.problemCount}, hiện có ${allProblemIds.length} bài phù hợp.`,
+      if (finalProblemIds.length < dto.problemCount) {
+        if (!isFlexibleAllocation) {
+          throw new BadRequestException(
+            `Không đủ bài code. Yêu cầu ${dto.problemCount}, hiện có ${finalProblemIds.length} bài phù hợp.`,
+          );
+        }
+        this.logger.warn(
+          `Tạo đề thi ở chế độ FLEXIBLE: số bài code thực tế ${finalProblemIds.length}/${dto.problemCount}`,
         );
       }
-      finalProblemIds = this.pickRandom(allProblemIds, dto.problemCount);
     }
 
-    const effectiveQuestionCount = isManualQuestions ? finalQuestionIds.length : dto.questionCount;
-    const effectiveProblemCount = isManualProblems ? finalProblemIds.length : dto.problemCount;
+    const effectiveQuestionCount = finalQuestionIds.length;
+    const effectiveProblemCount = finalProblemIds.length;
+    const publication = this.buildPublicationState({
+      visibility: dto.visibility,
+      publishAt: dto.publishAt || null,
+      publishNow: dto.publishNow,
+    });
 
     // Create exam + items in a transaction
     const exam = await this.prisma.$transaction(async (tx) => {
@@ -166,7 +293,14 @@ export class ExamsService {
           includeProblemsRelatedToQuestions: dto.includeProblemsRelatedToQuestions,
           shuffleQuestions: dto.shuffleQuestions,
           shuffleChoices: dto.shuffleChoices,
-          subjectId: dto.subjectId || null,
+          visibility: publication.visibility,
+          publishAt: publication.publishAt,
+          publishedAt: publication.publishedAt,
+          isPublished: publication.isPublished,
+          subjectId:
+            selectedSubjectIds.length === 1
+              ? selectedSubjectIds[0]
+              : dto.subjectId || null,
           topicId: dto.topicId || null,
           creatorId,
         },
@@ -222,7 +356,20 @@ export class ExamsService {
    * List exams with pagination and filters.
    */
   async findAll(query: QueryExamDto, userId: string, userRole: string): Promise<PaginatedExamsDto> {
-    const { page, limit, subjectId, topicId, difficulty, search, isPublished, sortBy, sortOrder } =
+    await this.syncScheduledExamPublication();
+
+    const {
+      page,
+      limit,
+      subjectId,
+      topicId,
+      difficulty,
+      visibility,
+      search,
+      isPublished,
+      sortBy,
+      sortOrder,
+    } =
       query;
     const skip = (page - 1) * limit;
 
@@ -230,7 +377,12 @@ export class ExamsService {
 
     // Students only see published exams
     if (userRole === 'STUDENT') {
-      where.isPublished = true;
+      where.AND = [
+        { visibility: 'PUBLIC' },
+        {
+          OR: [{ publishAt: null }, { publishAt: { lte: new Date() } }],
+        },
+      ];
     } else if (isPublished !== undefined) {
       where.isPublished = isPublished;
     }
@@ -238,6 +390,7 @@ export class ExamsService {
     if (subjectId) where.subjectId = subjectId;
     if (topicId) where.topicId = topicId;
     if (difficulty) where.difficulty = difficulty as Difficulty;
+    if (visibility && userRole !== 'STUDENT') where.visibility = visibility;
     if (search) {
       where.title = { contains: search, mode: 'insensitive' };
     }
@@ -270,6 +423,9 @@ export class ExamsService {
           duration: e.duration,
           difficulty: e.difficulty,
           isPublished: e.isPublished,
+          visibility: e.visibility,
+          publishAt: e.publishAt,
+          publishedAt: e.publishedAt,
           subjectId: e.subjectId,
           topicId: e.topicId,
           subject: e.subject,
@@ -296,6 +452,8 @@ export class ExamsService {
    * Get exam detail by ID.
    */
   async findOne(id: string, userId: string, userRole: string): Promise<ExamDetailDto> {
+    await this.syncScheduledExamPublication();
+
     const exam = await this.prisma.exam.findUnique({
       where: { id },
       include: {
@@ -314,7 +472,7 @@ export class ExamsService {
 
     if (!exam) throw new NotFoundException('Đề thi không tồn tại');
 
-    if (!exam.isPublished && userRole === 'STUDENT') {
+    if (!this.isExamPubliclyAvailable(exam) && userRole === 'STUDENT') {
       throw new ForbiddenException('Bạn không có quyền xem đề thi này');
     }
 
@@ -341,6 +499,8 @@ export class ExamsService {
       throw new ForbiddenException('Bạn không có quyền chỉnh sửa đề thi này');
     }
 
+    const publicationUpdate = this.resolvePublicationUpdate(dto, exam);
+
     const updated = await this.prisma.exam.update({
       where: { id },
       data: {
@@ -348,6 +508,7 @@ export class ExamsService {
         ...(dto.description !== undefined && { description: dto.description }),
         ...(dto.duration && { duration: dto.duration }),
         ...(dto.isPublished !== undefined && { isPublished: dto.isPublished }),
+        ...(publicationUpdate || {}),
         ...(dto.shuffleQuestions !== undefined && { shuffleQuestions: dto.shuffleQuestions }),
         ...(dto.shuffleChoices !== undefined && { shuffleChoices: dto.shuffleChoices }),
       },
@@ -394,6 +555,8 @@ export class ExamsService {
    * Generates a random seed and returns shuffled items.
    */
   async startSession(examId: string, userId: string): Promise<ShuffledSessionDto> {
+    await this.syncScheduledExamPublication();
+
     const activeBooking = await this.bookingsService.requireActiveCheckedInBooking(
       userId,
       'EXAM',
@@ -423,7 +586,7 @@ export class ExamsService {
     });
 
     if (!exam) throw new NotFoundException('Đề thi không tồn tại');
-    if (!exam.isPublished) throw new ForbiddenException('Đề thi chưa được công bố');
+    if (!this.isExamPubliclyAvailable(exam)) throw new ForbiddenException('Đề thi chưa được công bố');
 
     // Check if there's an existing session
     const existingSession = await this.prisma.examSession.findUnique({
@@ -912,6 +1075,132 @@ export class ExamsService {
 
   // ==================== HELPER METHODS ====================
 
+  private buildPublicationState(input: {
+    visibility?: ExamVisibility;
+    publishAt?: Date | null;
+    publishNow?: boolean;
+  }): {
+    visibility: ExamVisibility;
+    publishAt: Date | null;
+    publishedAt: Date | null;
+    isPublished: boolean;
+  } {
+    const now = new Date();
+    const visibility = input.visibility || 'PRIVATE';
+    const publishAt = input.publishAt || null;
+
+    if (visibility === 'PRIVATE') {
+      return {
+        visibility: 'PRIVATE',
+        publishAt: null,
+        publishedAt: null,
+        isPublished: false,
+      };
+    }
+
+    if (input.publishNow) {
+      return {
+        visibility: 'PUBLIC',
+        publishAt: null,
+        publishedAt: now,
+        isPublished: true,
+      };
+    }
+
+    if (publishAt && publishAt.getTime() > now.getTime()) {
+      return {
+        visibility: 'PUBLIC',
+        publishAt,
+        publishedAt: null,
+        isPublished: false,
+      };
+    }
+
+    return {
+      visibility: 'PUBLIC',
+      publishAt,
+      publishedAt: now,
+      isPublished: true,
+    };
+  }
+
+  private resolvePublicationUpdate(
+    dto: UpdateExamDto,
+    exam: {
+      visibility: ExamVisibility;
+      publishAt: Date | null;
+      publishedAt: Date | null;
+      isPublished: boolean;
+    },
+  ):
+    | {
+        visibility: ExamVisibility;
+        publishAt: Date | null;
+        publishedAt: Date | null;
+        isPublished: boolean;
+      }
+    | undefined {
+    const hasPublicationInput =
+      dto.visibility !== undefined ||
+      dto.publishAt !== undefined ||
+      dto.publishNow !== undefined ||
+      dto.isPublished !== undefined;
+
+    if (!hasPublicationInput) {
+      return undefined;
+    }
+
+    const visibilityFromLegacy =
+      dto.isPublished === undefined ? undefined : dto.isPublished ? 'PUBLIC' : 'PRIVATE';
+    const targetVisibility = dto.visibility || visibilityFromLegacy || exam.visibility;
+    const targetPublishAt = dto.publishAt === undefined ? exam.publishAt : dto.publishAt;
+    const publishNowFromLegacy =
+      dto.isPublished === true && dto.publishAt === undefined && dto.publishNow === undefined;
+    const publishNow = dto.publishNow || publishNowFromLegacy;
+
+    const next = this.buildPublicationState({
+      visibility: targetVisibility,
+      publishAt: targetPublishAt,
+      publishNow,
+    });
+
+    if (next.visibility === 'PUBLIC' && next.isPublished && !exam.publishedAt && !next.publishedAt) {
+      next.publishedAt = new Date();
+    }
+
+    return next;
+  }
+
+  private async syncScheduledExamPublication(): Promise<void> {
+    const now = new Date();
+    await this.prisma.exam.updateMany({
+      where: {
+        visibility: 'PUBLIC',
+        publishAt: { lte: now },
+        isPublished: false,
+      },
+      data: {
+        isPublished: true,
+        publishedAt: now,
+      },
+    });
+  }
+
+  private isExamPubliclyAvailable(exam: {
+    visibility: ExamVisibility;
+    publishAt: Date | null;
+  }): boolean {
+    if (exam.visibility !== 'PUBLIC') {
+      return false;
+    }
+
+    if (!exam.publishAt) {
+      return true;
+    }
+
+    return exam.publishAt.getTime() <= Date.now();
+  }
+
   /**
    * Pick N random elements from an array using crypto.randomInt.
    */
@@ -925,6 +1214,354 @@ export class ExamsService {
       available.splice(idx, 1);
     }
     return result;
+  }
+
+  private buildQuestionFilterWhereSql(filter: {
+    subjectIds?: string[];
+    topicId?: string;
+    difficulty?: Difficulty;
+    excludeIds?: string[];
+  }): Prisma.Sql {
+    const conditions: Prisma.Sql[] = [Prisma.sql`q."isPublished" = true`];
+
+    if (filter.subjectIds?.length) {
+      conditions.push(Prisma.sql`q."subjectId" IN (${Prisma.join(filter.subjectIds)})`);
+    }
+    if (filter.topicId) {
+      conditions.push(Prisma.sql`q."topicId" = ${filter.topicId}`);
+    }
+    if (filter.difficulty) {
+      conditions.push(Prisma.sql`q."difficulty" = ${filter.difficulty}::"Difficulty"`);
+    }
+    if (filter.excludeIds?.length) {
+      conditions.push(Prisma.sql`q.id NOT IN (${Prisma.join(filter.excludeIds)})`);
+    }
+
+    return Prisma.join(conditions, ' AND ');
+  }
+
+  private async pickRandomQuestionIdsBySql(
+    filter: {
+      subjectIds?: string[];
+      topicId?: string;
+      difficulty?: Difficulty;
+      excludeIds?: string[];
+    },
+    count: number,
+  ): Promise<string[]> {
+    if (count <= 0) return [];
+
+    const whereSql = this.buildQuestionFilterWhereSql(filter);
+    const rows = await this.prisma.$queryRaw<{ id: string }[]>`
+      SELECT q.id
+      FROM "Question" q
+      WHERE ${whereSql}
+      ORDER BY random()
+      LIMIT ${count}
+    `;
+
+    return rows.map((r) => r.id);
+  }
+
+  private async pickRandomQuestionIdsByDifficultyDistribution(
+    filter: {
+      subjectIds?: string[];
+      topicId?: string;
+      difficulty?: Difficulty;
+    },
+    distribution: { easy: number; medium: number; hard: number },
+    allocationPolicy: AllocationPolicy,
+  ): Promise<string[]> {
+    const totalRequested = distribution.easy + distribution.medium + distribution.hard;
+    if (totalRequested <= 0) return [];
+
+    const where: Prisma.QuestionWhereInput = { isPublished: true };
+    if (filter.subjectIds?.length) where.subjectId = { in: filter.subjectIds };
+    if (filter.topicId) where.topicId = filter.topicId;
+
+    const grouped = await this.prisma.question.groupBy({
+      by: ['difficulty'],
+      where,
+      _count: { _all: true },
+    });
+
+    const available: Record<Difficulty, number> = {
+      EASY: 0,
+      MEDIUM: 0,
+      HARD: 0,
+    };
+    for (const row of grouped) {
+      available[row.difficulty as Difficulty] = row._count._all;
+    }
+
+    const strictMode = allocationPolicy !== 'FLEXIBLE';
+    if (strictMode) {
+      if (distribution.easy > available.EASY) {
+        throw new BadRequestException(
+          `Không đủ câu EASY. Yêu cầu ${distribution.easy}, hiện có ${available.EASY}.`,
+        );
+      }
+      if (distribution.medium > available.MEDIUM) {
+        throw new BadRequestException(
+          `Không đủ câu MEDIUM. Yêu cầu ${distribution.medium}, hiện có ${available.MEDIUM}.`,
+        );
+      }
+      if (distribution.hard > available.HARD) {
+        throw new BadRequestException(
+          `Không đủ câu HARD. Yêu cầu ${distribution.hard}, hiện có ${available.HARD}.`,
+        );
+      }
+    }
+
+    const effectiveDistribution = strictMode
+      ? distribution
+      : {
+          easy: Math.min(distribution.easy, available.EASY),
+          medium: Math.min(distribution.medium, available.MEDIUM),
+          hard: Math.min(distribution.hard, available.HARD),
+        };
+
+    const whereSql = this.buildQuestionFilterWhereSql(filter);
+    const rows = await this.prisma.$queryRaw<{ id: string }[]>`
+      WITH ranked AS (
+        SELECT
+          q.id,
+          q."difficulty",
+          ROW_NUMBER() OVER (PARTITION BY q."difficulty" ORDER BY random()) AS rn
+        FROM "Question" q
+        WHERE ${whereSql}
+      )
+      SELECT id
+      FROM ranked
+      WHERE
+        ("difficulty" = 'EASY'::"Difficulty" AND rn <= ${effectiveDistribution.easy})
+        OR ("difficulty" = 'MEDIUM'::"Difficulty" AND rn <= ${effectiveDistribution.medium})
+        OR ("difficulty" = 'HARD'::"Difficulty" AND rn <= ${effectiveDistribution.hard})
+    `;
+
+    let selectedIds = rows.map((r) => r.id);
+
+    if (!strictMode && selectedIds.length < totalRequested) {
+      const missing = totalRequested - selectedIds.length;
+      const fallbackIds = await this.pickRandomQuestionIdsBySql(
+        {
+          subjectIds: filter.subjectIds,
+          topicId: filter.topicId,
+          excludeIds: selectedIds,
+        },
+        missing,
+      );
+      selectedIds = [...selectedIds, ...fallbackIds];
+      this.logger.warn(
+        `Phân bổ câu hỏi FLEXIBLE: lấy theo bucket ${rows.length}/${totalRequested}, bù thêm ${fallbackIds.length}`,
+      );
+    }
+
+    return selectedIds;
+  }
+
+  private async pickRandomQuestionIdsBySubjectRules(
+    rules: { subjectId: string; difficulty?: Difficulty | null; count: number }[],
+    options: {
+      topicId?: string;
+      defaultDifficulty?: Difficulty;
+      subjectNameById: Record<string, string>;
+    },
+    allocationPolicy: AllocationPolicy,
+  ): Promise<string[]> {
+    const strictMode = allocationPolicy !== 'FLEXIBLE';
+    const totalRequested = rules.reduce((sum, r) => sum + r.count, 0);
+    const selectedIds: string[] = [];
+
+    for (const rule of rules) {
+      const questionFilter = {
+        subjectIds: [rule.subjectId],
+        topicId: options.topicId,
+        difficulty: (rule.difficulty as Difficulty | undefined) || options.defaultDifficulty,
+        excludeIds: selectedIds,
+      };
+
+      const picked = await this.pickRandomQuestionIdsBySql(questionFilter, rule.count);
+      const subjectLabel = options.subjectNameById[rule.subjectId] || rule.subjectId;
+      const difficultyLabel = rule.difficulty ? ` (${rule.difficulty})` : '';
+
+      if (picked.length < rule.count && strictMode) {
+        throw new BadRequestException(
+          `Không đủ câu hỏi cho môn ${subjectLabel}${difficultyLabel}. Yêu cầu ${rule.count}, hiện có ${picked.length}.`,
+        );
+      }
+
+      if (picked.length < rule.count && !strictMode) {
+        const missing = rule.count - picked.length;
+        const fallback = await this.pickRandomQuestionIdsBySql(
+          {
+            subjectIds: [rule.subjectId],
+            topicId: options.topicId,
+            excludeIds: [...selectedIds, ...picked],
+          },
+          missing,
+        );
+        selectedIds.push(...picked, ...fallback);
+        this.logger.warn(
+          `FLEXIBLE subject rule cho môn ${subjectLabel}${difficultyLabel}: bucket đủ ${picked.length}/${rule.count}, bù thêm ${fallback.length}`,
+        );
+        continue;
+      }
+
+      selectedIds.push(...picked);
+    }
+
+    if (!strictMode && selectedIds.length < totalRequested) {
+      this.logger.warn(
+        `questionAllocationRules FLEXIBLE chưa đủ tổng số lượng: ${selectedIds.length}/${totalRequested}`,
+      );
+    }
+
+    return selectedIds;
+  }
+
+  private buildProblemFilterWhereSql(filter: {
+    subjectIds?: string[];
+    topicId?: string;
+    difficulty?: Difficulty;
+    excludeIds?: string[];
+  }): Prisma.Sql {
+    const conditions: Prisma.Sql[] = [Prisma.sql`p."isPublished" = true`];
+
+    if (filter.subjectIds?.length) {
+      conditions.push(Prisma.sql`p."subjectId" IN (${Prisma.join(filter.subjectIds)})`);
+    }
+    if (filter.topicId) {
+      conditions.push(Prisma.sql`p."topicId" = ${filter.topicId}`);
+    }
+    if (filter.difficulty) {
+      conditions.push(Prisma.sql`p."difficulty" = ${filter.difficulty}::"Difficulty"`);
+    }
+    if (filter.excludeIds?.length) {
+      conditions.push(Prisma.sql`p.id NOT IN (${Prisma.join(filter.excludeIds)})`);
+    }
+
+    return Prisma.join(conditions, ' AND ');
+  }
+
+  private async pickRandomProblemIdsBySql(
+    filter: {
+      subjectIds?: string[];
+      topicId?: string;
+      difficulty?: Difficulty;
+      excludeIds?: string[];
+    },
+    count: number,
+  ): Promise<string[]> {
+    if (count <= 0) return [];
+
+    const whereSql = this.buildProblemFilterWhereSql(filter);
+    const rows = await this.prisma.$queryRaw<{ id: string }[]>`
+      SELECT p.id
+      FROM "Problem" p
+      WHERE ${whereSql}
+      ORDER BY random()
+      LIMIT ${count}
+    `;
+
+    return rows.map((r) => r.id);
+  }
+
+  private async pickRandomProblemIdsByDifficultyDistribution(
+    filter: {
+      subjectIds?: string[];
+      topicId?: string;
+      difficulty?: Difficulty;
+    },
+    distribution: { easy: number; medium: number; hard: number },
+    allocationPolicy: AllocationPolicy,
+  ): Promise<string[]> {
+    const totalRequested = distribution.easy + distribution.medium + distribution.hard;
+    if (totalRequested <= 0) return [];
+
+    const where: Prisma.ProblemWhereInput = { isPublished: true };
+    if (filter.subjectIds?.length) where.subjectId = { in: filter.subjectIds };
+    if (filter.topicId) where.topicId = filter.topicId;
+
+    const grouped = await this.prisma.problem.groupBy({
+      by: ['difficulty'],
+      where,
+      _count: { _all: true },
+    });
+
+    const available: Record<Difficulty, number> = {
+      EASY: 0,
+      MEDIUM: 0,
+      HARD: 0,
+    };
+    for (const row of grouped) {
+      available[row.difficulty as Difficulty] = row._count._all;
+    }
+
+    const strictMode = allocationPolicy !== 'FLEXIBLE';
+    if (strictMode) {
+      if (distribution.easy > available.EASY) {
+        throw new BadRequestException(
+          `Không đủ bài code EASY. Yêu cầu ${distribution.easy}, hiện có ${available.EASY}.`,
+        );
+      }
+      if (distribution.medium > available.MEDIUM) {
+        throw new BadRequestException(
+          `Không đủ bài code MEDIUM. Yêu cầu ${distribution.medium}, hiện có ${available.MEDIUM}.`,
+        );
+      }
+      if (distribution.hard > available.HARD) {
+        throw new BadRequestException(
+          `Không đủ bài code HARD. Yêu cầu ${distribution.hard}, hiện có ${available.HARD}.`,
+        );
+      }
+    }
+
+    const effectiveDistribution = strictMode
+      ? distribution
+      : {
+          easy: Math.min(distribution.easy, available.EASY),
+          medium: Math.min(distribution.medium, available.MEDIUM),
+          hard: Math.min(distribution.hard, available.HARD),
+        };
+
+    const whereSql = this.buildProblemFilterWhereSql(filter);
+    const rows = await this.prisma.$queryRaw<{ id: string }[]>`
+      WITH ranked AS (
+        SELECT
+          p.id,
+          p."difficulty",
+          ROW_NUMBER() OVER (PARTITION BY p."difficulty" ORDER BY random()) AS rn
+        FROM "Problem" p
+        WHERE ${whereSql}
+      )
+      SELECT id
+      FROM ranked
+      WHERE
+        ("difficulty" = 'EASY'::"Difficulty" AND rn <= ${effectiveDistribution.easy})
+        OR ("difficulty" = 'MEDIUM'::"Difficulty" AND rn <= ${effectiveDistribution.medium})
+        OR ("difficulty" = 'HARD'::"Difficulty" AND rn <= ${effectiveDistribution.hard})
+    `;
+
+    let selectedIds = rows.map((r) => r.id);
+
+    if (!strictMode && selectedIds.length < totalRequested) {
+      const missing = totalRequested - selectedIds.length;
+      const fallbackIds = await this.pickRandomProblemIdsBySql(
+        {
+          subjectIds: filter.subjectIds,
+          topicId: filter.topicId,
+          excludeIds: selectedIds,
+        },
+        missing,
+      );
+      selectedIds = [...selectedIds, ...fallbackIds];
+      this.logger.warn(
+        `Phân bổ bài code FLEXIBLE: lấy theo bucket ${rows.length}/${totalRequested}, bù thêm ${fallbackIds.length}`,
+      );
+    }
+
+    return selectedIds;
   }
 
   /**
@@ -1102,6 +1739,9 @@ export class ExamsService {
       difficulty: exam.difficulty,
       includeProblemsRelatedToQuestions: exam.includeProblemsRelatedToQuestions,
       isPublished: exam.isPublished,
+      visibility: exam.visibility,
+      publishAt: exam.publishAt,
+      publishedAt: exam.publishedAt,
       subjectId: exam.subjectId,
       topicId: exam.topicId,
       subject: exam.subject,

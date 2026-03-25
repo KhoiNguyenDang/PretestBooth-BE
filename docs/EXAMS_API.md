@@ -75,6 +75,13 @@ Base path: `/api/exams`
 POST /api/exams
 ```
 
+Hoặc dùng endpoint rõ nghiệp vụ:
+
+```
+POST /api/exams/create-random
+POST /api/exams/create-manual
+```
+
 **Auth:** LECTURER, ADMIN
 
 **Request Body:**
@@ -85,11 +92,50 @@ POST /api/exams
   "description": "Đề thi giữa kỳ môn Toán rời rạc",
   "subjectId": "uuid-of-subject",
   "topicId": "uuid-of-topic",
+  "generationMode": "RANDOM",
+  "allocationPolicy": "STRICT",
   "questionCount": 20,
+  "questionAllocationRules": [
+    { "subjectId": "uuid-subject-a", "difficulty": "EASY", "count": 8 },
+    { "subjectId": "uuid-subject-b", "difficulty": "HARD", "count": 12 }
+  ],
+  "questionDifficultyDistribution": {
+    "easy": 5,
+    "medium": 10,
+    "hard": 5
+  },
   "problemCount": 3,
   "includeProblemsRelatedToQuestions": true,
   "difficulty": "MEDIUM",
-  "duration": 60
+  "duration": 60,
+  "shuffleQuestions": true,
+  "shuffleChoices": true
+}
+```
+
+`allocationPolicy`:
+- `STRICT` (mặc định): yêu cầu đủ đúng phân bổ/số lượng, thiếu dữ liệu thì trả lỗi.
+- `FLEXIBLE`: nếu thiếu theo bucket độ khó, hệ thống sẽ lấy bổ sung ngẫu nhiên từ bucket khác trong cùng bộ lọc subject/topic.
+
+`questionAllocationRules` (tuỳ chọn):
+- Dùng khi muốn chia số lượng câu theo từng môn (và có thể chỉ định độ khó từng môn).
+- Nếu có `questionAllocationRules`, tổng `count` của các rule phải bằng `questionCount`.
+- Khi `difficulty` trong rule để trống, hệ thống dùng `difficulty` chung của đề (nếu có).
+
+**Request Body (MANUAL):**
+
+```json
+{
+  "title": "Đề thi thủ công - Chương 1",
+  "description": "Giảng viên chọn trực tiếp câu hỏi",
+  "generationMode": "MANUAL",
+  "subjectId": "uuid-of-subject",
+  "topicId": "uuid-of-topic",
+  "questionIds": ["uuid-q1", "uuid-q2", "uuid-q3"],
+  "problemIds": ["uuid-p1"],
+  "duration": 45,
+  "shuffleQuestions": true,
+  "shuffleChoices": true
 }
 ```
 
@@ -136,6 +182,7 @@ POST /api/exams
 **Errors:**
 
 - `400` - Không đủ câu hỏi/bài code phù hợp
+- `400` - RANDOM mode có truyền questionIds/problemIds hoặc MANUAL mode sai payload
 - `403` - Không có quyền tạo đề thi
 - `404` - Môn học/chủ đề không tồn tại
 
