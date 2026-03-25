@@ -336,6 +336,11 @@ enum ExamSection {
   PROBLEM   // Coding problems (LeetCode-style)
 }
 
+enum ExamVisibility {
+  PRIVATE
+  PUBLIC
+}
+
 // Exam session status
 enum ExamSessionStatus {
   IN_PROGRESS
@@ -370,6 +375,9 @@ model Exam {
   
   // Status
   isPublished Boolean    @default(false)
+  visibility  ExamVisibility @default(PRIVATE)
+  publishAt   DateTime?
+  publishedAt DateTime?
   
   // Creator
   creatorId   String
@@ -386,6 +394,8 @@ model Exam {
   @@index([subjectId])
   @@index([topicId])
   @@index([isPublished])
+  @@index([visibility])
+  @@index([publishAt])
 }
 
 // ExamItem - a concrete item (question or problem) in an exam

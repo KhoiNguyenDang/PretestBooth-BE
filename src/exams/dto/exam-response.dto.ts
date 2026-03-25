@@ -9,6 +9,9 @@ export class ExamListItemDto {
   duration: number;
   difficulty: string | null;
   isPublished: boolean;
+  visibility: 'PRIVATE' | 'PUBLIC';
+  publishAt: Date | null;
+  publishedAt: Date | null;
   subjectId: string | null;
   topicId: string | null;
   subject?: { id: string; name: string } | null;
@@ -35,6 +38,9 @@ export class ExamDetailDto {
   difficulty: string | null;
   includeProblemsRelatedToQuestions: boolean;
   isPublished: boolean;
+  visibility: 'PRIVATE' | 'PUBLIC';
+  publishAt: Date | null;
+  publishedAt: Date | null;
   subjectId: string | null;
   topicId: string | null;
   subject?: { id: string; name: string } | null;

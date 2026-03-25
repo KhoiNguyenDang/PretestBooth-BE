@@ -43,7 +43,18 @@ export const CreateExamSchema = z
     // Shuffle settings
     shuffleQuestions: z.boolean().default(true),
     shuffleChoices: z.boolean().default(true),
+    // Publication settings
+    visibility: z.enum(['PRIVATE', 'PUBLIC']).default('PRIVATE'),
+    publishAt: z.coerce.date().optional().nullable(),
+    publishNow: z.boolean().default(false),
   })
+  .refine(
+    (data) => !(data.publishNow && data.publishAt),
+    {
+      message: 'Không thể truyền đồng thời publishNow và publishAt',
+      path: ['publishNow'],
+    },
+  )
   .refine(
     (data) => {
       if (!data.subjectIds?.length) return true;

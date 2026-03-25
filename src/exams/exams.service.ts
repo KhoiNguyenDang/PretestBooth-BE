@@ -39,6 +39,7 @@ import {
 
 type Difficulty = 'EASY' | 'MEDIUM' | 'HARD';
 type AllocationPolicy = 'STRICT' | 'FLEXIBLE';
+type ExamVisibility = 'PRIVATE' | 'PUBLIC';
 
 @Injectable()
 export class ExamsService {
@@ -273,6 +274,11 @@ export class ExamsService {
 
     const effectiveQuestionCount = finalQuestionIds.length;
     const effectiveProblemCount = finalProblemIds.length;
+    const publication = this.buildPublicationState({
+      visibility: dto.visibility,
+      publishAt: dto.publishAt || null,
+      publishNow: dto.publishNow,
+    });
 
     // Create exam + items in a transaction
     const exam = await this.prisma.$transaction(async (tx) => {
@@ -287,6 +293,10 @@ export class ExamsService {
           includeProblemsRelatedToQuestions: dto.includeProblemsRelatedToQuestions,
           shuffleQuestions: dto.shuffleQuestions,
           shuffleChoices: dto.shuffleChoices,
+          visibility: publication.visibility,
+          publishAt: publication.publishAt,
+          publishedAt: publication.publishedAt,
+          isPublished: publication.isPublished,
           subjectId:
             selectedSubjectIds.length === 1
               ? selectedSubjectIds[0]
@@ -346,7 +356,20 @@ export class ExamsService {
    * List exams with pagination and filters.
    */
   async findAll(query: QueryExamDto, userId: string, userRole: string): Promise<PaginatedExamsDto> {
-    const { page, limit, subjectId, topicId, difficulty, search, isPublished, sortBy, sortOrder } =
+    await this.syncScheduledExamPublication();
+
+    const {
+      page,
+      limit,
+      subjectId,
+      topicId,
+      difficulty,
+      visibility,
+      search,
+      isPublished,
+      sortBy,
+      sortOrder,
+    } =
       query;
     const skip = (page - 1) * limit;
 
@@ -354,7 +377,12 @@ export class ExamsService {
 
     // Students only see published exams
     if (userRole === 'STUDENT') {
-      where.isPublished = true;
+      where.AND = [
+        { visibility: 'PUBLIC' },
+        {
+          OR: [{ publishAt: null }, { publishAt: { lte: new Date() } }],
+        },
+      ];
     } else if (isPublished !== undefined) {
       where.isPublished = isPublished;
     }
@@ -362,6 +390,7 @@ export class ExamsService {
     if (subjectId) where.subjectId = subjectId;
     if (topicId) where.topicId = topicId;
     if (difficulty) where.difficulty = difficulty as Difficulty;
+    if (visibility && userRole !== 'STUDENT') where.visibility = visibility;
     if (search) {
       where.title = { contains: search, mode: 'insensitive' };
     }
@@ -394,6 +423,9 @@ export class ExamsService {
           duration: e.duration,
           difficulty: e.difficulty,
           isPublished: e.isPublished,
+          visibility: e.visibility,
+          publishAt: e.publishAt,
+          publishedAt: e.publishedAt,
           subjectId: e.subjectId,
           topicId: e.topicId,
           subject: e.subject,
@@ -420,6 +452,8 @@ export class ExamsService {
    * Get exam detail by ID.
    */
   async findOne(id: string, userId: string, userRole: string): Promise<ExamDetailDto> {
+    await this.syncScheduledExamPublication();
+
     const exam = await this.prisma.exam.findUnique({
       where: { id },
       include: {
@@ -438,7 +472,7 @@ export class ExamsService {
 
     if (!exam) throw new NotFoundException('Đề thi không tồn tại');
 
-    if (!exam.isPublished && userRole === 'STUDENT') {
+    if (!this.isExamPubliclyAvailable(exam) && userRole === 'STUDENT') {
       throw new ForbiddenException('Bạn không có quyền xem đề thi này');
     }
 
@@ -465,6 +499,8 @@ export class ExamsService {
       throw new ForbiddenException('Bạn không có quyền chỉnh sửa đề thi này');
     }
 
+    const publicationUpdate = this.resolvePublicationUpdate(dto, exam);
+
     const updated = await this.prisma.exam.update({
       where: { id },
       data: {
@@ -472,6 +508,7 @@ export class ExamsService {
         ...(dto.description !== undefined && { description: dto.description }),
         ...(dto.duration && { duration: dto.duration }),
         ...(dto.isPublished !== undefined && { isPublished: dto.isPublished }),
+        ...(publicationUpdate || {}),
         ...(dto.shuffleQuestions !== undefined && { shuffleQuestions: dto.shuffleQuestions }),
         ...(dto.shuffleChoices !== undefined && { shuffleChoices: dto.shuffleChoices }),
       },
@@ -518,6 +555,8 @@ export class ExamsService {
    * Generates a random seed and returns shuffled items.
    */
   async startSession(examId: string, userId: string): Promise<ShuffledSessionDto> {
+    await this.syncScheduledExamPublication();
+
     const activeBooking = await this.bookingsService.requireActiveCheckedInBooking(
       userId,
       'EXAM',
@@ -547,7 +586,7 @@ export class ExamsService {
     });
 
     if (!exam) throw new NotFoundException('Đề thi không tồn tại');
-    if (!exam.isPublished) throw new ForbiddenException('Đề thi chưa được công bố');
+    if (!this.isExamPubliclyAvailable(exam)) throw new ForbiddenException('Đề thi chưa được công bố');
 
     // Check if there's an existing session
     const existingSession = await this.prisma.examSession.findUnique({
@@ -1035,6 +1074,132 @@ export class ExamsService {
   }
 
   // ==================== HELPER METHODS ====================
+
+  private buildPublicationState(input: {
+    visibility?: ExamVisibility;
+    publishAt?: Date | null;
+    publishNow?: boolean;
+  }): {
+    visibility: ExamVisibility;
+    publishAt: Date | null;
+    publishedAt: Date | null;
+    isPublished: boolean;
+  } {
+    const now = new Date();
+    const visibility = input.visibility || 'PRIVATE';
+    const publishAt = input.publishAt || null;
+
+    if (visibility === 'PRIVATE') {
+      return {
+        visibility: 'PRIVATE',
+        publishAt: null,
+        publishedAt: null,
+        isPublished: false,
+      };
+    }
+
+    if (input.publishNow) {
+      return {
+        visibility: 'PUBLIC',
+        publishAt: null,
+        publishedAt: now,
+        isPublished: true,
+      };
+    }
+
+    if (publishAt && publishAt.getTime() > now.getTime()) {
+      return {
+        visibility: 'PUBLIC',
+        publishAt,
+        publishedAt: null,
+        isPublished: false,
+      };
+    }
+
+    return {
+      visibility: 'PUBLIC',
+      publishAt,
+      publishedAt: now,
+      isPublished: true,
+    };
+  }
+
+  private resolvePublicationUpdate(
+    dto: UpdateExamDto,
+    exam: {
+      visibility: ExamVisibility;
+      publishAt: Date | null;
+      publishedAt: Date | null;
+      isPublished: boolean;
+    },
+  ):
+    | {
+        visibility: ExamVisibility;
+        publishAt: Date | null;
+        publishedAt: Date | null;
+        isPublished: boolean;
+      }
+    | undefined {
+    const hasPublicationInput =
+      dto.visibility !== undefined ||
+      dto.publishAt !== undefined ||
+      dto.publishNow !== undefined ||
+      dto.isPublished !== undefined;
+
+    if (!hasPublicationInput) {
+      return undefined;
+    }
+
+    const visibilityFromLegacy =
+      dto.isPublished === undefined ? undefined : dto.isPublished ? 'PUBLIC' : 'PRIVATE';
+    const targetVisibility = dto.visibility || visibilityFromLegacy || exam.visibility;
+    const targetPublishAt = dto.publishAt === undefined ? exam.publishAt : dto.publishAt;
+    const publishNowFromLegacy =
+      dto.isPublished === true && dto.publishAt === undefined && dto.publishNow === undefined;
+    const publishNow = dto.publishNow || publishNowFromLegacy;
+
+    const next = this.buildPublicationState({
+      visibility: targetVisibility,
+      publishAt: targetPublishAt,
+      publishNow,
+    });
+
+    if (next.visibility === 'PUBLIC' && next.isPublished && !exam.publishedAt && !next.publishedAt) {
+      next.publishedAt = new Date();
+    }
+
+    return next;
+  }
+
+  private async syncScheduledExamPublication(): Promise<void> {
+    const now = new Date();
+    await this.prisma.exam.updateMany({
+      where: {
+        visibility: 'PUBLIC',
+        publishAt: { lte: now },
+        isPublished: false,
+      },
+      data: {
+        isPublished: true,
+        publishedAt: now,
+      },
+    });
+  }
+
+  private isExamPubliclyAvailable(exam: {
+    visibility: ExamVisibility;
+    publishAt: Date | null;
+  }): boolean {
+    if (exam.visibility !== 'PUBLIC') {
+      return false;
+    }
+
+    if (!exam.publishAt) {
+      return true;
+    }
+
+    return exam.publishAt.getTime() <= Date.now();
+  }
 
   /**
    * Pick N random elements from an array using crypto.randomInt.
@@ -1574,6 +1739,9 @@ export class ExamsService {
       difficulty: exam.difficulty,
       includeProblemsRelatedToQuestions: exam.includeProblemsRelatedToQuestions,
       isPublished: exam.isPublished,
+      visibility: exam.visibility,
+      publishAt: exam.publishAt,
+      publishedAt: exam.publishedAt,
       subjectId: exam.subjectId,
       topicId: exam.topicId,
       subject: exam.subject,
