@@ -8,16 +8,18 @@ async function bootstrap() {
   const fallbackPort = defaultPort === 3000 ? 3002 : defaultPort + 1;
   const app = await NestFactory.create(AppModule);
 
-  // Enable CORS for frontend on port 3001
+  // Cập nhật CORS để hỗ trợ cả dev và production
   app.enableCors({
-    origin: ['http://localhost:3001', 'http://localhost:3000'],
+    origin: [
+      'http://localhost:3000',
+      'http://localhost:3001',
+      'https://app.nguyen2207.io.vn', // Frontend production
+      'https://api.nguyen2207.io.vn', // Backend production
+    ],
     credentials: true,
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
   });
-
-  app.useGlobalInterceptors(new TransformInterceptor(new Reflector()));
-  app.setGlobalPrefix('api');
 
   try {
     await app.listen(defaultPort);
