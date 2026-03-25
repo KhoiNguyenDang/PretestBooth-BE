@@ -7,6 +7,7 @@ async function bootstrap() {
   const defaultPort = Number.isNaN(preferredPort) ? 3000 : preferredPort;
   const fallbackPort = defaultPort === 3000 ? 3002 : defaultPort + 1;
   const app = await NestFactory.create(AppModule);
+  app.setGlobalPrefix('api');
 
   const explicitOrigins = (process.env.CORS_ORIGINS ?? '')
     .split(',')
