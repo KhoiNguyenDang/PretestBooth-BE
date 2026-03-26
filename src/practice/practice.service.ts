@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { BookingsService } from '../bookings/bookings.service';
+import { PointsService } from '../points/points.service';
 import type { Prisma } from '@prisma/client';
 import type { CreatePracticeSessionDto, SubmitPracticeAnswerDto } from './dto/practice.dto';
 
@@ -15,7 +16,19 @@ export class PracticeService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly bookingsService: BookingsService,
+    private readonly pointsService: PointsService,
   ) {}
+
+  private calculatePracticeCompletionPoints(score: number, maxScore: number | null): number {
+    if (!maxScore || maxScore <= 0) {
+      return 2;
+    }
+
+    const ratio = Math.max(0, Math.min(1, score / maxScore));
+    // Formula: 2 + 8 * performance ratio, rounded to integer and capped to [2, 10]
+    const computed = Math.round(2 + 8 * ratio);
+    return Math.max(2, Math.min(10, computed));
+  }
 
   /**
    * Auto-generate a new practice session based on student config
@@ -293,11 +306,32 @@ export class PracticeService {
       },
     });
 
-    // Award +5 points for completing a practice session
-    await this.prisma.user.update({
-      where: { id: userId },
-      data: { totalPoints: { increment: 5 } }
+    const practicePoints = this.calculatePracticeCompletionPoints(totalScore, session.maxScore);
+    const linkedBooking = await this.prisma.booking.findFirst({
+      where: { practiceSessionId: sessionId },
+      select: { id: true },
     });
+
+    if (linkedBooking) {
+      const existing = await this.prisma.pointTransaction.findFirst({
+        where: {
+          userId,
+          type: 'PRACTICE_ATTENDANCE',
+          bookingId: linkedBooking.id,
+        },
+        select: { id: true },
+      });
+
+      if (!existing) {
+        await this.pointsService.addTransaction(
+          userId,
+          'PRACTICE_ATTENDANCE',
+          practicePoints,
+          `Hoàn thành luyện tập: ${totalScore}/${session.maxScore ?? 0}`,
+          { bookingId: linkedBooking.id },
+        );
+      }
+    }
 
     return updatedSession;
   }

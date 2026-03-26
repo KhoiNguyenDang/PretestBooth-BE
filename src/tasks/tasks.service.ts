@@ -62,9 +62,16 @@ export class TasksService {
    */
   @Cron(CronExpression.EVERY_MINUTE)
   async handleBookingAutoCheckout() {
-    const count = await this.bookingsService.autoCheckOutExpiredBookings();
-    if (count > 0) {
-      this.logger.log(`Auto checked out ${count} expired booking(s).`);
+    const checkedOutCount = await this.bookingsService.autoCheckOutExpiredBookings();
+    if (checkedOutCount > 0) {
+      this.logger.log(`Auto checked out ${checkedOutCount} expired booking(s).`);
+    }
+
+    const noShowResult = await this.bookingsService.autoMarkNoShowAndApplyPenalty();
+    if (noShowResult.markedCount > 0) {
+      this.logger.log(
+        `Auto marked ${noShowResult.markedCount} booking(s) as NO_SHOW and applied ${noShowResult.penalizedCount} penalty transaction(s).`,
+      );
     }
   }
 }
