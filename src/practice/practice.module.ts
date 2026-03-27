@@ -3,9 +3,10 @@ import { PracticeController } from './practice.controller';
 import { PracticeService } from './practice.service';
 import { PrismaModule } from '../prisma/prisma.module';
 import { BookingsModule } from '../bookings/bookings.module';
+import { PointsModule } from '../points/points.module';
 
 @Module({
-  imports: [PrismaModule, BookingsModule],
+  imports: [PrismaModule, BookingsModule, PointsModule],
   controllers: [PracticeController],
   providers: [PracticeService],
 })

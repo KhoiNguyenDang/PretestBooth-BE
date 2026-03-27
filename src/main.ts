@@ -5,7 +5,7 @@ import { TransformInterceptor } from './common/interceptors/transform.intercepto
 async function bootstrap() {
   const preferredPort = Number.parseInt(process.env.PORT ?? '3000', 10);
   const defaultPort = Number.isNaN(preferredPort) ? 3000 : preferredPort;
-  const fallbackPort = defaultPort === 3000 ? 3002 : defaultPort + 1;
+  const fallbackPort = defaultPort + 1;
   const app = await NestFactory.create(AppModule);
   app.setGlobalPrefix('api');
 

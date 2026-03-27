@@ -10,6 +10,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ExecutionService } from '../execution/execution.service';
 import { SubmissionsService } from '../submissions/submissions.service';
 import { BookingsService } from '../bookings/bookings.service';
+import { PointsService } from '../points/points.service';
 import { Prisma } from '@prisma/client';
 import * as crypto from 'crypto';
 import { shuffleWithSeed } from './utils/shuffle';
@@ -50,7 +51,51 @@ export class ExamsService {
     private readonly executionService: ExecutionService,
     private readonly submissionsService: SubmissionsService,
     private readonly bookingsService: BookingsService,
+    private readonly pointsService: PointsService,
   ) {}
+
+  private calculateExamCompletionPoints(score: number, maxScore: number | null): number {
+    if (!maxScore || maxScore <= 0) {
+      return 5;
+    }
+
+    const ratio = Math.max(0, Math.min(1, score / maxScore));
+    // Formula: 5 + 15 * performance ratio, rounded to integer and capped to [5, 20]
+    const computed = Math.round(5 + 15 * ratio);
+    return Math.max(5, Math.min(20, computed));
+  }
+
+  private async syncExamCompletionPoints(
+    sessionId: string,
+    userId: string,
+    score: number,
+    maxScore: number | null,
+  ) {
+    const targetPoints = this.calculateExamCompletionPoints(score, maxScore);
+    const existingTransactions = await this.prisma.pointTransaction.findMany({
+      where: {
+        userId,
+        type: 'EXAM_COMPLETION',
+        examSessionId: sessionId,
+      },
+      select: { points: true },
+    });
+
+    const currentlyAwarded = existingTransactions.reduce((sum, tx) => sum + tx.points, 0);
+    const delta = targetPoints - currentlyAwarded;
+
+    if (delta === 0) {
+      return;
+    }
+
+    await this.pointsService.addTransaction(
+      userId,
+      'EXAM_COMPLETION',
+      delta,
+      `Điều chỉnh điểm hoàn thành bài thi: ${score}/${maxScore ?? 0}`,
+      { examSessionId: sessionId },
+    );
+  }
 
   // ==================== EXAM CRUD ====================
 
@@ -866,6 +911,8 @@ export class ExamsService {
       });
     });
 
+    await this.syncExamCompletionPoints(sessionId, session.userId, totalScore, session.maxScore);
+
     return this.getSessionResult(sessionId, userId);
   }
 
@@ -960,7 +1007,7 @@ export class ExamsService {
     }
 
     // Update grades in a transaction
-    await this.prisma.$transaction(async (tx) => {
+    const gradingSummary = await this.prisma.$transaction(async (tx) => {
       for (const item of dto.items) {
         await tx.examSessionAnswer.update({
           where: {
@@ -988,7 +1035,16 @@ export class ExamsService {
           status: allGraded ? 'GRADED' : 'SUBMITTED',
         },
       });
+
+      return { totalScore };
     });
+
+    await this.syncExamCompletionPoints(
+      sessionId,
+      session.userId,
+      gradingSummary.totalScore,
+      session.maxScore,
+    );
 
     return this.getSessionResult(sessionId, userId, userRole);
   }

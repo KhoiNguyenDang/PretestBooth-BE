@@ -10,6 +10,7 @@ import { BoothsService } from '../booths/booths.service';
 import type { CreateBookingDto, QueryBookingDto } from './dto/booking.dto';
 import type { Prisma, BookingStatus, BookingType } from '@prisma/client';
 import { RealtimeService } from '../realtime/realtime.service';
+import { PointsService } from '../points/points.service';
 
 @Injectable()
 export class BookingsService {
@@ -17,6 +18,7 @@ export class BookingsService {
     private readonly prisma: PrismaService,
     private readonly boothsService: BoothsService,
     private readonly realtimeService: RealtimeService,
+    private readonly pointsService: PointsService,
   ) {}
 
   private getCheckInEarlyMinutes() {
@@ -593,5 +595,62 @@ export class BookingsService {
     }
 
     return result.count;
+  }
+
+  /**
+   * Mark expired confirmed bookings as NO_SHOW and apply penalty points.
+   */
+  async autoMarkNoShowAndApplyPenalty() {
+    const now = this.getNowInVietnamConvention();
+
+    const noShowCandidates = await this.prisma.booking.findMany({
+      where: {
+        status: 'CONFIRMED',
+        endTime: { lt: now },
+      },
+      select: {
+        id: true,
+        userId: true,
+        type: true,
+        startTime: true,
+        endTime: true,
+      },
+    });
+
+    if (noShowCandidates.length === 0) {
+      return { markedCount: 0, penalizedCount: 0 };
+    }
+
+    await this.prisma.booking.updateMany({
+      where: { id: { in: noShowCandidates.map((booking) => booking.id) } },
+      data: { status: 'NO_SHOW' },
+    });
+
+    let penalizedCount = 0;
+    for (const booking of noShowCandidates) {
+      const existingPenalty = await this.prisma.pointTransaction.findFirst({
+        where: {
+          userId: booking.userId,
+          type: 'NO_SHOW_PENALTY',
+          bookingId: booking.id,
+        },
+        select: { id: true },
+      });
+
+      if (existingPenalty) {
+        continue;
+      }
+
+      await this.pointsService.addTransaction(
+        booking.userId,
+        'NO_SHOW_PENALTY',
+        -8,
+        `Vắng mặt ca ${booking.type}: ${this.formatUtcDateTime(booking.startTime)} - ${this.formatUtcDateTime(booking.endTime)}`,
+        { bookingId: booking.id },
+      );
+      penalizedCount++;
+    }
+
+    return { markedCount: noShowCandidates.length, penalizedCount };
   }
 }
