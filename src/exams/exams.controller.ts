@@ -135,6 +135,14 @@ export class ExamsController {
     return this.examsService.submitSession(sessionId, userId);
   }
 
+  @Post('sessions/:sessionId/auto-submit')
+  @HttpCode(HttpStatus.OK)
+  autoSubmitSession(@Param('sessionId') sessionId: string, @Req() req) {
+    const userId = req.user['sub'];
+    // Same implementation as submitSession but called automatically when time expires
+    return this.examsService.submitSession(sessionId, userId);
+  }
+
   @Get('sessions/:sessionId/results')
   getSessionResults(@Param('sessionId') sessionId: string, @Req() req) {
     const userId = req.user['sub'];

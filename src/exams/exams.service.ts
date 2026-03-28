@@ -54,6 +54,19 @@ export class ExamsService {
     private readonly pointsService: PointsService,
   ) {}
 
+  /**
+   * Check if a session has exceeded its time limit
+   * @param session - ExamSession to check
+   * @param durationMinutes - Exam duration in minutes (from exam.duration)
+   * @returns true if session time has expired
+   */
+  private isSessionExpired(session: { startedAt: Date; expiresAt?: Date }, durationMinutes: number): boolean {
+    const now = Date.now();
+    // If expiresAt is set, use it; otherwise calculate from startedAt
+    const deadline = session.expiresAt ? session.expiresAt.getTime() : session.startedAt.getTime() + durationMinutes * 60 * 1000;
+    return now > deadline;
+  }
+
   private calculateExamCompletionPoints(score: number, maxScore: number | null): number {
     if (!maxScore || maxScore <= 0) {
       return 5;
@@ -610,9 +623,14 @@ export class ExamsService {
     if (activeBooking.examSessionId) {
       const linkedSession = await this.prisma.examSession.findUnique({
         where: { id: activeBooking.examSessionId },
+        include: { exam: true },
       });
 
       if (linkedSession && linkedSession.status !== 'SUBMITTED' && linkedSession.status !== 'GRADED') {
+        // Check if session has expired
+        if (this.isSessionExpired(linkedSession, linkedSession.exam.duration)) {
+          throw new ConflictException('Thời gian làm bài đã hết, không thể tiếp tục');
+        }
         return this.getSessionData(linkedSession.id, userId);
       }
     }
@@ -636,11 +654,16 @@ export class ExamsService {
     // Check if there's an existing session
     const existingSession = await this.prisma.examSession.findUnique({
       where: { examId_userId: { examId, userId } },
+      include: { exam: true },
     });
 
     if (existingSession) {
       if (existingSession.status === 'SUBMITTED' || existingSession.status === 'GRADED') {
         throw new ConflictException('Bạn đã hoàn thành đề thi này rồi');
+      }
+      // Check if session has expired
+      if (this.isSessionExpired(existingSession, existingSession.exam.duration)) {
+        throw new ConflictException('Thời gian làm bài đã hết, không thể tiếp tục');
       }
       // Resume existing session
       return this.getSessionData(existingSession.id, userId);
@@ -649,12 +672,15 @@ export class ExamsService {
     // Generate random seed
     const seed = crypto.randomInt(0, 2147483647);
 
-    // Create new session
+    // Create new session with expiresAt deadline
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + exam.duration * 60 * 1000);
     const session = await this.prisma.examSession.create({
       data: {
         examId,
         userId,
         seed,
+        expiresAt,
         maxScore: exam.items.reduce((sum, item) => sum + item.points, 0),
       },
     });
@@ -692,6 +718,11 @@ export class ExamsService {
     if (!session) throw new NotFoundException('Phiên thi không tồn tại');
     if (session.userId !== userId)
       throw new ForbiddenException('Bạn không có quyền xem phiên thi này');
+
+    // Check if session has expired
+    if (this.isSessionExpired(session, session.exam.duration)) {
+      throw new ConflictException('Thời gian làm bài đã hết');
+    }
 
     return this.buildShuffledSession(session, session.exam, session.answers);
   }
@@ -788,6 +819,11 @@ export class ExamsService {
       throw new ForbiddenException('Bạn không có quyền nộp phiên thi này');
     if (session.status !== 'IN_PROGRESS') {
       throw new BadRequestException('Phiên thi đã được nộp rồi');
+    }
+
+    // Check if session has expired
+    if (this.isSessionExpired(session, session.exam.duration)) {
+      throw new ConflictException('Bạn đã nộp quá hạn giờ quy định');
     }
 
     // Auto-score MC questions + auto-grade coding problems

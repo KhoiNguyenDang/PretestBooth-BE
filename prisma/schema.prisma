@@ -449,6 +449,7 @@ model ExamSession {
   
   // Timing
   startedAt  DateTime         @default(now())
+  expiresAt  DateTime         // Session deadline (startedAt + exam.duration * 60 seconds)
   finishedAt DateTime?
   
   // Scoring
@@ -468,6 +469,7 @@ model ExamSession {
   @@index([examId])
   @@index([userId])
   @@index([status])
+  @@index([expiresAt])
 }
 
 // ExamSessionAnswer - each answer in a session
