@@ -77,6 +77,8 @@ export class AuthService {
       id: user.id,
       email: user.email,
       role: user.role,
+      isEmailVerified: user.isEmailVerified,
+      kycStatus: user.kycStatus,
     });
   }
 
@@ -118,6 +120,8 @@ export class AuthService {
         email: user.email,
         name: user.name || undefined,
         role: user.role,
+        isEmailVerified: user.isEmailVerified,
+        kycStatus: user.kycStatus,
       }),
     });
   }
@@ -134,7 +138,7 @@ export class AuthService {
     }
 
     const booth = await this.boothsService.validateBoothSessionToken(boothSessionToken);
-    const checkedInBooking = await this.bookingsService.autoCheckInByBooth(user.id, booth.id);
+    const bookingForCheckin = await this.bookingsService.getPendingCheckInByBooth(user.id, booth.id);
 
     const tokens = await this.generateTokens(user.id, user.role);
 
@@ -153,6 +157,8 @@ export class AuthService {
           email: user.email,
           name: user.name || undefined,
           role: user.role,
+          isEmailVerified: user.isEmailVerified,
+          kycStatus: user.kycStatus,
         }),
       }),
       booth: {
@@ -160,7 +166,8 @@ export class AuthService {
         code: booth.code || booth.name,
         name: booth.name,
       },
-      checkedInBooking,
+      checkedInBooking: bookingForCheckin.status === 'CHECKED_IN' ? bookingForCheckin : null,
+      pendingCheckinBooking: bookingForCheckin.status === 'CHECKED_IN' ? null : bookingForCheckin,
     };
   }
 
@@ -281,6 +288,8 @@ export class AuthService {
       email: user.email,
       name: user.name || undefined,
       role: user.role,
+      isEmailVerified: user.isEmailVerified,
+      kycStatus: user.kycStatus,
     });
   }
 
@@ -370,6 +379,8 @@ export class AuthService {
       id: user.id,
       email: user.email,
       role: user.role,
+      isEmailVerified: user.isEmailVerified,
+      kycStatus: user.kycStatus,
     });
   }
 

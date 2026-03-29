@@ -83,6 +83,13 @@ export class BookingsService {
       throw new ForbiddenException('Tài khoản đã bị khóa, không thể đặt lịch');
     }
 
+    const hasFaceEmbedding = Array.isArray(user.faceEmbedding) && user.faceEmbedding.length > 0;
+    if (user.kycStatus !== 'VERIFIED' || !hasFaceEmbedding) {
+      throw new ForbiddenException(
+        'Bạn cần hoàn tất xác thực khuôn mặt (KYC) trước khi đặt lịch sử dụng booth',
+      );
+    }
+
     const bookingDate = new Date(dto.date);
     const startTime = new Date(dto.startTime);
     const endTime = new Date(dto.endTime);
@@ -345,6 +352,45 @@ export class BookingsService {
 
   async autoCheckInByBooth(userId: string, boothId: string) {
     const now = this.getNowInVietnamConvention();
+
+    const booking = await this.getPendingCheckInByBooth(userId, boothId);
+    if (booking.status === 'CHECKED_IN') {
+      return booking;
+    }
+
+    const checkedInBooking = await this.prisma.booking.update({
+      where: { id: booking.id },
+      data: {
+        status: 'CHECKED_IN',
+        checkedInAt: now,
+      },
+    });
+
+    this.realtimeService.bookingCheckin({
+      bookingId: checkedInBooking.id,
+      boothId: checkedInBooking.boothId,
+      userId: checkedInBooking.userId,
+      status: 'CHECKED_IN',
+      type: checkedInBooking.type,
+      startTime: checkedInBooking.startTime.toISOString(),
+      endTime: checkedInBooking.endTime.toISOString(),
+      checkedInAt: checkedInBooking.checkedInAt?.toISOString(),
+      emittedAt: new Date().toISOString(),
+    });
+
+    this.realtimeService.notify({
+      userId: checkedInBooking.userId,
+      boothId: checkedInBooking.boothId,
+      message: 'Check-in thành công. Phiên sử dụng booth đã bắt đầu.',
+      level: 'success',
+      emittedAt: new Date().toISOString(),
+    });
+
+    return checkedInBooking;
+  }
+
+  async getPendingCheckInByBooth(userId: string, boothId: string) {
+    const now = this.getNowInVietnamConvention();
     const earlyMs = this.getCheckInEarlyMinutes() * 60 * 1000;
     const lateMs = this.getCheckInLateMinutes() * 60 * 1000;
 
@@ -448,39 +494,7 @@ export class BookingsService {
       throw new ForbiddenException('Không có booking hợp lệ theo booth và khung giờ để check-in');
     }
 
-    if (booking.status === 'CHECKED_IN') {
-      return booking;
-    }
-
-    const checkedInBooking = await this.prisma.booking.update({
-      where: { id: booking.id },
-      data: {
-        status: 'CHECKED_IN',
-        checkedInAt: now,
-      },
-    });
-
-    this.realtimeService.bookingCheckin({
-      bookingId: checkedInBooking.id,
-      boothId: checkedInBooking.boothId,
-      userId: checkedInBooking.userId,
-      status: 'CHECKED_IN',
-      type: checkedInBooking.type,
-      startTime: checkedInBooking.startTime.toISOString(),
-      endTime: checkedInBooking.endTime.toISOString(),
-      checkedInAt: checkedInBooking.checkedInAt?.toISOString(),
-      emittedAt: new Date().toISOString(),
-    });
-
-    this.realtimeService.notify({
-      userId: checkedInBooking.userId,
-      boothId: checkedInBooking.boothId,
-      message: 'Check-in thành công. Phiên sử dụng booth đã bắt đầu.',
-      level: 'success',
-      emittedAt: new Date().toISOString(),
-    });
-
-    return checkedInBooking;
+    return booking;
   }
 
   /**

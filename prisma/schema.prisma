@@ -27,11 +27,23 @@ model User {
   createdAt               DateTime           @default(now())
   updatedAt               DateTime           @updatedAt
   className               String?
+  kycStatus               KycStatus          @default(NOT_STARTED)
+  kycRegisteredAt         DateTime?
+  kycVerifiedAt           DateTime?
+  kycLastAttemptAt        DateTime?
+  kycConsentVersion       String?
+  kycConsentedAt          DateTime?
+  faceEmbedding           Json?
+  faceEmbeddingModel      String?
+  faceEmbeddingVersion    String?
+  faceEmbeddingNorm       Float?
+  faceEmbeddingUpdatedAt  DateTime?
   bookings                Booking[]
   boothStatusLogs         BoothStatusLog[]
   createdExams            Exam[]             @relation("ExamCreator")
   examSessions            ExamSession[]
   pointTransactions       PointTransaction[]
+  bookingCheckinAttempts  BookingCheckinAttempt[]
   practiceSessions        PracticeSession[]
   createdProblems         Problem[]          @relation("ProblemCreator")
   createdQuestions        Question[]         @relation("QuestionCreator")
@@ -42,6 +54,7 @@ model User {
   @@index([role])
   @@index([isEmailVerified])
   @@index([isLocked])
+  @@index([kycStatus])
 }
 
 model Problem {
@@ -392,10 +405,16 @@ model Booking {
   status            BookingStatus @default(PENDING)
   checkedInAt       DateTime?
   checkedOutAt      DateTime?
+  checkinStatus         CheckinStatus @default(PENDING)
+  checkinSimilarityScore Float?
+  checkinThreshold      Float         @default(0.85)
+  checkinVerifiedAt     DateTime?
+  checkinAttemptCount   Int           @default(0)
   
   // Relations - exam/practice sessions that reference this booking
   examSessions      ExamSession[]      @relation("ExamSessionBooking")
   practiceSessions  PracticeSession[]  @relation("PracticeSessionBooking")
+  checkinAttempts   BookingCheckinAttempt[]
   
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
@@ -408,6 +427,26 @@ model Booking {
   @@index([date, startTime])
   @@index([status])
   @@index([boothId, startTime, endTime])
+  @@index([checkinStatus])
+}
+
+model BookingCheckinAttempt {
+  id              String   @id @default(uuid())
+  bookingId       String
+  userId          String
+  similarityScore Float
+  threshold       Float    @default(0.85)
+  isMatch         Boolean
+  livenessPassed  Boolean  @default(true)
+  failReason      String?
+  verifierDeviceId String?
+  createdAt       DateTime @default(now())
+  booking         Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([bookingId, createdAt])
+  @@index([userId, createdAt])
+  @@index([isMatch])
 }
 
 model PointTransaction {
@@ -570,6 +609,19 @@ enum BookingStatus {
   COMPLETED
   CANCELLED
   NO_SHOW
+}
+
+enum KycStatus {
+  NOT_STARTED
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum CheckinStatus {
+  PENDING
+  PASSED
+  FAILED
 }
 
 enum PointType {

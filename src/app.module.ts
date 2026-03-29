@@ -18,6 +18,8 @@ import { TasksModule } from './tasks/tasks.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { BookingDurationsModule } from './booking-durations/booking-durations.module';
 import { RealtimeModule } from './realtime/realtime.module';
+import { KycModule } from './kyc/kyc.module';
+import { CheckinModule } from './checkin/checkin.module';
 
 @Module({
   imports: [
@@ -40,6 +42,8 @@ import { RealtimeModule } from './realtime/realtime.module';
     DashboardModule,
     BookingDurationsModule,
     RealtimeModule,
+    KycModule,
+    CheckinModule,
   ],
 })
 export class AppModule {}

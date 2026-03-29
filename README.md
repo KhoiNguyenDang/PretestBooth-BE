@@ -96,3 +96,39 @@ Nest is an MIT-licensed open source project. It can grow thanks to the sponsors 
 ## License
 
 Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+
+## Facial KYC Real Embedding Service
+
+This project now supports real face embedding extraction via a Python microservice.
+
+### 1) Configure backend env
+
+Use `.env.example` as reference and ensure these keys are set in `.env`:
+
+- `FACE_EMBEDDING_SERVICE_URL=http://localhost:8010/v1/embeddings`
+- `FACE_EMBEDDING_SERVICE_API_KEY=change-me-face-key`
+- `FACE_EMBEDDING_USE_MOCK=false`
+- `FACE_EMBEDDING_DIM=512`
+
+### 2) Start embedding service (Docker)
+
+```bash
+docker compose -f docker-compose.face-embedding.yml up --build
+```
+
+### 3) Start embedding service (Python local)
+
+```powershell
+Set-Location services/face-embedding-service
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+$env:FACE_EMBEDDING_API_KEY = "change-me-face-key"
+uvicorn app.main:app --host 0.0.0.0 --port 8010
+```
+
+Service health check:
+
+```bash
+curl http://localhost:8010/health
+```

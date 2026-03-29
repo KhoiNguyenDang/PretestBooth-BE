@@ -1,0 +1,12 @@
+services:
+  face-embedding:
+    build:
+      context: ./services/face-embedding-service
+    container_name: pretestbooth-face-embedding
+    ports:
+      - "8010:8010"
+    environment:
+      FACE_EMBEDDING_API_KEY: ${FACE_EMBEDDING_SERVICE_API_KEY:-change-me-face-key}
+      INSIGHTFACE_MODEL_NAME: buffalo_l
+      INSIGHTFACE_MODEL_VERSION: "1"
+      INSIGHTFACE_DET_SIZE: "640"

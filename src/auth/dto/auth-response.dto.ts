@@ -14,6 +14,12 @@ export class UserResponseDto {
   @Expose()
   role: string;
 
+  @Expose()
+  isEmailVerified?: boolean;
+
+  @Expose()
+  kycStatus?: 'NOT_STARTED' | 'PENDING' | 'VERIFIED' | 'REJECTED';
+
   constructor(partial: Partial<UserResponseDto>) {
     Object.assign(this, partial);
   }
