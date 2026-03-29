@@ -7,42 +7,36 @@ datasource db {
 }
 
 model User {
-  id        String   @id @default(uuid())
-  email     String   @unique
-  name      String?  // User's full name
-  password  String
-  studentCode String?  @unique
-  className   String?
-  role      Role     @default(STUDENT)
-  refreshToken  String?
-  isEmailVerified Boolean @default(false)
-  emailVerificationToken String?
+  id                      String             @id @default(uuid())
+  email                   String             @unique
+  name                    String?
+  password                String
+  studentCode             String?            @unique
+  role                    Role               @default(STUDENT)
+  refreshToken            String?
+  isEmailVerified         Boolean            @default(false)
+  emailVerificationToken  String?
   emailVerificationExpiry DateTime?
-  resetPasswordCode String?
-  resetPasswordExpiry DateTime?
-  
-  // Account management
-  isLocked      Boolean   @default(false)
-  lockedAt      DateTime?
-  lockedReason  String?
-  dateOfBirth   DateTime? @db.Date  // For default password generation (DDMM)
-  totalPoints   Int       @default(0)
-  
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  
-  // Relations
-  createdProblems   Problem[]           @relation("ProblemCreator")
-  createdQuestions  Question[]          @relation("QuestionCreator")
-  submissions       Submission[]
-  createdExams      Exam[]              @relation("ExamCreator")
-  examSessions      ExamSession[]
-  bookings          Booking[]
-  boothStatusLogs   BoothStatusLog[]
-  pointTransactions PointTransaction[]
-  practiceSessions  PracticeSession[]
-  
-  // Indexes for common queries
+  resetPasswordCode       String?
+  resetPasswordExpiry     DateTime?
+  isLocked                Boolean            @default(false)
+  lockedAt                DateTime?
+  lockedReason            String?
+  dateOfBirth             DateTime?          @db.Date
+  totalPoints             Int                @default(0)
+  createdAt               DateTime           @default(now())
+  updatedAt               DateTime           @updatedAt
+  className               String?
+  bookings                Booking[]
+  boothStatusLogs         BoothStatusLog[]
+  createdExams            Exam[]             @relation("ExamCreator")
+  examSessions            ExamSession[]
+  pointTransactions       PointTransaction[]
+  practiceSessions        PracticeSession[]
+  createdProblems         Problem[]          @relation("ProblemCreator")
+  createdQuestions        Question[]         @relation("QuestionCreator")
+  submissions             Submission[]
+
   @@index([email])
   @@index([studentCode])
   @@index([role])
@@ -50,72 +44,39 @@ model User {
   @@index([isLocked])
 }
 
-enum Role {
-  STUDENT
-  LECTURER
-  ADMIN
-}
-
-// Problem difficulty levels (like LeetCode)
-enum Difficulty {
-  EASY
-  MEDIUM
-  HARD
-}
-
-// Problem model for coding challenges
 model Problem {
-  id          String     @id @default(uuid())
-  title       String
-  slug        String     @unique
-  description String     @db.Text
-  difficulty  Difficulty @default(MEDIUM)
-  
-  // Code templates for different languages
-  starterCode Json?      // { "javascript": "function solve() {}", "python": "def solve():", ... }
-  
-  // Constraints and hints
-  constraints String?    @db.Text
-  hints       String[]   // Array of hints
-  
-  // Problem metadata
-  timeLimit   Int        @default(1000)  // in milliseconds
-  memoryLimit Int        @default(256)   // in MB
+  id                  String                @id @default(uuid())
+  title               String
+  slug                String                @unique
+  description         String
+  difficulty          Difficulty            @default(MEDIUM)
+  starterCode         Json?
+  constraints         String?
+  hints               String[]
+  timeLimit           Int                   @default(1000)
+  memoryLimit         Int                   @default(256)
+  functionName        String                @default("solution")
+  inputTypes          String[]              @default([])
+  outputType          String                @default("void")
+  argNames            String[]              @default([])
+  totalSubmissions    Int                   @default(0)
+  acceptedSubmissions Int                   @default(0)
+  isPublished         Boolean               @default(false)
+  subjectId           String?
+  topicId             String?
+  categoryId          String?
+  creatorId           String
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+  examItems           ExamItem[]            @relation("ProblemExamItems")
+  practiceItems       PracticeSessionItem[]
+  category            Category?             @relation(fields: [categoryId], references: [id])
+  creator             User                  @relation("ProblemCreator", fields: [creatorId], references: [id])
+  subject             Subject?              @relation(fields: [subjectId], references: [id])
+  topic               Topic?                @relation(fields: [topicId], references: [id])
+  submissions         Submission[]
+  testCases           TestCase[]
 
-  // Function signature metadata for driver code generation
-  functionName String   @default("solution")
-  inputTypes   String[] @default([])
-  outputType   String   @default("void")
-  argNames     String[] @default([])
-  
-  // Stats
-  totalSubmissions Int   @default(0)
-  acceptedSubmissions Int @default(0)
-  
-  // Status
-  isPublished Boolean    @default(false)
-  
-  // Classification (optional - links to question bank subjects/topics)
-  subjectId   String?
-  subject     Subject?   @relation(fields: [subjectId], references: [id])
-  topicId     String?
-  topic       Topic?     @relation(fields: [topicId], references: [id])
-  
-  // Classification (Category tree - parallel)
-  categoryId  String?
-  category    Category?  @relation(fields: [categoryId], references: [id])
-  
-  // Relations
-  creatorId   String
-  creator     User       @relation("ProblemCreator", fields: [creatorId], references: [id])
-  testCases   TestCase[]
-  submissions Submission[]
-  examItems   ExamItem[]  @relation("ProblemExamItems")
-  practiceItems PracticeSessionItem[]
-  
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
-  
   @@index([difficulty])
   @@index([isPublished])
   @@index([creatorId])
@@ -124,39 +85,441 @@ model Problem {
   @@index([categoryId])
 }
 
-// TestCase model with hidden test cases support
 model TestCase {
-  id          String   @id @default(uuid())
-  
-  // Test case data
-  input       String   @db.Text
-  expectedOutput String @db.Text
-  
-  // Explanation shown to users (only for visible test cases)
-  explanation String?  @db.Text
-  
-  // Hidden test case flag (like LeetCode)
-  isHidden    Boolean  @default(false)
-  
-  // Sample test case (shown in problem description)
-  isSample    Boolean  @default(false)
-  
-  // Order of test case
-  order       Int      @default(0)
-  
-  // Relations
-  problemId   String
-  problem     Problem  @relation(fields: [problemId], references: [id], onDelete: Cascade)
-  
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  
+  id             String   @id @default(uuid())
+  input          String
+  expectedOutput String
+  explanation    String?
+  isHidden       Boolean  @default(false)
+  isSample       Boolean  @default(false)
+  order          Int      @default(0)
+  problemId      String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  problem        Problem  @relation(fields: [problemId], references: [id], onDelete: Cascade)
+
   @@index([problemId])
   @@index([isHidden])
   @@index([isSample])
 }
 
-// Submission status enum
+model Submission {
+  id              String           @id @default(uuid())
+  language        String
+  languageVersion String?
+  sourceCode      String
+  status          SubmissionStatus @default(PENDING)
+  totalTestCases  Int              @default(0)
+  passedTestCases Int              @default(0)
+  failedTestCases Int              @default(0)
+  executionTime   Int?
+  networkTime     Int?
+  totalTime       Int?
+  compileOutput   String?
+  errorMessage    String?
+  testCaseResults Json?
+  userId          String
+  problemId       String
+  createdAt       DateTime         @default(now())
+  problem         Problem          @relation(fields: [problemId], references: [id], onDelete: Cascade)
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([problemId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([userId, problemId])
+}
+
+model Subject {
+  id          String     @id @default(uuid())
+  name        String     @unique
+  description String?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  exams       Exam[]
+  problems    Problem[]
+  questions   Question[]
+  topics      Topic[]
+}
+
+model Topic {
+  id        String     @id @default(uuid())
+  name      String
+  subjectId String
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  exams     Exam[]
+  problems  Problem[]
+  questions Question[]
+  subject   Subject    @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+
+  @@unique([subjectId, name])
+  @@index([subjectId])
+}
+
+model Question {
+  id             String                @id @default(uuid())
+  content        String
+  questionType   QuestionType          @default(SINGLE_CHOICE)
+  difficulty     Difficulty            @default(MEDIUM)
+  correctAnswer  String?
+  explanation    String?
+  isPublished    Boolean               @default(false)
+  lastReviewedAt DateTime?
+  reviewNotes    String?
+  qualityScore   Int?
+  usageCount     Int                   @default(0)
+  estimatedTime  Int?
+  subjectId      String
+  topicId        String?
+  categoryId     String?
+  creatorId      String
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+  examItems      ExamItem[]            @relation("QuestionExamItems")
+  practiceItems  PracticeSessionItem[]
+  category       Category?             @relation(fields: [categoryId], references: [id])
+  creator        User                  @relation("QuestionCreator", fields: [creatorId], references: [id])
+  subject        Subject               @relation(fields: [subjectId], references: [id])
+  topic          Topic?                @relation(fields: [topicId], references: [id])
+  choices        QuestionChoice[]
+
+  @@index([questionType])
+  @@index([difficulty])
+  @@index([isPublished])
+  @@index([subjectId])
+  @@index([topicId])
+  @@index([categoryId])
+  @@index([creatorId])
+}
+
+model QuestionChoice {
+  id         String   @id @default(uuid())
+  content    String
+  isCorrect  Boolean  @default(false)
+  order      Int      @default(0)
+  questionId String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@index([questionId])
+}
+
+model Exam {
+  id                                String         @id @default(uuid())
+  title                             String
+  description                       String?
+  // Exam type: determines who can access (practice bookers vs exam bookers)
+  type                              BookingType    @default(EXAM)
+  questionCount                     Int            @default(0)
+  problemCount                      Int            @default(0)
+  duration                          Int            @default(60)
+  difficulty                        Difficulty?
+  includeProblemsRelatedToQuestions Boolean        @default(false)
+  shuffleQuestions                  Boolean        @default(true)
+  shuffleChoices                    Boolean        @default(true)
+  subjectId                         String?
+  topicId                           String?
+  isPublished                       Boolean        @default(false)
+  creatorId                         String
+  createdAt                         DateTime       @default(now())
+  updatedAt                         DateTime       @updatedAt
+  visibility                        ExamVisibility @default(PRIVATE)
+  publishAt                         DateTime?
+  publishedAt                       DateTime?
+  creator                           User           @relation("ExamCreator", fields: [creatorId], references: [id])
+  subject                           Subject?       @relation(fields: [subjectId], references: [id])
+  topic                             Topic?         @relation(fields: [topicId], references: [id])
+  items                             ExamItem[]
+  sessions                          ExamSession[]
+
+  @@index([creatorId])
+  @@index([subjectId])
+  @@index([topicId])
+  @@index([isPublished])
+  @@index([visibility])
+  @@index([publishAt])
+}
+
+model ExamItem {
+  id             String              @id @default(uuid())
+  examId         String
+  questionId     String?
+  problemId      String?
+  section        ExamSection
+  order          Int                 @default(0)
+  points         Float               @default(1.0)
+  createdAt      DateTime            @default(now())
+  exam           Exam                @relation(fields: [examId], references: [id], onDelete: Cascade)
+  problem        Problem?            @relation("ProblemExamItems", fields: [problemId], references: [id])
+  question       Question?           @relation("QuestionExamItems", fields: [questionId], references: [id])
+  sessionAnswers ExamSessionAnswer[]
+
+  @@unique([examId, questionId])
+  @@unique([examId, problemId])
+  @@index([examId])
+  @@index([section])
+}
+
+model ExamSession {
+  id              String              @id @default(uuid())
+  examId          String
+  userId          String
+  bookingId       String?
+  seed            Int
+  startedAt       DateTime            @default(now())
+  finishedAt      DateTime?
+  score           Float?
+  maxScore        Float?
+  status          ExamSessionStatus   @default(IN_PROGRESS)
+  createdAt       DateTime            @default(now())
+  expiresAt       DateTime            @default(now())
+  exam            Exam                @relation(fields: [examId], references: [id], onDelete: Cascade)
+  user            User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  booking         Booking?            @relation("ExamSessionBooking", fields: [bookingId], references: [id], onDelete: SetNull)
+  answers         ExamSessionAnswer[]
+  proctoringEvents ProctoringEvent[]
+
+  @@unique([examId, userId])
+  @@index([examId])
+  @@index([userId])
+  @@index([status])
+  @@index([expiresAt])
+  @@index([bookingId])
+}
+
+model ExamSessionAnswer {
+  id                String      @id @default(uuid())
+  sessionId         String
+  examItemId        String
+  selectedChoiceIds String[]
+  textAnswer        String?
+  submissionId      String?
+  sourceCode        String?
+  language          String?
+  languageVersion   String?
+  isCorrect         Boolean?
+  score             Float?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+  examItem          ExamItem    @relation(fields: [examItemId], references: [id], onDelete: Cascade)
+  session           ExamSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, examItemId])
+  @@index([sessionId])
+  @@index([examItemId])
+}
+
+model Category {
+  id          String     @id @default(uuid())
+  name        String
+  description String?
+  level       Int        @default(0)
+  parentId    String?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  parent      Category?  @relation("CategoryTree", fields: [parentId], references: [id])
+  children    Category[] @relation("CategoryTree")
+  problems    Problem[]
+  questions   Question[]
+
+  @@unique([parentId, name])
+  @@index([parentId])
+  @@index([level])
+}
+
+model Booth {
+  id                     String           @id @default(uuid())
+  name                   String           @unique
+  description            String?
+  status                 BoothStatus      @default(ACTIVE)
+  location               String?
+  createdAt              DateTime         @default(now())
+  updatedAt              DateTime         @updatedAt
+  activationOtpAttempts  Int              @default(0)
+  activationOtpExpiresAt DateTime?
+  activationOtpHash      String?
+  activationOtpUsedAt    DateTime?
+  code                   String?          @unique
+  sessionActivatedAt     DateTime?
+  sessionTokenHash       String?
+  bookings               Booking[]
+  statusLogs             BoothStatusLog[]
+
+  @@index([status])
+}
+
+model BoothStatusLog {
+  id              String      @id @default(uuid())
+  boothId         String
+  fromStatus      BoothStatus
+  toStatus        BoothStatus
+  note            String
+  changedByUserId String?
+  changedAt       DateTime    @default(now())
+  booth           Booth       @relation(fields: [boothId], references: [id], onDelete: Cascade)
+  changedByUser   User?       @relation(fields: [changedByUserId], references: [id])
+
+  @@index([boothId, changedAt])
+  @@index([changedByUserId])
+}
+
+model BookingDurationOption {
+  id              String      @id @default(uuid())
+  type            BookingType
+  durationMinutes Int
+  isActive        Boolean     @default(true)
+  displayOrder    Int?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  @@unique([type, durationMinutes])
+  @@index([type, isActive])
+}
+
+model Booking {
+  id                String        @id @default(uuid())
+  userId            String
+  boothId           String
+  type              BookingType
+  date              DateTime      @db.Date
+  startTime         DateTime
+  endTime           DateTime
+  durationMinutes   Int
+  bufferMinutes     Int           @default(15)
+  status            BookingStatus @default(PENDING)
+  checkedInAt       DateTime?
+  checkedOutAt      DateTime?
+  
+  // Relations - exam/practice sessions that reference this booking
+  examSessions      ExamSession[]      @relation("ExamSessionBooking")
+  practiceSessions  PracticeSession[]  @relation("PracticeSessionBooking")
+  
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  
+  booth   Booth @relation(fields: [boothId], references: [id])
+  user    User  @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([boothId, date])
+  @@index([date, startTime])
+  @@index([status])
+  @@index([boothId, startTime, endTime])
+}
+
+model PointTransaction {
+  id            String    @id @default(uuid())
+  userId        String
+  type          PointType
+  points        Int
+  reason        String
+  bookingId     String?
+  examSessionId String?
+  createdAt     DateTime  @default(now())
+  user          User      @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([type])
+  @@index([createdAt])
+}
+
+model ProctoringEvent {
+  id           String      @id @default(uuid())
+  
+  // Either examSessionId or practiceSessionId should be set
+  examSessionId    String?
+  examSession      ExamSession? @relation(fields: [examSessionId], references: [id], onDelete: Cascade)
+  
+  practiceSessionId String?
+  practiceSession   PracticeSession? @relation(fields: [practiceSessionId], references: [id], onDelete: Cascade)
+  
+  eventType    String      // "TAB_SWITCH", "WINDOW_BLUR", "COPY_PASTE", "FULLSCREEN_EXIT"
+  warningLevel Int         @default(1)  // 1 = mild warning, 2 = severe, 3 = exam cancelled
+  metadata     Json?       // Additional event data
+  
+  timestamp    DateTime    @default(now())
+  
+  @@index([examSessionId])
+  @@index([practiceSessionId])
+  @@index([eventType])
+}
+
+model PracticeSession {
+  id         String                @id @default(uuid())
+  userId     String
+  bookingId  String?
+  duration   Int
+  totalItems Int
+  difficulty Difficulty?
+  subjectId  String?
+  topicId    String?
+  categoryId String?
+  startedAt  DateTime              @default(now())
+  finishedAt DateTime?
+  score      Float?
+  maxScore   Float?
+  status     PracticeSessionStatus @default(IN_PROGRESS)
+  createdAt  DateTime              @default(now())
+  user       User                  @relation(fields: [userId], references: [id])
+  booking    Booking?              @relation("PracticeSessionBooking", fields: [bookingId], references: [id], onDelete: SetNull)
+  items      PracticeSessionItem[]
+  proctoringEvents ProctoringEvent[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([bookingId])
+}
+
+model PracticeSessionItem {
+  id         String                 @id @default(uuid())
+  sessionId  String
+  questionId String?
+  problemId  String?
+  order      Int                    @default(0)
+  points     Float                  @default(1.0)
+  createdAt  DateTime               @default(now())
+  answers    PracticeSessionAnswer?
+  problem    Problem?               @relation(fields: [problemId], references: [id])
+  question   Question?              @relation(fields: [questionId], references: [id])
+  session    PracticeSession        @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+}
+
+model PracticeSessionAnswer {
+  id                String              @id @default(uuid())
+  itemId            String              @unique
+  selectedChoiceIds String[]
+  textAnswer        String?
+  sourceCode        String?
+  language          String?
+  languageVersion   String?
+  submissionId      String?
+  isCorrect         Boolean?
+  score             Float?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  item              PracticeSessionItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@index([itemId])
+}
+
+enum Role {
+  STUDENT
+  LECTURER
+  ADMIN
+}
+
+enum Difficulty {
+  EASY
+  MEDIUM
+  HARD
+}
+
 enum SubmissionStatus {
   PENDING
   ACCEPTED
@@ -167,173 +530,15 @@ enum SubmissionStatus {
   MEMORY_LIMIT_EXCEEDED
 }
 
-// Submission model for storing user code submissions
-model Submission {
-  id              String           @id @default(uuid())
-  
-  // Code submitted
-  language        String
-  languageVersion String?
-  sourceCode      String           @db.Text
-  
-  // Execution results
-  status          SubmissionStatus @default(PENDING)
-  totalTestCases  Int              @default(0)
-  passedTestCases Int              @default(0)
-  failedTestCases Int              @default(0)
-  
-  // Timing information
-  executionTime   Int?             // Total execution time in ms
-  networkTime     Int?             // Network latency in ms
-  totalTime       Int?             // Total time (execution + network) in ms
-  
-  // Error information
-  compileOutput   String?          @db.Text
-  errorMessage    String?          @db.Text
-  
-  // Detailed results for each test case (JSON array)
-  testCaseResults Json?            // Array of test case results
-  
-  // Relations
-  userId          String
-  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  problemId       String
-  problem         Problem          @relation(fields: [problemId], references: [id], onDelete: Cascade)
-  
-  createdAt       DateTime         @default(now())
-  
-  @@index([userId])
-  @@index([problemId])
-  @@index([status])
-  @@index([createdAt])
-  @@index([userId, problemId])
-}
-
-// ==================== QUESTION BANK ====================
-
-// Question type enum
 enum QuestionType {
-  SINGLE_CHOICE    // Single correct answer (ABCD)
-  MULTIPLE_CHOICE  // Multiple correct answers
-  SHORT_ANSWER     // Free-text short answer
+  SINGLE_CHOICE
+  MULTIPLE_CHOICE
+  SHORT_ANSWER
 }
 
-// Subject model for question classification
-model Subject {
-  id          String    @id @default(uuid())
-  name        String    @unique
-  description String?   @db.Text
-  
-  // Relations
-  topics      Topic[]
-  questions   Question[]
-  problems    Problem[]
-  exams       Exam[]
-  
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-}
-
-// Topic model (belongs to a Subject)
-model Topic {
-  id          String    @id @default(uuid())
-  name        String
-  
-  // Relations
-  subjectId   String
-  subject     Subject   @relation(fields: [subjectId], references: [id], onDelete: Cascade)
-  questions   Question[]
-  problems    Problem[]
-  exams       Exam[]
-  
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  
-  @@unique([subjectId, name])
-  @@index([subjectId])
-}
-
-// Question model for multiple-choice question bank
-model Question {
-  id            String       @id @default(uuid())
-  
-  // Question content
-  content       String       @db.Text
-  questionType  QuestionType @default(SINGLE_CHOICE)
-  difficulty    Difficulty   @default(MEDIUM)
-  
-  // For SHORT_ANSWER questions
-  correctAnswer String?      @db.Text
-  
-  // Explanation of the answer
-  explanation   String?      @db.Text
-  
-  // Status
-  isPublished   Boolean      @default(false)
-  
-  // Review & Quality tracking
-  lastReviewedAt DateTime?
-  reviewNotes    String?      @db.Text
-  qualityScore   Int?         // 1-5 quality rating
-  usageCount     Int          @default(0)
-  estimatedTime  Int?         // Estimated answer time in seconds
-  
-  // Classification (Subject/Topic - existing)
-  subjectId     String
-  subject       Subject      @relation(fields: [subjectId], references: [id])
-  topicId       String?
-  topic         Topic?       @relation(fields: [topicId], references: [id])
-  
-  // Classification (Category tree - parallel)
-  categoryId    String?
-  category      Category?    @relation(fields: [categoryId], references: [id])
-  
-  // Creator
-  creatorId     String
-  creator       User         @relation("QuestionCreator", fields: [creatorId], references: [id])
-  
-  // Relations
-  choices       QuestionChoice[]
-  examItems     ExamItem[]   @relation("QuestionExamItems")
-  practiceItems PracticeSessionItem[]
-  
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
-  
-  @@index([questionType])
-  @@index([difficulty])
-  @@index([isPublished])
-  @@index([subjectId])
-  @@index([topicId])
-  @@index([categoryId])
-  @@index([creatorId])
-}
-
-// QuestionChoice model for answer options
-model QuestionChoice {
-  id          String   @id @default(uuid())
-  
-  // Choice content
-  content     String   @db.Text
-  isCorrect   Boolean  @default(false)
-  order       Int      @default(0)
-  
-  // Relations
-  questionId  String
-  question    Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
-  
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  
-  @@index([questionId])
-}
-
-// ==================== EXAM SYSTEM ====================
-
-// Exam section types
 enum ExamSection {
-  QUESTION  // Multiple-choice / short-answer from question bank
-  PROBLEM   // Coding problems (LeetCode-style)
+  QUESTION
+  PROBLEM
 }
 
 enum ExamVisibility {
@@ -341,252 +546,17 @@ enum ExamVisibility {
   PUBLIC
 }
 
-// Exam session status
 enum ExamSessionStatus {
   IN_PROGRESS
   SUBMITTED
   GRADED
 }
 
-// Exam model - the exam template created by a lecturer
-model Exam {
-  id          String      @id @default(uuid())
-  title       String
-  description String?     @db.Text
-  
-  // Configuration
-  questionCount Int       @default(0)   // Number of MC/short-answer questions
-  problemCount  Int       @default(0)   // Number of coding problems
-  duration      Int       @default(60)  // Duration in minutes
-  
-  // Filtering options used during generation
-  difficulty  Difficulty?
-  includeProblemsRelatedToQuestions Boolean @default(false)
-  
-  // Shuffle settings
-  shuffleQuestions Boolean @default(true)   // Shuffle question order per student
-  shuffleChoices  Boolean @default(true)   // Shuffle answer choices per student
-  
-  // Classification
-  subjectId   String?
-  subject     Subject?   @relation(fields: [subjectId], references: [id])
-  topicId     String?
-  topic       Topic?     @relation(fields: [topicId], references: [id])
-  
-  // Status
-  isPublished Boolean    @default(false)
-  visibility  ExamVisibility @default(PRIVATE)
-  publishAt   DateTime?
-  publishedAt DateTime?
-  
-  // Creator
-  creatorId   String
-  creator     User       @relation("ExamCreator", fields: [creatorId], references: [id])
-  
-  // Relations
-  items       ExamItem[]
-  sessions    ExamSession[]
-  
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
-  
-  @@index([creatorId])
-  @@index([subjectId])
-  @@index([topicId])
-  @@index([isPublished])
-  @@index([visibility])
-  @@index([publishAt])
-}
-
-// ExamItem - a concrete item (question or problem) in an exam
-model ExamItem {
-  id        String      @id @default(uuid())
-  
-  // Which exam this belongs to
-  examId    String
-  exam      Exam        @relation(fields: [examId], references: [id], onDelete: Cascade)
-  
-  // Either a question or a problem (exactly one should be set)
-  questionId String?
-  question   Question?   @relation("QuestionExamItems", fields: [questionId], references: [id])
-  problemId  String?
-  problem    Problem?    @relation("ProblemExamItems", fields: [problemId], references: [id])
-  
-  // Section type
-  section   ExamSection
-  
-  // Canonical (unshuffled) order
-  order     Int         @default(0)
-  
-  // Points for this item
-  points    Float       @default(1.0)
-  
-  // Relations
-  sessionAnswers ExamSessionAnswer[]
-  
-  createdAt DateTime    @default(now())
-  
-  @@unique([examId, questionId])
-  @@unique([examId, problemId])
-  @@index([examId])
-  @@index([section])
-}
-
-// ExamSession - one student's attempt at an exam
-model ExamSession {
-  id        String            @id @default(uuid())
-  
-  // Which exam
-  examId    String
-  exam      Exam              @relation(fields: [examId], references: [id], onDelete: Cascade)
-  
-  // Which student
-  userId    String
-  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  // Deterministic shuffle seed
-  seed      Int
-  
-  // Timing
-  startedAt  DateTime         @default(now())
-  expiresAt  DateTime         // Session deadline (startedAt + exam.duration * 60 seconds)
-  finishedAt DateTime?
-  
-  // Scoring
-  score      Float?
-  maxScore   Float?
-  
-  // Status
-  status    ExamSessionStatus @default(IN_PROGRESS)
-  
-  // Relations
-  answers           ExamSessionAnswer[]
-  proctoringEvents  ProctoringEvent[]
-  
-  createdAt DateTime          @default(now())
-  
-  @@unique([examId, userId])
-  @@index([examId])
-  @@index([userId])
-  @@index([status])
-  @@index([expiresAt])
-}
-
-// ExamSessionAnswer - each answer in a session
-model ExamSessionAnswer {
-  id          String      @id @default(uuid())
-  
-  // Which session
-  sessionId   String
-  session     ExamSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  
-  // Which exam item
-  examItemId  String
-  examItem    ExamItem    @relation(fields: [examItemId], references: [id], onDelete: Cascade)
-  
-  // For MC questions - selected choice IDs
-  selectedChoiceIds String[]
-  
-  // For short-answer questions
-  textAnswer  String?     @db.Text
-  
-  // For coding problems - reference to submission
-  submissionId String?
-  
-  // For coding problems - store source code for deferred execution on submit
-  sourceCode      String?   @db.Text
-  language        String?
-  languageVersion String?
-  
-  // Grading
-  isCorrect   Boolean?
-  score       Float?
-  
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
-  
-  @@unique([sessionId, examItemId])
-  @@index([sessionId])
-  @@index([examItemId])
-}
-
-// ==================== HIERARCHICAL CATEGORY TREE ====================
-// Runs in parallel with existing Subject/Topic classification
-
-model Category {
-  id          String     @id @default(uuid())
-  name        String
-  description String?    @db.Text
-  level       Int        @default(0)
-  
-  // Self-referencing tree
-  parentId    String?
-  parent      Category?  @relation("CategoryTree", fields: [parentId], references: [id])
-  children    Category[] @relation("CategoryTree")
-  
-  // Relations
-  questions   Question[]
-  problems    Problem[]
-  
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
-  
-  @@unique([parentId, name])
-  @@index([parentId])
-  @@index([level])
-}
-
-// ==================== BOOTH MANAGEMENT ====================
-
 enum BoothStatus {
   ACTIVE
   MAINTENANCE
   INACTIVE
 }
-
-model Booth {
-  id          String      @id @default(uuid())
-  name        String      @unique      // "Booth 01", "Booth 02", etc.
-  code        String?     @unique      // Human-friendly booth code used for OTP activation
-  description String?
-  status      BoothStatus @default(ACTIVE)
-  location    String?                  // Room/building info
-
-  // OTP activation state (admin issues OTP, kiosk activates by booth code + OTP)
-  activationOtpHash      String?
-  activationOtpExpiresAt DateTime?
-  activationOtpUsedAt    DateTime?
-  activationOtpAttempts  Int         @default(0)
-
-  // Current active booth session
-  sessionTokenHash String?
-  sessionActivatedAt DateTime?
-  
-  bookings    Booking[]
-  statusLogs  BoothStatusLog[]
-  
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
-  
-  @@index([status])
-}
-
-model BoothStatusLog {
-  id              String      @id @default(uuid())
-  boothId         String
-  booth           Booth       @relation(fields: [boothId], references: [id], onDelete: Cascade)
-  fromStatus      BoothStatus
-  toStatus        BoothStatus
-  note            String      @db.Text
-  changedByUserId String?
-  changedByUser   User?       @relation(fields: [changedByUserId], references: [id], onDelete: SetNull)
-  changedAt       DateTime    @default(now())
-
-  @@index([boothId, changedAt])
-  @@index([changedByUserId])
-}
-
-// ==================== BOOKING / SCHEDULING ====================
 
 enum BookingType {
   PRACTICE
@@ -602,199 +572,17 @@ enum BookingStatus {
   NO_SHOW
 }
 
-model BookingDurationOption {
-  id              String      @id @default(uuid())
-  type            BookingType
-  durationMinutes Int
-  isActive        Boolean     @default(true)
-  displayOrder    Int?
-
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
-
-  @@unique([type, durationMinutes])
-  @@index([type, isActive])
-}
-
-model Booking {
-  id           String        @id @default(uuid())
-  
-  // Who & Where
-  userId       String
-  user         User          @relation(fields: [userId], references: [id])
-  boothId      String
-  booth        Booth         @relation(fields: [boothId], references: [id])
-  
-  // What & When
-  type         BookingType
-  date         DateTime      @db.Date
-  startTime    DateTime      // Full datetime for the start
-  endTime      DateTime      // Full datetime for the end
-  
-  // Status tracking
-  status       BookingStatus @default(PENDING)
-  checkedInAt  DateTime?
-  checkedOutAt DateTime?
-  
-  // Optional link to practice/exam session
-  examSessionId    String?
-  practiceSessionId String?
-  
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
-  
-  @@index([userId])
-  @@index([boothId, date])
-  @@index([date, startTime])
-  @@index([status])
-}
-
-// ==================== CUMULATIVE POINTS ====================
-
 enum PointType {
-  PRACTICE_ATTENDANCE     // + points for attending practice on time
-  EXAM_COMPLETION         // + points for completing an exam
-  NO_SHOW_PENALTY         // - points for not showing up after booking
-  PROCTORING_WARNING      // - points for proctoring violations
-  EXAM_CANCELLED_PENALTY  // - points for exam cancellation due to cheating
-  MANUAL_ADJUSTMENT       // +/- points by admin
+  PRACTICE_ATTENDANCE
+  EXAM_COMPLETION
+  NO_SHOW_PENALTY
+  PROCTORING_WARNING
+  EXAM_CANCELLED_PENALTY
+  MANUAL_ADJUSTMENT
 }
-
-model PointTransaction {
-  id            String    @id @default(uuid())
-  
-  userId        String
-  user          User      @relation(fields: [userId], references: [id])
-  
-  type          PointType
-  points        Int        // Positive = earned, Negative = deducted
-  reason        String
-  
-  // Optional references
-  bookingId     String?
-  examSessionId String?
-  
-  createdAt     DateTime  @default(now())
-  
-  @@index([userId])
-  @@index([type])
-  @@index([createdAt])
-}
-
-// ==================== EXAM PROCTORING ====================
-
-model ProctoringEvent {
-  id           String      @id @default(uuid())
-  
-  sessionId    String
-  session      ExamSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  
-  eventType    String      // "TAB_SWITCH", "WINDOW_BLUR", "COPY_PASTE", "FULLSCREEN_EXIT"
-  warningLevel Int         @default(1)  // 1 = mild warning, 2 = severe, 3 = exam cancelled
-  metadata     Json?       // Additional event data
-  
-  timestamp    DateTime    @default(now())
-  
-  @@index([sessionId])
-  @@index([eventType])
-}
-
-// ==================== PRACTICE SESSION (Standalone) ====================
 
 enum PracticeSessionStatus {
   IN_PROGRESS
   COMPLETED
   ABANDONED
-}
-
-model PracticeSession {
-  id          String                @id @default(uuid())
-  
-  // Who
-  userId      String
-  user        User                  @relation(fields: [userId], references: [id])
-  
-  // Configuration (what the student chose)
-  duration    Int                   // Duration in minutes
-  totalItems  Int                   // Total number of items
-  difficulty  Difficulty?           // Optional difficulty filter
-  
-  // Classification filters used
-  subjectId   String?
-  topicId     String?
-  categoryId  String?
-  
-  // Timing
-  startedAt   DateTime              @default(now())
-  finishedAt  DateTime?
-  
-  // Scoring
-  score       Float?
-  maxScore    Float?
-  
-  // Status
-  status      PracticeSessionStatus @default(IN_PROGRESS)
-  
-  // Relations
-  items       PracticeSessionItem[]
-  
-  createdAt   DateTime              @default(now())
-  
-  @@index([userId])
-  @@index([status])
-  @@index([createdAt])
-}
-
-// PracticeSessionItem - a question or problem in a practice session
-model PracticeSessionItem {
-  id          String          @id @default(uuid())
-  
-  sessionId   String
-  session     PracticeSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  
-  // Either a question or a problem
-  questionId  String?
-  question    Question?       @relation(fields: [questionId], references: [id])
-  problemId   String?
-  problem     Problem?        @relation(fields: [problemId], references: [id])
-  
-  order       Int             @default(0)
-  points      Float           @default(1.0)
-  
-  // Answer
-  answers     PracticeSessionAnswer[]
-  
-  createdAt   DateTime        @default(now())
-  
-  @@index([sessionId])
-}
-
-// PracticeSessionAnswer - student's answer in a practice session
-model PracticeSessionAnswer {
-  id                String              @id @default(uuid())
-  
-  itemId            String
-  item              PracticeSessionItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
-  
-  // For MC questions
-  selectedChoiceIds String[]
-  
-  // For short-answer questions
-  textAnswer        String?             @db.Text
-  
-  // For coding problems
-  sourceCode        String?             @db.Text
-  language          String?
-  languageVersion   String?
-  submissionId      String?
-  
-  // Grading
-  isCorrect         Boolean?
-  score             Float?
-  
-  createdAt         DateTime            @default(now())
-  updatedAt         DateTime            @updatedAt
-  
-  @@unique([itemId])
-  @@index([itemId])
 }

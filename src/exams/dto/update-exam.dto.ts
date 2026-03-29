@@ -11,6 +11,7 @@ export const UpdateExamSchema = z
     publishNow: z.boolean().optional(),
     shuffleQuestions: z.boolean().optional(),
     shuffleChoices: z.boolean().optional(),
+    type: z.enum(['PRACTICE', 'EXAM']).optional(),
   })
   .refine(
     (data) => !(data.publishNow && data.publishAt),

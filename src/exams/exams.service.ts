@@ -361,6 +361,7 @@ export class ExamsService {
               : dto.subjectId || null,
           topicId: dto.topicId || null,
           creatorId,
+          type: (dto.type as any) || 'EXAM',
         },
       });
 
@@ -569,6 +570,7 @@ export class ExamsService {
         ...(publicationUpdate || {}),
         ...(dto.shuffleQuestions !== undefined && { shuffleQuestions: dto.shuffleQuestions }),
         ...(dto.shuffleChoices !== undefined && { shuffleChoices: dto.shuffleChoices }),
+        ...(dto.type !== undefined && { type: dto.type as any }),
       },
       include: {
         subject: { select: { id: true, name: true } },
@@ -611,31 +613,50 @@ export class ExamsService {
   /**
    * Start an exam session for a student.
    * Generates a random seed and returns shuffled items.
+   * Validates that booking type matches exam type (PRACTICE vs EXAM)
    */
   async startSession(examId: string, userId: string): Promise<ShuffledSessionDto> {
     await this.syncScheduledExamPublication();
 
+    const exam = await this.prisma.exam.findUnique({
+      where: { id: examId },
+      select: { id: true, type: true },
+    });
+    if (!exam) throw new NotFoundException('Đề thi không tồn tại');
+
+    // Check booking type must match exam type
+    // PRACTICE exams need PRACTICE bookings, EXAM exams need EXAM bookings
     const activeBooking = await this.bookingsService.requireActiveCheckedInBooking(
       userId,
-      'EXAM',
+      exam.type as any,
     );
 
-    if (activeBooking.examSessionId) {
-      const linkedSession = await this.prisma.examSession.findUnique({
-        where: { id: activeBooking.examSessionId },
-        include: { exam: true },
-      });
-
-      if (linkedSession && linkedSession.status !== 'SUBMITTED' && linkedSession.status !== 'GRADED') {
-        // Check if session has expired
-        if (this.isSessionExpired(linkedSession, linkedSession.exam.duration)) {
-          throw new ConflictException('Thời gian làm bài đã hết, không thể tiếp tục');
-        }
-        return this.getSessionData(linkedSession.id, userId);
-      }
+    if (activeBooking.type !== exam.type) {
+      const examTypeLabel = exam.type === 'PRACTICE' ? 'luyện tập' : 'thi';
+      const bookingTypeLabel = activeBooking.type === 'PRACTICE' ? 'luyện tập' : 'thi';
+      throw new ForbiddenException(
+        `Đề thi này dành cho nội dung ${examTypeLabel}, nhưng bạn hiện có lịch ${bookingTypeLabel}. Vui lòng chọn đúng loại.`,
+      );
     }
 
-    const exam = await this.prisma.exam.findUnique({
+    // Check if booking already has an active exam session
+    const existingLinkedSession = await this.prisma.examSession.findFirst({
+      where: {
+        bookingId: activeBooking.id,
+        userId,
+      },
+      include: { exam: true },
+    });
+
+    if (existingLinkedSession && existingLinkedSession.status !== 'SUBMITTED' && existingLinkedSession.status !== 'GRADED') {
+      // Check if session has expired
+      if (this.isSessionExpired(existingLinkedSession, existingLinkedSession.exam.duration)) {
+        throw new ConflictException('Thời gian làm bài đã hết, không thể tiếp tục');
+      }
+      return this.getSessionData(existingLinkedSession.id, userId);
+    }
+
+    const fullExam = await this.prisma.exam.findUnique({
       where: { id: examId },
       include: {
         items: {
@@ -648,8 +669,8 @@ export class ExamsService {
       },
     });
 
-    if (!exam) throw new NotFoundException('Đề thi không tồn tại');
-    if (!this.isExamPubliclyAvailable(exam)) throw new ForbiddenException('Đề thi chưa được công bố');
+    if (!fullExam) throw new NotFoundException('Đề thi không tồn tại');
+    if (!this.isExamPubliclyAvailable(fullExam)) throw new ForbiddenException('Đề thi chưa được công bố');
 
     // Check if there's an existing session
     const existingSession = await this.prisma.examSession.findUnique({
@@ -674,23 +695,19 @@ export class ExamsService {
 
     // Create new session with expiresAt deadline
     const now = new Date();
-    const expiresAt = new Date(now.getTime() + exam.duration * 60 * 1000);
+    const expiresAt = new Date(now.getTime() + fullExam.duration * 60 * 1000);
     const session = await this.prisma.examSession.create({
       data: {
         examId,
         userId,
         seed,
         expiresAt,
-        maxScore: exam.items.reduce((sum, item) => sum + item.points, 0),
+        bookingId: activeBooking.id,
+        maxScore: fullExam.items.reduce((sum, item) => sum + item.points, 0),
       },
     });
 
-    await this.prisma.booking.update({
-      where: { id: activeBooking.id },
-      data: { examSessionId: session.id },
-    });
-
-    return this.buildShuffledSession(session, exam);
+    return this.buildShuffledSession(session, fullExam);
   }
 
   /**

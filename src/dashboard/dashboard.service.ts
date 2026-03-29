@@ -69,7 +69,10 @@ export class DashboardService {
       this.prisma.proctoringEvent.findMany({
         orderBy: { timestamp: 'desc' },
         take: 10,
-        include: { session: { select: { user: { select: { name: true, studentCode: true } } } } },
+        include: {
+          examSession: { select: { user: { select: { name: true, studentCode: true } } } },
+          practiceSession: { select: { user: { select: { name: true, studentCode: true } } } },
+        },
       }),
     ]);
 
