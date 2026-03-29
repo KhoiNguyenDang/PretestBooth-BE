@@ -69,13 +69,6 @@ export class ExamsController {
     return this.examsService.findAll(query, userId, userRole);
   }
 
-  @Get(':id')
-  findOneExam(@Param('id') id: string, @Req() req) {
-    const userId = req.user['sub'];
-    const userRole = req.user['role'];
-    return this.examsService.findOne(id, userId, userRole);
-  }
-
   @Patch(':id')
   updateExam(
     @Param('id') id: string,
@@ -159,5 +152,12 @@ export class ExamsController {
     const userId = req.user['sub'];
     const userRole = req.user['role'];
     return this.examsService.gradeSession(sessionId, dto, userId, userRole);
+  }
+
+  @Get(':id')
+  findOneExam(@Param('id') id: string, @Req() req) {
+    const userId = req.user['sub'];
+    const userRole = req.user['role'];
+    return this.examsService.findOne(id, userId, userRole);
   }
 }

@@ -7,54 +7,17 @@ async function bootstrap() {
   const defaultPort = Number.isNaN(preferredPort) ? 3000 : preferredPort;
   const fallbackPort = defaultPort + 1;
   const app = await NestFactory.create(AppModule);
-  app.setGlobalPrefix('api');
 
-  const explicitOrigins = (process.env.CORS_ORIGINS ?? '')
-    .split(',')
-    .map((origin) => origin.trim())
-    .filter(Boolean);
-
-  const allowedOrigins = new Set<string>([
-    'http://localhost:3000',
-    'http://localhost:3001',
-    'https://app.nguyen2207.io.vn',
-    'https://api.nguyen2207.io.vn',
-    ...explicitOrigins,
-  ]);
-
-  const isAllowedProductionOrigin = (origin: string): boolean => {
-    try {
-      const parsed = new URL(origin);
-      return (
-        parsed.protocol === 'https:' &&
-        (parsed.hostname === 'nguyen2207.io.vn' ||
-          parsed.hostname.endsWith('.nguyen2207.io.vn'))
-      );
-    } catch {
-      return false;
-    }
-  };
-
-  // Keep CORS strict for trusted domains while supporting production subdomains.
+  // Enable CORS for frontend on port 3001
   app.enableCors({
-    origin: (origin, callback) => {
-      // Allow requests without Origin header (curl, server-to-server, health checks).
-      if (!origin) {
-        callback(null, true);
-        return;
-      }
-
-      if (allowedOrigins.has(origin) || isAllowedProductionOrigin(origin)) {
-        callback(null, true);
-        return;
-      }
-
-      callback(new Error(`CORS blocked for origin: ${origin}`), false);
-    },
+    origin: ['http://localhost:3001', 'http://localhost:3000'],
     credentials: true,
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
-    allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
   });
+
+  app.useGlobalInterceptors(new TransformInterceptor(new Reflector()));
+  app.setGlobalPrefix('api');
 
   try {
     await app.listen(defaultPort);

@@ -47,6 +47,8 @@ export const CreateExamSchema = z
     visibility: z.enum(['PRIVATE', 'PUBLIC']).default('PRIVATE'),
     publishAt: z.coerce.date().optional().nullable(),
     publishNow: z.boolean().default(false),
+    // Exam type classification
+    type: z.enum(['PRACTICE', 'EXAM']).default('EXAM'),
   })
   .refine(
     (data) => !(data.publishNow && data.publishAt),

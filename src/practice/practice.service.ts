@@ -39,10 +39,6 @@ export class PracticeService {
       'PRACTICE',
     );
 
-    if (activeBooking.practiceSessionId) {
-      throw new ConflictException('Booking này đã được gắn với một phiên luyện tập');
-    }
-
     // 1. Fetch eligible items
     if (!dto.includeQuestions && !dto.includeProblems) {
       throw new BadRequestException('Phải chọn ít nhất một loại bài tập');
@@ -98,6 +94,7 @@ export class PracticeService {
       const session = await tx.practiceSession.create({
         data: {
           userId,
+          bookingId: activeBooking.id,
           duration: dto.duration,
           totalItems: totalActualItems,
           difficulty: dto.difficulty,
@@ -137,11 +134,6 @@ export class PracticeService {
       await tx.practiceSession.update({
         where: { id: session.id },
         data: { maxScore: totalScore },
-      });
-
-      await tx.booking.update({
-        where: { id: activeBooking.id },
-        data: { practiceSessionId: session.id },
       });
 
       return { sessionId: session.id, totalItems: totalActualItems };
@@ -260,8 +252,8 @@ export class PracticeService {
 
     // Grade MC and Short Answers (Problems require full execution, so they stay Ungraded for now)
     for (const item of session.items) {
-      const answer = item.answers[0];
-      if (!answer) continue; // Unanswered
+      if (!item.answers) continue; // Unanswered
+      const answer = item.answers;
 
       if (item.questionId && item.question) {
         let isCorrect = false;
@@ -307,17 +299,19 @@ export class PracticeService {
     });
 
     const practicePoints = this.calculatePracticeCompletionPoints(totalScore, session.maxScore);
-    const linkedBooking = await this.prisma.booking.findFirst({
-      where: { practiceSessionId: sessionId },
-      select: { id: true },
+    
+    // Get booking ID from practice session via session fetch
+    const practiceSessionWithBooking = await this.prisma.practiceSession.findUnique({
+      where: { id: sessionId },
+      select: { bookingId: true },
     });
 
-    if (linkedBooking) {
+    if (practiceSessionWithBooking?.bookingId) {
       const existing = await this.prisma.pointTransaction.findFirst({
         where: {
           userId,
           type: 'PRACTICE_ATTENDANCE',
-          bookingId: linkedBooking.id,
+          bookingId: practiceSessionWithBooking.bookingId,
         },
         select: { id: true },
       });
@@ -328,7 +322,7 @@ export class PracticeService {
           'PRACTICE_ATTENDANCE',
           practicePoints,
           `Hoàn thành luyện tập: ${totalScore}/${session.maxScore ?? 0}`,
-          { bookingId: linkedBooking.id },
+          { bookingId: practiceSessionWithBooking.bookingId },
         );
       }
     }

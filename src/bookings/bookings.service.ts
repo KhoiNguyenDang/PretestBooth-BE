@@ -223,6 +223,8 @@ export class BookingsService {
         date: bookingDate,
         startTime,
         endTime,
+        durationMinutes: Math.round(durationMin),
+        bufferMinutes: 15, // Fixed 15 min gap between consecutive sessions
         status: 'CONFIRMED',
       },
       include: {
