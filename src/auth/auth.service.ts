@@ -139,6 +139,16 @@ export class AuthService {
 
     const booth = await this.boothsService.validateBoothSessionToken(boothSessionToken);
     const bookingForCheckin = await this.bookingsService.getPendingCheckInByBooth(user.id, booth.id);
+    const bookingForFreshCheckin = await this.prisma.booking.update({
+      where: { id: bookingForCheckin.id },
+      data: {
+        status: 'CONFIRMED',
+        checkedInAt: null,
+        checkinStatus: 'PENDING',
+        checkinSimilarityScore: null,
+        checkinVerifiedAt: null,
+      },
+    });
 
     const tokens = await this.generateTokens(user.id, user.role);
 
@@ -166,8 +176,8 @@ export class AuthService {
         code: booth.code || booth.name,
         name: booth.name,
       },
-      checkedInBooking: bookingForCheckin.status === 'CHECKED_IN' ? bookingForCheckin : null,
-      pendingCheckinBooking: bookingForCheckin.status === 'CHECKED_IN' ? null : bookingForCheckin,
+      checkedInBooking: null,
+      pendingCheckinBooking: bookingForFreshCheckin,
     };
   }
 

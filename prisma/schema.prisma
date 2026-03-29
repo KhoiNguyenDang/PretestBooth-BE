@@ -392,6 +392,17 @@ model BookingDurationOption {
   @@index([type, isActive])
 }
 
+model SystemSetting {
+  key             String   @id
+  value           String
+  description     String?
+  updatedByUserId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([updatedByUserId])
+}
+
 model Booking {
   id                String        @id @default(uuid())
   userId            String
@@ -407,7 +418,7 @@ model Booking {
   checkedOutAt      DateTime?
   checkinStatus         CheckinStatus @default(PENDING)
   checkinSimilarityScore Float?
-  checkinThreshold      Float         @default(0.85)
+  checkinThreshold      Float         @default(0.6)
   checkinVerifiedAt     DateTime?
   checkinAttemptCount   Int           @default(0)
   
@@ -435,7 +446,7 @@ model BookingCheckinAttempt {
   bookingId       String
   userId          String
   similarityScore Float
-  threshold       Float    @default(0.85)
+  threshold       Float    @default(0.6)
   isMatch         Boolean
   livenessPassed  Boolean  @default(true)
   failReason      String?

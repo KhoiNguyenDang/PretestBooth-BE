@@ -10,6 +10,11 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeService } from '../realtime/realtime.service';
 import type { CheckinVerifyDto } from './dto/checkin-verify.dto';
 
+const CHECKIN_THRESHOLD_SETTING_KEY = 'CHECKIN_SIMILARITY_THRESHOLD';
+const DEFAULT_CHECKIN_THRESHOLD = 0.6;
+const MIN_CHECKIN_THRESHOLD = 0.5;
+const MAX_CHECKIN_THRESHOLD = 0.99;
+
 @Injectable()
 export class CheckinService {
   constructor(
@@ -24,6 +29,100 @@ export class CheckinService {
 
   private getCheckInLateMinutes() {
     return Number(process.env.CHECKIN_LATE_MINUTES || 0);
+  }
+
+  private ensureAdmin(userRole: string) {
+    if (userRole !== 'ADMIN') {
+      throw new ForbiddenException('Chỉ quản trị viên mới được cập nhật ngưỡng xác thực khuôn mặt');
+    }
+  }
+
+  private parseThreshold(rawValue: string | null | undefined): number | null {
+    if (rawValue === null || rawValue === undefined) {
+      return null;
+    }
+
+    const value = Number(rawValue);
+    if (!Number.isFinite(value)) {
+      return null;
+    }
+
+    if (value < MIN_CHECKIN_THRESHOLD || value > MAX_CHECKIN_THRESHOLD) {
+      return null;
+    }
+
+    return value;
+  }
+
+  async getCheckinThresholdConfig() {
+    const setting = await this.prisma.systemSetting.findUnique({
+      where: { key: CHECKIN_THRESHOLD_SETTING_KEY },
+    });
+
+    const thresholdFromDb = this.parseThreshold(setting?.value);
+    if (thresholdFromDb !== null) {
+      return {
+        key: CHECKIN_THRESHOLD_SETTING_KEY,
+        threshold: thresholdFromDb,
+        source: 'database' as const,
+        updatedAt: setting?.updatedAt ?? null,
+      };
+    }
+
+    const thresholdFromEnv = this.parseThreshold(process.env.CHECKIN_SIMILARITY_THRESHOLD);
+    if (thresholdFromEnv !== null) {
+      return {
+        key: CHECKIN_THRESHOLD_SETTING_KEY,
+        threshold: thresholdFromEnv,
+        source: 'env' as const,
+        updatedAt: setting?.updatedAt ?? null,
+      };
+    }
+
+    return {
+      key: CHECKIN_THRESHOLD_SETTING_KEY,
+      threshold: DEFAULT_CHECKIN_THRESHOLD,
+      source: 'default' as const,
+      updatedAt: setting?.updatedAt ?? null,
+    };
+  }
+
+  async updateCheckinThreshold(userRole: string, userId: string, threshold: number) {
+    this.ensureAdmin(userRole);
+
+    if (!Number.isFinite(threshold)) {
+      throw new BadRequestException('Ngưỡng xác thực không hợp lệ');
+    }
+
+    if (threshold < MIN_CHECKIN_THRESHOLD || threshold > MAX_CHECKIN_THRESHOLD) {
+      throw new BadRequestException(
+        `Ngưỡng xác thực phải nằm trong khoảng ${MIN_CHECKIN_THRESHOLD} - ${MAX_CHECKIN_THRESHOLD}`,
+      );
+    }
+
+    const normalizedThreshold = Number(threshold.toFixed(2));
+
+    const savedSetting = await this.prisma.systemSetting.upsert({
+      where: { key: CHECKIN_THRESHOLD_SETTING_KEY },
+      update: {
+        value: String(normalizedThreshold),
+        updatedByUserId: userId,
+      },
+      create: {
+        key: CHECKIN_THRESHOLD_SETTING_KEY,
+        value: String(normalizedThreshold),
+        description: 'Cosine similarity threshold for booth face check-in verification',
+        updatedByUserId: userId,
+      },
+    });
+
+    return {
+      key: CHECKIN_THRESHOLD_SETTING_KEY,
+      threshold: normalizedThreshold,
+      source: 'database' as const,
+      updatedAt: savedSetting.updatedAt,
+      updatedByUserId: savedSetting.updatedByUserId,
+    };
   }
 
   private getNowInVietnamConvention() {
@@ -92,40 +191,8 @@ export class CheckinService {
       throw new ForbiddenException('Người dùng chưa hoàn tất xác minh KYC');
     }
 
-    const threshold = dto.threshold ?? booking.checkinThreshold ?? 0.85;
-
-    if (!dto.liveness.passed) {
-      await this.prisma.bookingCheckinAttempt.create({
-        data: {
-          bookingId: booking.id,
-          userId: booking.userId,
-          similarityScore: 0,
-          threshold,
-          isMatch: false,
-          livenessPassed: false,
-          failReason: 'LIVENESS_FAILED',
-          verifierDeviceId: dto.verifierDeviceId,
-        },
-      });
-
-      await this.prisma.booking.update({
-        where: { id: booking.id },
-        data: {
-          checkinStatus: 'FAILED',
-          checkinSimilarityScore: 0,
-          checkinThreshold: threshold,
-          checkinAttemptCount: { increment: 1 },
-        },
-      });
-
-      return {
-        bookingId: booking.id,
-        matched: false,
-        similarityScore: 0,
-        threshold,
-        reason: 'Liveness không đạt',
-      };
-    }
+    const thresholdConfig = await this.getCheckinThresholdConfig();
+    const threshold = thresholdConfig.threshold;
 
     const storedEmbedding = this.getStoredEmbedding(bookingUser.faceEmbedding);
     const liveEmbeddingResult = await this.faceRecognitionService.extractEmbedding(dto.image);
@@ -156,6 +223,12 @@ export class CheckinService {
         checkinThreshold: threshold,
         checkinVerifiedAt: matched ? now : null,
         checkinAttemptCount: { increment: 1 },
+        ...(!matched && booking.status === 'CHECKED_IN'
+          ? {
+              status: 'CONFIRMED',
+              checkedInAt: null,
+            }
+          : {}),
         ...(matched && booking.status !== 'CHECKED_IN'
           ? {
               status: 'CHECKED_IN',
