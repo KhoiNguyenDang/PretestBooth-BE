@@ -47,6 +47,8 @@ model User {
   practiceSessions        PracticeSession[]
   createdProblems         Problem[]          @relation("ProblemCreator")
   createdQuestions        Question[]         @relation("QuestionCreator")
+  reviewedQuestionSessions QuestionReviewSession[] @relation("QuestionReviewSessionReviewer")
+  questionReviewActions    QuestionReviewAction[]  @relation("QuestionReviewActionReviewer")
   proctoringEvents        ProctoringEvent[]
   submissions             Submission[]
 
@@ -198,6 +200,7 @@ model Question {
   subject        Subject               @relation(fields: [subjectId], references: [id])
   topic          Topic?                @relation(fields: [topicId], references: [id])
   choices        QuestionChoice[]
+  reviewSessions QuestionReviewSession[]
 
   @@index([questionType])
   @@index([difficulty])
@@ -206,6 +209,46 @@ model Question {
   @@index([topicId])
   @@index([categoryId])
   @@index([creatorId])
+}
+
+model QuestionReviewSession {
+  id           String               @id @default(uuid())
+  quarter      Int
+  year         Int
+  academicYear String
+  startDate    DateTime
+  endDate      DateTime
+  status       QuestionReviewStatus @default(PENDING)
+  notes        String?
+  reviewedBy   String?
+  reviewedAt   DateTime?
+  questionId   String
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+  question     Question             @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  reviewer     User?                @relation("QuestionReviewSessionReviewer", fields: [reviewedBy], references: [id])
+  actions      QuestionReviewAction[]
+
+  @@unique([quarter, year, questionId])
+  @@index([quarter, year, status])
+  @@index([reviewedBy])
+  @@index([questionId])
+}
+
+model QuestionReviewAction {
+  id         String               @id @default(uuid())
+  sessionId  String
+  status     QuestionReviewStatus
+  notes      String?
+  reviewedBy String
+  reviewedAt DateTime             @default(now())
+  createdAt  DateTime             @default(now())
+  session    QuestionReviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  reviewer   User                  @relation("QuestionReviewActionReviewer", fields: [reviewedBy], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@index([reviewedBy])
+  @@index([reviewedAt])
 }
 
 model QuestionChoice {
@@ -589,6 +632,14 @@ enum QuestionType {
   SINGLE_CHOICE
   MULTIPLE_CHOICE
   SHORT_ANSWER
+}
+
+enum QuestionReviewStatus {
+  PENDING
+  RESUBMITTED
+  APPROVED
+  NEEDS_REVISION
+  SKIPPED
 }
 
 enum ExamSection {

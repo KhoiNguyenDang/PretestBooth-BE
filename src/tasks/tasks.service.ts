@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { BookingsService } from '../bookings/bookings.service';
+import { QuestionReviewService } from '../questions/question-review.service';
 
 @Injectable()
 export class TasksService {
@@ -10,6 +11,7 @@ export class TasksService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly bookingsService: BookingsService,
+    private readonly questionReviewService: QuestionReviewService,
   ) {}
 
   /**
@@ -73,5 +75,18 @@ export class TasksService {
         `Auto marked ${noShowResult.markedCount} booking(s) as NO_SHOW and applied ${noShowResult.penalizedCount} penalty transaction(s).`,
       );
     }
+  }
+
+  /**
+   * Run at 00:00 on the first day of quarter months (Jan, Apr, Jul, Oct).
+   */
+  @Cron('0 0 1 1,4,7,10 *')
+  async handleQuarterlyQuestionReviewSessions() {
+    this.logger.debug('Running quarterly question review session cron job...');
+
+    const result = await this.questionReviewService.createQuarterlySessions();
+    this.logger.log(
+      `Quarterly review sessions created: ${result.createdSessions}/${result.totalPublishedQuestions} (Q${result.quarter}/${result.year}).`,
+    );
   }
 }
