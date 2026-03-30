@@ -61,6 +61,9 @@ export class ProctoringService {
 
     // Save event with appropriate session reference
     const eventData: any = {
+      user: {
+        connect: { id: userId },
+      },
       eventType: dto.eventType,
       warningLevel,
       metadata: (dto.metadata || {}) as Prisma.InputJsonValue,
@@ -142,13 +145,16 @@ export class ProctoringService {
     });
 
     // Create violation event
+    const examTabSwitchEventData: any = {
+      userId,
+      examSessionId: examSession.id,
+      eventType: 'TAB_SWITCH',
+      warningLevel: 10, // Immediate termination
+      metadata: { reason: 'Học sinh chuyển tab trong kỳ thi' } as Prisma.InputJsonValue,
+    };
+
     const event = await this.prisma.proctoringEvent.create({
-      data: {
-        examSessionId: examSession.id,
-        eventType: 'TAB_SWITCH',
-        warningLevel: 10, // Immediate termination
-        metadata: { reason: 'Học sinh chuyển tab trong kỳ thi' },
-      },
+      data: examTabSwitchEventData,
     });
 
     // Deduct points for exam violation
@@ -181,13 +187,16 @@ export class ProctoringService {
     });
 
     // Create violation event
+    const practiceTabSwitchEventData: any = {
+      userId,
+      practiceSessionId: practiceSession.id,
+      eventType: 'TAB_SWITCH',
+      warningLevel: 5,
+      metadata: { reason: 'Học sinh chuyển tab trong phiên luyện tập' } as Prisma.InputJsonValue,
+    };
+
     const event = await this.prisma.proctoringEvent.create({
-      data: {
-        practiceSessionId: practiceSession.id,
-        eventType: 'TAB_SWITCH',
-        warningLevel: 5,
-        metadata: { reason: 'Học sinh chuyển tab trong phiên luyện tập' },
-      },
+      data: practiceTabSwitchEventData,
     });
 
     // Deduct points for practice violation

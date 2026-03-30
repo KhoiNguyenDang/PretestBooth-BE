@@ -47,6 +47,7 @@ model User {
   practiceSessions        PracticeSession[]
   createdProblems         Problem[]          @relation("ProblemCreator")
   createdQuestions        Question[]         @relation("QuestionCreator")
+  proctoringEvents        ProctoringEvent[]
   submissions             Submission[]
 
   @@index([email])
@@ -478,6 +479,9 @@ model PointTransaction {
 
 model ProctoringEvent {
   id           String      @id @default(uuid())
+
+  userId       String?
+  user         User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
   
   // Either examSessionId or practiceSessionId should be set
   examSessionId    String?
@@ -494,6 +498,7 @@ model ProctoringEvent {
   
   @@index([examSessionId])
   @@index([practiceSessionId])
+  @@index([userId])
   @@index([eventType])
 }
 
