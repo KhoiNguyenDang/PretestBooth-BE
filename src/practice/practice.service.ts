@@ -34,7 +34,7 @@ export class PracticeService {
    * Auto-generate a new practice session based on student config
    */
   async createSession(userId: string, dto: CreatePracticeSessionDto) {
-    const activeBooking = await this.bookingsService.requireActiveCheckedInBooking(
+    const activeBooking = await this.bookingsService.findActiveCheckedInBooking(
       userId,
       'PRACTICE',
     );
@@ -94,7 +94,7 @@ export class PracticeService {
       const session = await tx.practiceSession.create({
         data: {
           userId,
-          bookingId: activeBooking.id,
+          bookingId: activeBooking?.id ?? null,
           duration: dto.duration,
           totalItems: totalActualItems,
           difficulty: dto.difficulty,

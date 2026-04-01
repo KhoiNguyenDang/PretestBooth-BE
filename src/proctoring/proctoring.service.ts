@@ -18,15 +18,18 @@ export class ProctoringService {
 
   /**
    * Log a proctoring event and apply penalties if threshold is reached
-   * Handles EXAM and PRACTICE sessions differently:
-   * - EXAM: Immediate termination on TAB_SWITCH
-   * - PRACTICE: Exit current session + ban this practice item
+   * Anti-cheat enforcement is only applied for EXAM sessions.
    */
   async reportEvent(userId: string, dto: ReportProctoringEventDto) {
     // Find which type of session this is (EXAM or PRACTICE)
     let examSession = await this.prisma.examSession.findFirst({
       where: { id: dto.sessionId },
-      include: { booking: true },
+      include: {
+        booking: true,
+        exam: {
+          select: { type: true },
+        },
+      },
     });
 
     let practiceSession: any = null;
@@ -42,11 +45,16 @@ export class ProctoringService {
     if (session.userId !== userId) throw new ForbiddenException('Bạn không có quyền báo cáo cho phiên này');
 
     const isExamSession = !!examSession;
+    const isPracticeExamSession = !!examSession && examSession.exam.type === 'PRACTICE';
     const isPracticeSession = !!practiceSession;
 
-    // Special handling for TAB_SWITCH on PRACTICE sessions
-    if (isPracticeSession && dto.eventType === 'TAB_SWITCH') {
-      return await this.handlePracticeTabSwitch(practiceSession as any, userId);
+    // Practice contexts are not proctored.
+    if (isPracticeSession || isPracticeExamSession) {
+      return {
+        eventId: null,
+        totalSeverity: 0,
+        actionTaken: 'LOGGED',
+      };
     }
 
     // Special handling for TAB_SWITCH on EXAM sessions
@@ -170,48 +178,6 @@ export class ProctoringService {
       eventId: event.id,
       actionTaken: 'EXAM_TERMINATED_TAB_SWITCH',
       sessionType: 'EXAM',
-    };
-  }
-
-  /**
-   * Handle TAB_SWITCH for PRACTICE sessions: Exit + ban this practice session
-   */
-  private async handlePracticeTabSwitch(practiceSession: any, userId: string) {
-    // Terminate practice session
-    await this.prisma.practiceSession.update({
-      where: { id: practiceSession.id },
-      data: {
-        status: 'ABANDONED',
-        finishedAt: new Date(),
-      },
-    });
-
-    // Create violation event
-    const practiceTabSwitchEventData: any = {
-      userId,
-      practiceSessionId: practiceSession.id,
-      eventType: 'TAB_SWITCH',
-      warningLevel: 5,
-      metadata: { reason: 'Học sinh chuyển tab trong phiên luyện tập' } as Prisma.InputJsonValue,
-    };
-
-    const event = await this.prisma.proctoringEvent.create({
-      data: practiceTabSwitchEventData,
-    });
-
-    // Deduct points for practice violation
-    await this.pointsService.addTransaction(
-      userId,
-      'PROCTORING_WARNING',
-      -5,
-      'Bị cấm luyện tập do chuyển tab/rời khỏi màn hình',
-      practiceSession.bookingId ? { bookingId: practiceSession.bookingId } : undefined,
-    );
-
-    return {
-      eventId: event.id,
-      actionTaken: 'PRACTICE_TERMINATED_TAB_SWITCH',
-      sessionType: 'PRACTICE',
     };
   }
 

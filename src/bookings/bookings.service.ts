@@ -498,6 +498,41 @@ export class BookingsService {
   }
 
   /**
+   * Find an active checked-in booking if available (non-throwing).
+   * Used by online-capable practice flows to optionally keep booth linkage.
+   */
+  async findActiveCheckedInBooking(userId: string, type: BookingType) {
+    await this.autoCheckOutExpiredBookings();
+
+    const now = this.getNowInVietnamConvention();
+    const booking = await this.prisma.booking.findFirst({
+      where: {
+        userId,
+        type,
+        status: 'CHECKED_IN',
+        startTime: { lte: now },
+        endTime: { gte: now },
+      },
+      orderBy: { startTime: 'asc' },
+    });
+
+    if (booking) {
+      return booking;
+    }
+
+    return this.prisma.booking.findFirst({
+      where: {
+        userId,
+        type,
+        status: 'CHECKED_IN',
+        checkedOutAt: null,
+        endTime: { gte: new Date(now.getTime() - 12 * 60 * 60 * 1000) },
+      },
+      orderBy: { checkedInAt: 'desc' },
+    });
+  }
+
+  /**
    * Require an active checked-in booking to start practice/exam.
    */
   async requireActiveCheckedInBooking(userId: string, type: BookingType) {

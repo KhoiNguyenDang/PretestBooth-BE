@@ -84,7 +84,26 @@ export class ExamsService {
     score: number,
     maxScore: number | null,
   ) {
-    const targetPoints = this.calculateExamCompletionPoints(score, maxScore);
+    const sessionMeta = await this.prisma.examSession.findUnique({
+      where: { id: sessionId },
+      select: {
+        bookingId: true,
+        exam: {
+          select: { type: true },
+        },
+      },
+    });
+
+    if (!sessionMeta) {
+      return;
+    }
+
+    const isOnlinePracticeSession =
+      sessionMeta.exam.type === 'PRACTICE' && !sessionMeta.bookingId;
+    const targetPoints = isOnlinePracticeSession
+      ? 0
+      : this.calculateExamCompletionPoints(score, maxScore);
+
     const existingTransactions = await this.prisma.pointTransaction.findMany({
       where: {
         userId,
@@ -613,7 +632,7 @@ export class ExamsService {
   /**
    * Start an exam session for a student.
    * Generates a random seed and returns shuffled items.
-   * Validates that booking type matches exam type (PRACTICE vs EXAM)
+    * Requires booth check-in only for EXAM sessions.
    */
   async startSession(examId: string, userId: string): Promise<ShuffledSessionDto> {
     await this.syncScheduledExamPublication();
@@ -624,14 +643,16 @@ export class ExamsService {
     });
     if (!exam) throw new NotFoundException('Đề thi không tồn tại');
 
-    // Check booking type must match exam type
-    // PRACTICE exams need PRACTICE bookings, EXAM exams need EXAM bookings
-    const activeBooking = await this.bookingsService.requireActiveCheckedInBooking(
-      userId,
-      exam.type as any,
-    );
+    let activeBooking: Awaited<ReturnType<BookingsService['findActiveCheckedInBooking']>> | null =
+      null;
 
-    if (activeBooking.type !== exam.type) {
+    if (exam.type === 'EXAM') {
+      activeBooking = await this.bookingsService.requireActiveCheckedInBooking(userId, 'EXAM');
+    } else {
+      activeBooking = await this.bookingsService.findActiveCheckedInBooking(userId, 'PRACTICE');
+    }
+
+    if (activeBooking && activeBooking.type !== exam.type) {
       const examTypeLabel = exam.type === 'PRACTICE' ? 'luyện tập' : 'thi';
       const bookingTypeLabel = activeBooking.type === 'PRACTICE' ? 'luyện tập' : 'thi';
       throw new ForbiddenException(
@@ -640,13 +661,15 @@ export class ExamsService {
     }
 
     // Check if booking already has an active exam session
-    const existingLinkedSession = await this.prisma.examSession.findFirst({
-      where: {
-        bookingId: activeBooking.id,
-        userId,
-      },
-      include: { exam: true },
-    });
+    const existingLinkedSession = activeBooking
+      ? await this.prisma.examSession.findFirst({
+          where: {
+            bookingId: activeBooking.id,
+            userId,
+          },
+          include: { exam: true },
+        })
+      : null;
 
     if (existingLinkedSession && existingLinkedSession.status !== 'SUBMITTED' && existingLinkedSession.status !== 'GRADED') {
       // Check if session has expired
@@ -702,7 +725,7 @@ export class ExamsService {
         userId,
         seed,
         expiresAt,
-        bookingId: activeBooking.id,
+        bookingId: activeBooking?.id ?? null,
         maxScore: fullExam.items.reduce((sum, item) => sum + item.points, 0),
       },
     });
@@ -1775,6 +1798,8 @@ export class ExamsService {
     return new ShuffledSessionDto({
       id: session.id,
       examId: exam.id,
+      examType: exam.type,
+      proctoringEnabled: exam.type === 'EXAM',
       examTitle: exam.title,
       duration: exam.duration,
       status: session.status,

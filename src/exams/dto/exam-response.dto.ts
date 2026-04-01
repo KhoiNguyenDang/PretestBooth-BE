@@ -134,6 +134,8 @@ export class PaginatedExamsDto {
 export class ShuffledSessionDto {
   id: string;
   examId: string;
+  examType: 'PRACTICE' | 'EXAM';
+  proctoringEnabled: boolean;
   examTitle: string;
   duration: number;
   status: string;
