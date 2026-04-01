@@ -177,6 +177,7 @@ model Topic {
 model Question {
   id             String                @id @default(uuid())
   content        String
+  imageUrl       String?
   questionType   QuestionType          @default(SINGLE_CHOICE)
   difficulty     Difficulty            @default(MEDIUM)
   correctAnswer  String?

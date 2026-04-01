@@ -45,6 +45,7 @@ export class QuestionChoiceResponseDto {
 export class QuestionDetailResponseDto {
   id: string;
   content: string;
+  imageUrl: string | null;
   questionType: 'SINGLE_CHOICE' | 'MULTIPLE_CHOICE' | 'SHORT_ANSWER';
   difficulty: 'EASY' | 'MEDIUM' | 'HARD';
   correctAnswer: string | null;
@@ -67,6 +68,7 @@ export class QuestionDetailResponseDto {
 export class QuestionListItemDto {
   id: string;
   content: string;
+  imageUrl: string | null;
   questionType: 'SINGLE_CHOICE' | 'MULTIPLE_CHOICE' | 'SHORT_ANSWER';
   difficulty: 'EASY' | 'MEDIUM' | 'HARD';
   isPublished: boolean;

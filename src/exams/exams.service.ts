@@ -1765,6 +1765,7 @@ export class ExamsService {
         dto.question = new ExamQuestionDto({
           id: item.question.id,
           content: item.question.content,
+          imageUrl: item.question.imageUrl ?? null,
           questionType: item.question.questionType,
           difficulty: item.question.difficulty,
           choices: finalChoices.map(
@@ -1859,6 +1860,7 @@ export class ExamsService {
             ? new ExamQuestionDto({
                 id: item.question.id,
                 content: item.question.content,
+                imageUrl: item.question.imageUrl ?? null,
                 questionType: item.question.questionType,
                 difficulty: item.question.difficulty,
                 choices: (item.question.choices || []).map(

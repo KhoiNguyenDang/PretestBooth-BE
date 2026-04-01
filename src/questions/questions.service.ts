@@ -56,6 +56,7 @@ export class QuestionsService {
       try {
         const dto: any = {
           content: row['content'] || row['Câu hỏi'],
+          imageUrl: row['imageUrl'] || row['image'] || row['Hình ảnh'] || row['Anh'] || null,
           questionType: row['questionType'] || row['Loại'],
           difficulty: row['difficulty'] || row['Mức độ'],
           correctAnswer: row['correctAnswer'] || row['Đáp án đúng'],
@@ -353,6 +354,7 @@ export class QuestionsService {
       const createdQuestion = await tx.question.create({
         data: {
           content: dto.content,
+          imageUrl: dto.imageUrl?.trim() || null,
           questionType: dto.questionType as QuestionType,
           difficulty: dto.difficulty as Difficulty,
           correctAnswer: dto.correctAnswer,
@@ -459,6 +461,7 @@ export class QuestionsService {
         new QuestionListItemDto({
           id: q.id,
           content: q.content,
+          imageUrl: q.imageUrl,
           questionType: q.questionType as QuestionListItemDto['questionType'],
           difficulty: q.difficulty as QuestionListItemDto['difficulty'],
           isPublished: q.isPublished,
@@ -563,6 +566,7 @@ export class QuestionsService {
         where: { id },
         data: {
           ...(dto.content && { content: dto.content }),
+          ...(dto.imageUrl !== undefined && { imageUrl: dto.imageUrl?.trim() || null }),
           ...(dto.questionType && { questionType: dto.questionType as QuestionType }),
           ...(dto.difficulty && { difficulty: dto.difficulty as Difficulty }),
           ...(dto.correctAnswer !== undefined && { correctAnswer: dto.correctAnswer }),
@@ -687,6 +691,7 @@ export class QuestionsService {
     return new QuestionDetailResponseDto({
       id: question.id,
       content: question.content,
+      imageUrl: question.imageUrl,
       questionType: question.questionType,
       difficulty: question.difficulty,
       correctAnswer: question.correctAnswer,

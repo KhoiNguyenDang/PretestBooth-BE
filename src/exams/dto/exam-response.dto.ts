@@ -76,6 +76,7 @@ export class ExamItemDto {
 export class ExamQuestionDto {
   id: string;
   content: string;
+  imageUrl: string | null;
   questionType: string;
   difficulty: string;
   choices?: ExamChoiceDto[];
