@@ -64,6 +64,33 @@ export class BoothsService {
     return `${get('year')}-${get('month')}-${get('day')} ${get('hour')}:${get('minute')}:${get('second')}`;
   }
 
+  private mapBoothForResponse(booth: any) {
+    const { sessionTokenHash, ...rest } = booth;
+    return {
+      ...rest,
+      isSessionActive: rest.status === 'ACTIVE' && Boolean(sessionTokenHash),
+    };
+  }
+
+  private async appendBoothActivityLog(
+    boothId: string,
+    status: BoothStatus,
+    note: string,
+    changedByUserId: string | null = null,
+    tx?: Prisma.TransactionClient,
+  ) {
+    const db = tx ?? this.prisma;
+    await db.boothStatusLog.create({
+      data: {
+        boothId,
+        fromStatus: status,
+        toStatus: status,
+        note,
+        changedByUserId,
+      },
+    });
+  }
+
   async create(dto: CreateBoothDto, userRole: string) {
     if (!['ADMIN'].includes(userRole)) {
       throw new ForbiddenException('Chỉ quản trị viên mới có thể tạo booth');
@@ -82,7 +109,7 @@ export class BoothsService {
       }
     }
 
-    return this.prisma.booth.create({
+    const created = await this.prisma.booth.create({
       data: {
         name: dto.name,
         code: normalizedCode,
@@ -90,6 +117,8 @@ export class BoothsService {
         location: dto.location || null,
       },
     });
+
+    return this.mapBoothForResponse(created);
   }
 
   async findAll(query: QueryBoothDto) {
@@ -98,13 +127,15 @@ export class BoothsService {
       where.status = query.status as BoothStatus;
     }
 
-    return this.prisma.booth.findMany({
+    const booths = await this.prisma.booth.findMany({
       where,
       orderBy: { name: 'asc' },
       include: {
         _count: { select: { bookings: true } },
       },
     });
+
+    return booths.map((booth) => this.mapBoothForResponse(booth));
   }
 
   async findOne(id: string) {
@@ -123,7 +154,7 @@ export class BoothsService {
     });
 
     if (!booth) throw new NotFoundException('Booth không tồn tại');
-    return booth;
+    return this.mapBoothForResponse(booth);
   }
 
   async update(id: string, dto: UpdateBoothDto, userRole: string, userId: string) {
@@ -147,16 +178,25 @@ export class BoothsService {
 
     const isStatusChanged = dto.status && dto.status !== booth.status;
 
+    const shouldInvalidateSession = isStatusChanged && dto.status !== 'ACTIVE';
+
     const txResult = await this.prisma.$transaction(async (tx) => {
+      const updateData: Prisma.BoothUpdateInput = {
+        ...(dto.name && { name: dto.name }),
+        ...(normalizedCode !== undefined && { code: normalizedCode }),
+        ...(dto.description !== undefined && { description: dto.description }),
+        ...(dto.location !== undefined && { location: dto.location }),
+        ...(dto.status && { status: dto.status as BoothStatus }),
+      };
+
+      if (shouldInvalidateSession) {
+        updateData.sessionTokenHash = null;
+        updateData.sessionActivatedAt = null;
+      }
+
       const updated = await tx.booth.update({
         where: { id },
-        data: {
-          ...(dto.name && { name: dto.name }),
-          ...(normalizedCode !== undefined && { code: normalizedCode }),
-          ...(dto.description !== undefined && { description: dto.description }),
-          ...(dto.location !== undefined && { location: dto.location }),
-          ...(dto.status && { status: dto.status as BoothStatus }),
-        },
+        data: updateData,
       });
 
       let statusLog: {
@@ -192,7 +232,7 @@ export class BoothsService {
       });
     }
 
-    return txResult.updated;
+    return this.mapBoothForResponse(txResult.updated);
   }
 
   async getStatusLogs(boothId: string) {
@@ -251,7 +291,7 @@ export class BoothsService {
     return activeBooths.filter((booth) => !busyIds.has(booth.id));
   }
 
-  async generateActivationOtp(boothCode: string, userRole: string) {
+  async generateActivationOtp(boothCode: string, userRole: string, userId: string) {
     if (userRole !== 'ADMIN') {
       throw new ForbiddenException('Chỉ quản trị viên mới có thể tạo OTP kích hoạt booth');
     }
@@ -276,14 +316,31 @@ export class BoothsService {
     const now = new Date();
     const expiresAt = new Date(now.getTime() + this.getOtpTtlMinutes() * 60 * 1000);
 
-    await this.prisma.booth.update({
-      where: { id: booth.id },
-      data: {
-        activationOtpHash: otpHash,
-        activationOtpExpiresAt: expiresAt,
-        activationOtpUsedAt: null,
-        activationOtpAttempts: 0,
-      },
+    await this.prisma.$transaction(async (tx) => {
+      await tx.booth.update({
+        where: { id: booth.id },
+        data: {
+          activationOtpHash: otpHash,
+          activationOtpExpiresAt: expiresAt,
+          activationOtpUsedAt: null,
+          activationOtpAttempts: 0,
+        },
+      });
+
+      await this.appendBoothActivityLog(
+        booth.id,
+        booth.status,
+        `Tạo OTP kích hoạt booth (hết hạn lúc ${this.formatVnDateTime(expiresAt)})`,
+        userId,
+        tx,
+      );
+    });
+
+    this.realtimeService.notify({
+      boothId: booth.id,
+      message: `Đã tạo OTP kích hoạt cho booth ${booth.code || booth.name}`,
+      level: 'info',
+      emittedAt: new Date().toISOString(),
     });
 
     return {
@@ -351,14 +408,31 @@ export class BoothsService {
       },
     );
 
-    await this.prisma.booth.update({
-      where: { id: booth.id },
-      data: {
-        activationOtpUsedAt: activatedAt,
-        activationOtpAttempts: 0,
-        sessionTokenHash: await bcrypt.hash(boothSessionToken, 10),
-        sessionActivatedAt: activatedAt,
-      },
+    await this.prisma.$transaction(async (tx) => {
+      await tx.booth.update({
+        where: { id: booth.id },
+        data: {
+          activationOtpUsedAt: activatedAt,
+          activationOtpAttempts: 0,
+          sessionTokenHash: await bcrypt.hash(boothSessionToken, 10),
+          sessionActivatedAt: activatedAt,
+        },
+      });
+
+      await this.appendBoothActivityLog(
+        booth.id,
+        booth.status,
+        'Kiosk đăng nhập thành công bằng OTP kích hoạt',
+        null,
+        tx,
+      );
+    });
+
+    this.realtimeService.notify({
+      boothId: booth.id,
+      message: `Booth ${booth.code || booth.name} đã đăng nhập kiosk`,
+      level: 'success',
+      emittedAt: new Date().toISOString(),
     });
 
     return {
@@ -407,14 +481,31 @@ export class BoothsService {
     return booth;
   }
 
-  async deactivateBoothSession(boothSessionToken: string) {
+  async deactivateBoothSession(boothSessionToken: string, userId?: string) {
     const booth = await this.validateBoothSessionToken(boothSessionToken);
 
-    await this.prisma.booth.update({
-      where: { id: booth.id },
-      data: {
-        sessionTokenHash: null,
-      },
+    await this.prisma.$transaction(async (tx) => {
+      await tx.booth.update({
+        where: { id: booth.id },
+        data: {
+          sessionTokenHash: null,
+        },
+      });
+
+      await this.appendBoothActivityLog(
+        booth.id,
+        booth.status,
+        'Kiosk đăng xuất khỏi booth',
+        userId || null,
+        tx,
+      );
+    });
+
+    this.realtimeService.notify({
+      boothId: booth.id,
+      message: `Booth ${booth.code || booth.name} đã đăng xuất kiosk`,
+      level: 'warning',
+      emittedAt: new Date().toISOString(),
     });
 
     return { message: 'Đăng xuất booth thành công' };

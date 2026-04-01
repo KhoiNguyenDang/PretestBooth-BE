@@ -366,6 +366,23 @@ export class BookingsService {
       },
     });
 
+    const booth = await this.prisma.booth.findUnique({
+      where: { id: checkedInBooking.boothId },
+      select: { status: true },
+    });
+
+    if (booth) {
+      await this.prisma.boothStatusLog.create({
+        data: {
+          boothId: checkedInBooking.boothId,
+          fromStatus: booth.status,
+          toStatus: booth.status,
+          note: `Sinh viên auto check-in thành công (booking ${checkedInBooking.id})`,
+          changedByUserId: checkedInBooking.userId,
+        },
+      });
+    }
+
     this.realtimeService.bookingCheckin({
       bookingId: checkedInBooking.id,
       boothId: checkedInBooking.boothId,

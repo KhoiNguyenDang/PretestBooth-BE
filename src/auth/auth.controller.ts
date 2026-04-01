@@ -79,7 +79,7 @@ export class AuthController {
     @Body(new ZodValidationPipe(BoothLogoutSchema))
     dto: BoothLogoutDto,
   ) {
-    return this.authService.boothLogout(dto.boothSessionToken, req.user?.role);
+    return this.authService.boothLogout(dto.boothSessionToken, req.user?.role, req.user?.sub);
   }
 
   @Get('booth-session')

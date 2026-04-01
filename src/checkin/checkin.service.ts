@@ -153,7 +153,7 @@ export class CheckinService {
     const booking = await this.prisma.booking.findUnique({
       where: { id: dto.bookingId },
       include: {
-        booth: { select: { id: true, name: true } },
+        booth: { select: { id: true, name: true, status: true } },
       },
     });
 
@@ -235,6 +235,18 @@ export class CheckinService {
               checkedInAt: now,
             }
           : {}),
+      },
+    });
+
+    await this.prisma.boothStatusLog.create({
+      data: {
+        boothId: updatedBooking.boothId,
+        fromStatus: booking.booth.status,
+        toStatus: booking.booth.status,
+        note: matched
+          ? `Sinh viên check-in thành công (booking ${updatedBooking.id}, similarity=${similarityScore.toFixed(4)})`
+          : `Sinh viên check-in thất bại (booking ${updatedBooking.id}, similarity=${similarityScore.toFixed(4)})`,
+        changedByUserId: updatedBooking.userId,
       },
     });
 

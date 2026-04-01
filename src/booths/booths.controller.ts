@@ -83,7 +83,7 @@ export class BoothsController {
     @Body(new ZodValidationPipe(GenerateActivationOtpSchema)) dto: GenerateActivationOtpDto,
     @Req() req,
   ) {
-    return this.boothsService.generateActivationOtp(dto.boothCode, req.user['role']);
+    return this.boothsService.generateActivationOtp(dto.boothCode, req.user['role'], req.user['sub']);
   }
 
   @Delete(':id')
