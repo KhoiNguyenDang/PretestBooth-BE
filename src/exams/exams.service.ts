@@ -666,17 +666,29 @@ export class ExamsService {
           where: {
             bookingId: activeBooking.id,
             userId,
+            status: 'IN_PROGRESS',
           },
           include: { exam: true },
+          orderBy: { startedAt: 'desc' },
         })
       : null;
 
-    if (existingLinkedSession && existingLinkedSession.status !== 'SUBMITTED' && existingLinkedSession.status !== 'GRADED') {
-      // Check if session has expired
+    if (existingLinkedSession) {
       if (this.isSessionExpired(existingLinkedSession, existingLinkedSession.exam.duration)) {
-        throw new ConflictException('Thời gian làm bài đã hết, không thể tiếp tục');
+        if (exam.type === 'EXAM') {
+          throw new ConflictException('Thời gian làm bài đã hết, không thể tiếp tục');
+        }
+
+        await this.prisma.examSession.update({
+          where: { id: existingLinkedSession.id },
+          data: {
+            status: 'SUBMITTED',
+            finishedAt: new Date(),
+          },
+        });
+      } else {
+        return this.getSessionData(existingLinkedSession.id, userId);
       }
-      return this.getSessionData(existingLinkedSession.id, userId);
     }
 
     const fullExam = await this.prisma.exam.findUnique({
@@ -695,22 +707,39 @@ export class ExamsService {
     if (!fullExam) throw new NotFoundException('Đề thi không tồn tại');
     if (!this.isExamPubliclyAvailable(fullExam)) throw new ForbiddenException('Đề thi chưa được công bố');
 
-    // Check if there's an existing session
-    const existingSession = await this.prisma.examSession.findUnique({
-      where: { examId_userId: { examId, userId } },
+    // Check if there's an existing session of this exam for this user
+    const existingSession = await this.prisma.examSession.findFirst({
+      where: { examId, userId },
       include: { exam: true },
+      orderBy: { startedAt: 'desc' },
     });
 
     if (existingSession) {
-      if (existingSession.status === 'SUBMITTED' || existingSession.status === 'GRADED') {
-        throw new ConflictException('Bạn đã hoàn thành đề thi này rồi');
+      const isCompleted =
+        existingSession.status === 'SUBMITTED' || existingSession.status === 'GRADED';
+
+      if (isCompleted) {
+        if (exam.type === 'PRACTICE') {
+          // PRACTICE exams support re-attempts.
+        } else {
+          throw new ConflictException('Bạn đã hoàn thành đề thi này rồi');
+        }
+      } else if (this.isSessionExpired(existingSession, existingSession.exam.duration)) {
+        if (exam.type === 'PRACTICE') {
+          await this.prisma.examSession.update({
+            where: { id: existingSession.id },
+            data: {
+              status: 'SUBMITTED',
+              finishedAt: new Date(),
+            },
+          });
+        } else {
+          throw new ConflictException('Thời gian làm bài đã hết, không thể tiếp tục');
+        }
+      } else {
+        // Resume existing in-progress session
+        return this.getSessionData(existingSession.id, userId);
       }
-      // Check if session has expired
-      if (this.isSessionExpired(existingSession, existingSession.exam.duration)) {
-        throw new ConflictException('Thời gian làm bài đã hết, không thể tiếp tục');
-      }
-      // Resume existing session
-      return this.getSessionData(existingSession.id, userId);
     }
 
     // Generate random seed

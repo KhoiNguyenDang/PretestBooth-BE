@@ -339,7 +339,7 @@ model ExamSession {
   answers         ExamSessionAnswer[]
   proctoringEvents ProctoringEvent[]
 
-  @@unique([examId, userId])
+  @@index([examId, userId])
   @@index([examId])
   @@index([userId])
   @@index([status])
