@@ -456,6 +456,7 @@ export class ExamsService {
     // Students only see published exams
     if (userRole === 'STUDENT') {
       where.AND = [
+        { type: 'EXAM' },
         { visibility: 'PUBLIC' },
         {
           OR: [{ publishAt: null }, { publishAt: { lte: new Date() } }],
@@ -496,6 +497,7 @@ export class ExamsService {
           id: e.id,
           title: e.title,
           description: e.description,
+          type: e.type,
           questionCount: e.questionCount,
           problemCount: e.problemCount,
           duration: e.duration,
@@ -1898,6 +1900,7 @@ export class ExamsService {
       id: exam.id,
       title: exam.title,
       description: exam.description,
+      type: exam.type,
       questionCount: exam.questionCount,
       problemCount: exam.problemCount,
       duration: exam.duration,
