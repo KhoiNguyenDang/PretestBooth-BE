@@ -4,6 +4,7 @@ export class ExamListItemDto {
   id: string;
   title: string;
   description: string | null;
+  type: 'PRACTICE' | 'EXAM';
   questionCount: number;
   problemCount: number;
   duration: number;
@@ -32,6 +33,7 @@ export class ExamDetailDto {
   id: string;
   title: string;
   description: string | null;
+  type: 'PRACTICE' | 'EXAM';
   questionCount: number;
   problemCount: number;
   duration: number;

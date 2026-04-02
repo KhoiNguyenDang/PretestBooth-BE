@@ -10,10 +10,7 @@ async function bootstrap() {
 
   // Enable CORS for frontend on port 3001
   app.enableCors({
-    origin: [
-      'https://app.nguyen2207.io.vn',
-      'http://localhost:3001',
-    ],
+    origin: ['http://localhost:3001', 'http://localhost:3000'],
     credentials: true,
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     allowedHeaders: ['Content-Type', 'Authorization'],
