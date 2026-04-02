@@ -7,6 +7,7 @@ export const UpdateExamSchema = z
     duration: z.number().int().min(1, 'Thời gian làm bài phải >= 1 phút').optional(),
     isPublished: z.boolean().optional(),
     visibility: z.enum(['PRIVATE', 'PUBLIC']).optional(),
+    allowStudentReviewResults: z.boolean().optional(),
     publishAt: z.coerce.date().optional().nullable(),
     publishNow: z.boolean().optional(),
     shuffleQuestions: z.boolean().optional(),

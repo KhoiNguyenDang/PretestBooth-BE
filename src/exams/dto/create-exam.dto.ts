@@ -45,6 +45,7 @@ export const CreateExamSchema = z
     shuffleChoices: z.boolean().default(true),
     // Publication settings
     visibility: z.enum(['PRIVATE', 'PUBLIC']).default('PRIVATE'),
+    allowStudentReviewResults: z.boolean().default(false),
     publishAt: z.coerce.date().optional().nullable(),
     publishNow: z.boolean().default(false),
     // Exam type classification

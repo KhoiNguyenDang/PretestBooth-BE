@@ -388,6 +388,7 @@ export class ExamsService {
           shuffleQuestions: dto.shuffleQuestions,
           shuffleChoices: dto.shuffleChoices,
           visibility: publication.visibility,
+          allowStudentReviewResults: dto.allowStudentReviewResults,
           publishAt: publication.publishAt,
           publishedAt: publication.publishedAt,
           isPublished: publication.isPublished,
@@ -523,6 +524,7 @@ export class ExamsService {
           visibility: e.visibility,
           publishAt: e.publishAt,
           publishedAt: e.publishedAt,
+          allowStudentReviewResults: e.allowStudentReviewResults,
           subjectId: e.subjectId,
           topicId: e.topicId,
           subject: e.subject,
@@ -590,10 +592,6 @@ export class ExamsService {
     const exam = await this.prisma.exam.findUnique({ where: { id } });
     if (!exam) throw new NotFoundException('Đề thi không tồn tại');
 
-    if (exam.creatorId !== userId && userRole !== 'ADMIN') {
-      throw new ForbiddenException('Bạn không có quyền chỉnh sửa đề thi này');
-    }
-
     const publicationUpdate = this.resolvePublicationUpdate(dto, exam);
 
     const updated = await this.prisma.exam.update({
@@ -604,6 +602,9 @@ export class ExamsService {
         ...(dto.duration && { duration: dto.duration }),
         ...(dto.isPublished !== undefined && { isPublished: dto.isPublished }),
         ...(publicationUpdate || {}),
+        ...(dto.allowStudentReviewResults !== undefined && {
+          allowStudentReviewResults: dto.allowStudentReviewResults,
+        }),
         ...(dto.shuffleQuestions !== undefined && { shuffleQuestions: dto.shuffleQuestions }),
         ...(dto.shuffleChoices !== undefined && { shuffleChoices: dto.shuffleChoices }),
         ...(dto.type !== undefined && { type: dto.type as any }),
@@ -1033,7 +1034,9 @@ export class ExamsService {
 
     await this.syncExamCompletionPoints(sessionId, session.userId, totalScore, session.maxScore);
 
-    return this.getSessionResult(sessionId, userId);
+    return this.getSessionResult(sessionId, userId, 'STUDENT', {
+      allowOwnerPreview: true,
+    });
   }
 
   /**
@@ -1043,6 +1046,7 @@ export class ExamsService {
     sessionId: string,
     userId: string,
     userRole?: string,
+    options?: { allowOwnerPreview?: boolean },
   ): Promise<SessionResultDto> {
     const session = await this.prisma.examSession.findUnique({
       where: { id: sessionId },
@@ -1063,15 +1067,24 @@ export class ExamsService {
 
     if (!session) throw new NotFoundException('Phiên thi không tồn tại');
 
-    // Only owner or lecturers can view results
+    // Lecturers/admin can review all sessions; students can review only their own
+    // sessions when the exam explicitly allows review.
     const isOwner = session.userId === userId;
-    const canViewAsLecturer =
-      userRole === 'ADMIN'
-        ? true
-        : userRole === 'LECTURER'
-          ? await this.authorizationService.hasPermission(userId, userRole, 'CREATE_EXAM')
-          : false;
-    if (!isOwner && !canViewAsLecturer) {
+    const role = userRole || (isOwner ? 'STUDENT' : undefined);
+    const canViewAsLecturer = role === 'ADMIN' || role === 'LECTURER';
+
+    if (canViewAsLecturer) {
+      // Allowed.
+    } else if (role === 'STUDENT' && isOwner) {
+      const canStudentReview =
+        session.exam.allowStudentReviewResults || options?.allowOwnerPreview === true;
+
+      if (!canStudentReview) {
+        throw new ForbiddenException(
+          'Đề thi này không cho phép sinh viên xem lại chi tiết kết quả.',
+        );
+      }
+    } else {
       throw new ForbiddenException('Bạn không có quyền xem kết quả phiên thi này');
     }
 
@@ -1190,6 +1203,12 @@ export class ExamsService {
     // Students only see their own sessions
     if (userRole === 'STUDENT') {
       where.userId = userId;
+    } else if (query.studentId) {
+      where.userId = query.studentId;
+    }
+
+    if (query.examId) {
+      where.examId = query.examId;
     }
 
     if (status) {
@@ -1926,6 +1945,7 @@ export class ExamsService {
       visibility: exam.visibility,
       publishAt: exam.publishAt,
       publishedAt: exam.publishedAt,
+      allowStudentReviewResults: exam.allowStudentReviewResults,
       subjectId: exam.subjectId,
       topicId: exam.topicId,
       subject: exam.subject,

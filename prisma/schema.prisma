@@ -305,6 +305,7 @@ model Exam {
   visibility                        ExamVisibility @default(PRIVATE)
   publishAt                         DateTime?
   publishedAt                       DateTime?
+  allowStudentReviewResults         Boolean        @default(false)
   creator                           User           @relation("ExamCreator", fields: [creatorId], references: [id])
   subject                           Subject?       @relation(fields: [subjectId], references: [id])
   topic                             Topic?         @relation(fields: [topicId], references: [id])

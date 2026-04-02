@@ -13,6 +13,7 @@ export class ExamListItemDto {
   visibility: 'PRIVATE' | 'PUBLIC';
   publishAt: Date | null;
   publishedAt: Date | null;
+  allowStudentReviewResults: boolean;
   subjectId: string | null;
   topicId: string | null;
   subject?: { id: string; name: string } | null;
@@ -43,6 +44,7 @@ export class ExamDetailDto {
   visibility: 'PRIVATE' | 'PUBLIC';
   publishAt: Date | null;
   publishedAt: Date | null;
+  allowStudentReviewResults: boolean;
   subjectId: string | null;
   topicId: string | null;
   subject?: { id: string; name: string } | null;
