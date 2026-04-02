@@ -20,6 +20,7 @@ import {
   PaginatedQuestionsDto,
 } from './dto/question-response.dto';
 import { Prisma } from '@prisma/client';
+import { AuthorizationService } from '../common/authorization/authorization.service';
 
 import * as xlsx from 'xlsx';
 import * as iconv from 'iconv-lite';
@@ -29,13 +30,31 @@ type Difficulty = 'EASY' | 'MEDIUM' | 'HARD';
 
 @Injectable()
 export class QuestionsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly authorizationService: AuthorizationService,
+  ) {}
+
+  private async assertQuestionBankPermission(userId: string, userRole: string, actionLabel: string) {
+    if (userRole === 'ADMIN') {
+      return;
+    }
+
+    if (userRole !== 'LECTURER') {
+      throw new ForbiddenException(`Chỉ giảng viên và quản trị viên mới có thể ${actionLabel}`);
+    }
+
+    await this.authorizationService.assertPermission(
+      userId,
+      userRole,
+      'MANAGE_QUESTION_BANK',
+      'Giảng viên chưa được cấp quyền quản lý ngân hàng câu hỏi',
+    );
+  }
   // ========== IMPORT QUESTIONS FROM FILE ==========
   async importQuestions(file: Express.Multer.File, userId: string, userRole: string) {
     if (!file) throw new BadRequestException('Vui lòng upload file Excel/CSV');
-    if (!['LECTURER', 'ADMIN'].includes(userRole)) {
-      throw new ForbiddenException('Chỉ giảng viên và quản trị viên mới có thể import câu hỏi');
-    }
+    await this.assertQuestionBankPermission(userId, userRole, 'import câu hỏi');
     let data = [];
     const ext = file.originalname.split('.').pop()?.toLowerCase();
     if (ext === 'csv') {
@@ -85,10 +104,12 @@ export class QuestionsService {
 
   // ==================== SUBJECT CRUD ====================
 
-  async createSubject(dto: CreateSubjectDto, userRole: string): Promise<SubjectResponseDto> {
-    if (!['LECTURER', 'ADMIN'].includes(userRole)) {
-      throw new ForbiddenException('Chỉ giảng viên và quản trị viên mới có thể tạo môn học');
-    }
+  async createSubject(
+    dto: CreateSubjectDto,
+    userId: string,
+    userRole: string,
+  ): Promise<SubjectResponseDto> {
+    await this.assertQuestionBankPermission(userId, userRole, 'tạo môn học');
 
     const existing = await this.prisma.subject.findUnique({
       where: { name: dto.name },
@@ -136,11 +157,10 @@ export class QuestionsService {
   async updateSubject(
     id: string,
     dto: UpdateSubjectDto,
+    userId: string,
     userRole: string,
   ): Promise<SubjectResponseDto> {
-    if (!['LECTURER', 'ADMIN'].includes(userRole)) {
-      throw new ForbiddenException('Chỉ giảng viên và quản trị viên mới có thể cập nhật môn học');
-    }
+    await this.assertQuestionBankPermission(userId, userRole, 'cập nhật môn học');
 
     const subject = await this.prisma.subject.findUnique({ where: { id } });
     if (!subject) {
@@ -174,10 +194,8 @@ export class QuestionsService {
     });
   }
 
-  async deleteSubject(id: string, userRole: string): Promise<{ message: string }> {
-    if (userRole !== 'ADMIN') {
-      throw new ForbiddenException('Chỉ quản trị viên mới có thể xóa môn học');
-    }
+  async deleteSubject(id: string, userId: string, userRole: string): Promise<{ message: string }> {
+    await this.assertQuestionBankPermission(userId, userRole, 'xóa môn học');
 
     const subject = await this.prisma.subject.findUnique({
       where: { id },
@@ -204,11 +222,10 @@ export class QuestionsService {
   async createTopic(
     subjectId: string,
     dto: CreateTopicDto,
+    userId: string,
     userRole: string,
   ): Promise<TopicResponseDto> {
-    if (!['LECTURER', 'ADMIN'].includes(userRole)) {
-      throw new ForbiddenException('Chỉ giảng viên và quản trị viên mới có thể tạo chủ đề');
-    }
+    await this.assertQuestionBankPermission(userId, userRole, 'tạo chủ đề');
 
     const subject = await this.prisma.subject.findUnique({ where: { id: subjectId } });
     if (!subject) {
@@ -262,10 +279,13 @@ export class QuestionsService {
     );
   }
 
-  async updateTopic(id: string, dto: UpdateTopicDto, userRole: string): Promise<TopicResponseDto> {
-    if (!['LECTURER', 'ADMIN'].includes(userRole)) {
-      throw new ForbiddenException('Chỉ giảng viên và quản trị viên mới có thể cập nhật chủ đề');
-    }
+  async updateTopic(
+    id: string,
+    dto: UpdateTopicDto,
+    userId: string,
+    userRole: string,
+  ): Promise<TopicResponseDto> {
+    await this.assertQuestionBankPermission(userId, userRole, 'cập nhật chủ đề');
 
     const topic = await this.prisma.topic.findUnique({ where: { id } });
     if (!topic) {
@@ -297,10 +317,8 @@ export class QuestionsService {
     });
   }
 
-  async deleteTopic(id: string, userRole: string): Promise<{ message: string }> {
-    if (userRole !== 'ADMIN') {
-      throw new ForbiddenException('Chỉ quản trị viên mới có thể xóa chủ đề');
-    }
+  async deleteTopic(id: string, userId: string, userRole: string): Promise<{ message: string }> {
+    await this.assertQuestionBankPermission(userId, userRole, 'xóa chủ đề');
 
     const topic = await this.prisma.topic.findUnique({
       where: { id },
@@ -329,9 +347,7 @@ export class QuestionsService {
     userRole: string,
     dto: CreateQuestionDto,
   ): Promise<QuestionDetailResponseDto> {
-    if (!['LECTURER', 'ADMIN'].includes(userRole)) {
-      throw new ForbiddenException('Chỉ giảng viên và quản trị viên mới có thể tạo câu hỏi');
-    }
+    await this.assertQuestionBankPermission(creatorId, userRole, 'tạo câu hỏi');
 
     // Validate subject exists
     const subject = await this.prisma.subject.findUnique({ where: { id: dto.subjectId } });
@@ -528,9 +544,7 @@ export class QuestionsService {
     userId: string,
     userRole: string,
   ): Promise<QuestionDetailResponseDto> {
-    if (!['LECTURER', 'ADMIN'].includes(userRole)) {
-      throw new ForbiddenException('Chỉ giảng viên và quản trị viên mới có thể cập nhật câu hỏi');
-    }
+    await this.assertQuestionBankPermission(userId, userRole, 'cập nhật câu hỏi');
 
     const question = await this.prisma.question.findUnique({ where: { id } });
     if (!question) {
@@ -604,9 +618,7 @@ export class QuestionsService {
   }
 
   async remove(id: string, userId: string, userRole: string): Promise<{ message: string }> {
-    if (!['LECTURER', 'ADMIN'].includes(userRole)) {
-      throw new ForbiddenException('Chỉ giảng viên và quản trị viên mới có thể xóa câu hỏi');
-    }
+    await this.assertQuestionBankPermission(userId, userRole, 'xóa câu hỏi');
 
     const question = await this.prisma.question.findUnique({ where: { id } });
     if (!question) {
@@ -627,11 +639,7 @@ export class QuestionsService {
     userId: string,
     userRole: string,
   ): Promise<QuestionDetailResponseDto> {
-    if (!['LECTURER', 'ADMIN'].includes(userRole)) {
-      throw new ForbiddenException(
-        'Chỉ giảng viên và quản trị viên mới có thể thay đổi trạng thái câu hỏi',
-      );
-    }
+    await this.assertQuestionBankPermission(userId, userRole, 'thay đổi trạng thái câu hỏi');
 
     const question = await this.prisma.question.findUnique({ where: { id } });
     if (!question) {

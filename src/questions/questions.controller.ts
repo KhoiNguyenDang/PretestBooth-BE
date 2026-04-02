@@ -44,8 +44,9 @@ export class QuestionsController {
     @Body(new ZodValidationPipe(CreateSubjectSchema)) dto: CreateSubjectDto,
     @Req() req,
   ) {
+    const userId = req.user['sub'];
     const userRole = req.user['role'];
-    return this.questionsService.createSubject(dto, userRole);
+    return this.questionsService.createSubject(dto, userId, userRole);
   }
 
   @Get('subjects')
@@ -59,15 +60,17 @@ export class QuestionsController {
     @Body(new ZodValidationPipe(UpdateSubjectSchema)) dto: UpdateSubjectDto,
     @Req() req,
   ) {
+    const userId = req.user['sub'];
     const userRole = req.user['role'];
-    return this.questionsService.updateSubject(id, dto, userRole);
+    return this.questionsService.updateSubject(id, dto, userId, userRole);
   }
 
   @Delete('subjects/:id')
   @HttpCode(HttpStatus.OK)
   deleteSubject(@Param('id') id: string, @Req() req) {
+    const userId = req.user['sub'];
     const userRole = req.user['role'];
-    return this.questionsService.deleteSubject(id, userRole);
+    return this.questionsService.deleteSubject(id, userId, userRole);
   }
 
   // ==================== TOPIC ENDPOINTS ====================
@@ -78,8 +81,9 @@ export class QuestionsController {
     @Body(new ZodValidationPipe(CreateTopicSchema)) dto: CreateTopicDto,
     @Req() req,
   ) {
+    const userId = req.user['sub'];
     const userRole = req.user['role'];
-    return this.questionsService.createTopic(subjectId, dto, userRole);
+    return this.questionsService.createTopic(subjectId, dto, userId, userRole);
   }
 
   @Get('subjects/:subjectId/topics')
@@ -93,15 +97,17 @@ export class QuestionsController {
     @Body(new ZodValidationPipe(UpdateTopicSchema)) dto: UpdateTopicDto,
     @Req() req,
   ) {
+    const userId = req.user['sub'];
     const userRole = req.user['role'];
-    return this.questionsService.updateTopic(id, dto, userRole);
+    return this.questionsService.updateTopic(id, dto, userId, userRole);
   }
 
   @Delete('topics/:id')
   @HttpCode(HttpStatus.OK)
   deleteTopic(@Param('id') id: string, @Req() req) {
+    const userId = req.user['sub'];
     const userRole = req.user['role'];
-    return this.questionsService.deleteTopic(id, userRole);
+    return this.questionsService.deleteTopic(id, userId, userRole);
   }
 
   // ==================== QUESTION ENDPOINTS ====================

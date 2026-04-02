@@ -38,7 +38,7 @@ export class BoothsController {
     @Body(new ZodValidationPipe(CreateBoothSchema)) dto: CreateBoothDto,
     @Req() req,
   ) {
-    return this.boothsService.create(dto, req.user['role']);
+    return this.boothsService.create(dto, req.user['role'], req.user['sub']);
   }
 
   @Get()
@@ -89,6 +89,6 @@ export class BoothsController {
   @Delete(':id')
   @HttpCode(HttpStatus.OK)
   remove(@Param('id') id: string, @Req() req) {
-    return this.boothsService.remove(id, req.user['role']);
+    return this.boothsService.remove(id, req.user['role'], req.user['sub']);
   }
 }

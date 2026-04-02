@@ -6,9 +6,10 @@ import { ExecutionModule } from '../execution/execution.module';
 import { SubmissionsModule } from '../submissions/submissions.module';
 import { BookingsModule } from '../bookings/bookings.module';
 import { PointsModule } from '../points/points.module';
+import { AuthorizationModule } from '../common/authorization/authorization.module';
 
 @Module({
-  imports: [PrismaModule, ExecutionModule, SubmissionsModule, BookingsModule, PointsModule],
+  imports: [PrismaModule, ExecutionModule, SubmissionsModule, BookingsModule, PointsModule, AuthorizationModule],
   controllers: [ExamsController],
   providers: [ExamsService],
   exports: [ExamsService],

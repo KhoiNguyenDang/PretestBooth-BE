@@ -8,12 +8,84 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import * as bcrypt from 'bcryptjs';
 import * as xlsx from 'xlsx';
-import type { QueryUserDto, CreateUserDto, UpdateUserDto } from './dto/user.dto';
+import type {
+  QueryUserDto,
+  CreateUserDto,
+  UpdateUserDto,
+  QueryLecturerDto,
+  UpdateLecturerPermissionsDto,
+} from './dto/user.dto';
 import type { Prisma, Role } from '@prisma/client';
+import { AuthorizationService } from '../common/authorization/authorization.service';
+import {
+  LECTURER_ADMIN_PERMISSION,
+  type LecturerPermissionKey,
+} from '../common/authorization/authorization.constants';
 
 @Injectable()
 export class UsersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly authorizationService: AuthorizationService,
+  ) {}
+
+  private async assertStudentManagementAccess(requesterId: string, requesterRole: string) {
+    if (requesterRole === 'ADMIN') {
+      return;
+    }
+
+    if (requesterRole !== 'LECTURER') {
+      throw new ForbiddenException('Bạn không có quyền quản lý sinh viên');
+    }
+
+    await this.authorizationService.assertPermission(
+      requesterId,
+      requesterRole,
+      'MANAGE_STUDENTS',
+      'Giảng viên chưa được cấp quyền quản lý sinh viên',
+    );
+  }
+
+  private async assertLecturerPermissionManagementAccess(
+    requesterId: string,
+    requesterRole: string,
+  ): Promise<LecturerPermissionKey[]> {
+    const requesterPermissions = await this.authorizationService.getPermissionsForUser(
+      requesterId,
+      requesterRole,
+    );
+
+    this.authorizationService.assertCanManageLecturerPermissions(
+      requesterRole,
+      requesterPermissions,
+    );
+
+    return requesterPermissions;
+  }
+
+  private mapLecturerWithPermissions(record: {
+    id: string;
+    email: string;
+    name: string | null;
+    isLocked: boolean;
+    createdAt: Date;
+    lecturerPermissions: { permission: LecturerPermissionKey }[];
+  }) {
+    const permissions = record.lecturerPermissions.map(
+      (item) => item.permission as LecturerPermissionKey,
+    );
+
+    return {
+      id: record.id,
+      email: record.email,
+      name: record.name,
+      role: 'LECTURER' as const,
+      isLocked: record.isLocked,
+      createdAt: record.createdAt,
+      permissions,
+      isLecturerAdmin: permissions.includes(LECTURER_ADMIN_PERMISSION),
+    };
+  }
 
   private buildStudentWhere(query: QueryUserDto): Prisma.UserWhereInput {
     const { role, search, className, isLocked } = query;
@@ -64,10 +136,8 @@ export class UsersService {
   /**
    * Find all users with pagination and filtering
    */
-  async findAll(query: QueryUserDto, requesterRole: string) {
-    if (!['ADMIN', 'LECTURER'].includes(requesterRole)) {
-      throw new ForbiddenException('Bạn không có quyền xem danh sách sinh viên');
-    }
+  async findAll(query: QueryUserDto, requesterId: string, requesterRole: string) {
+    await this.assertStudentManagementAccess(requesterId, requesterRole);
 
     const { page, limit, role, search, className, isLocked, sortOrder } = query;
     const skip = (page - 1) * limit;
@@ -117,10 +187,8 @@ export class UsersService {
     };
   }
 
-  async exportStudents(query: QueryUserDto, requesterRole: string) {
-    if (!['ADMIN', 'LECTURER'].includes(requesterRole)) {
-      throw new ForbiddenException('Bạn không có quyền xuất danh sách sinh viên');
-    }
+  async exportStudents(query: QueryUserDto, requesterId: string, requesterRole: string) {
+    await this.assertStudentManagementAccess(requesterId, requesterRole);
 
     const where = this.buildStudentWhere(query);
     const students = await this.prisma.user.findMany({
@@ -227,6 +295,10 @@ export class UsersService {
       throw new ForbiddenException('Sinh viên chỉ có thể xem thông tin của chính mình');
     }
 
+    if (requesterRole === 'LECTURER') {
+      await this.assertStudentManagementAccess(requesterId, requesterRole);
+    }
+
     if (['ADMIN', 'LECTURER'].includes(requesterRole) && user.role !== 'STUDENT') {
       throw new ForbiddenException('Chỉ được thao tác với dữ liệu sinh viên');
     }
@@ -237,10 +309,8 @@ export class UsersService {
   /**
    * Create single user (Admin/Lecturer)
    */
-  async create(dto: CreateUserDto, requesterRole: string) {
-    if (!['ADMIN', 'LECTURER'].includes(requesterRole)) {
-      throw new ForbiddenException('Bạn không có quyền tạo dữ liệu sinh viên');
-    }
+  async create(dto: CreateUserDto, requesterId: string, requesterRole: string) {
+    await this.assertStudentManagementAccess(requesterId, requesterRole);
 
     if (dto.role !== 'STUDENT') {
       throw new BadRequestException('Chỉ được tạo tài khoản với vai trò STUDENT');
@@ -292,6 +362,187 @@ export class UsersService {
     };
   }
 
+  async findLecturers(query: QueryLecturerDto, requesterId: string, requesterRole: string) {
+    const requesterPermissions = await this.assertLecturerPermissionManagementAccess(
+      requesterId,
+      requesterRole,
+    );
+
+    const { page, limit, search, sortOrder } = query;
+    const skip = (page - 1) * limit;
+
+    const where: Prisma.UserWhereInput = { role: 'LECTURER' };
+    if (search) {
+      where.OR = [
+        { email: { contains: search, mode: 'insensitive' } },
+        { name: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+
+    const [rows, total] = await Promise.all([
+      this.prisma.user.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { createdAt: sortOrder },
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          isLocked: true,
+          createdAt: true,
+          lecturerPermissions: {
+            select: { permission: true },
+            orderBy: { permission: 'asc' },
+          },
+        },
+      }),
+      this.prisma.user.count({ where }),
+    ]);
+
+    return {
+      data: rows.map((row) => this.mapLecturerWithPermissions(row)),
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+      requesterPermissions,
+      assignablePermissions:
+        requesterRole === 'ADMIN'
+          ? this.authorizationService.getAllLecturerPermissions()
+          : this.authorizationService.getLowerLecturerPermissions(),
+      canGrantAdminPackage: requesterRole === 'ADMIN',
+    };
+  }
+
+  async getLecturerPermissions(lecturerId: string, requesterId: string, requesterRole: string) {
+    const requesterPermissions = await this.assertLecturerPermissionManagementAccess(
+      requesterId,
+      requesterRole,
+    );
+
+    const lecturer = await this.prisma.user.findUnique({
+      where: { id: lecturerId },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        isLocked: true,
+        createdAt: true,
+        role: true,
+        lecturerPermissions: {
+          select: {
+            permission: true,
+            grantedAt: true,
+            grantedByUser: {
+              select: { id: true, email: true, name: true },
+            },
+          },
+          orderBy: { permission: 'asc' },
+        },
+      },
+    });
+
+    if (!lecturer || lecturer.role !== 'LECTURER') {
+      throw new NotFoundException('Giảng viên không tồn tại');
+    }
+
+    const permissions = lecturer.lecturerPermissions.map((item) => item.permission);
+
+    return {
+      id: lecturer.id,
+      email: lecturer.email,
+      name: lecturer.name,
+      role: lecturer.role,
+      isLocked: lecturer.isLocked,
+      createdAt: lecturer.createdAt,
+      permissions,
+      isLecturerAdmin: permissions.includes(LECTURER_ADMIN_PERMISSION),
+      assignments: lecturer.lecturerPermissions,
+      requesterPermissions,
+      assignablePermissions:
+        requesterRole === 'ADMIN'
+          ? this.authorizationService.getAllLecturerPermissions()
+          : this.authorizationService.getLowerLecturerPermissions(),
+      canGrantAdminPackage: requesterRole === 'ADMIN',
+    };
+  }
+
+  async updateLecturerPermissions(
+    lecturerId: string,
+    dto: UpdateLecturerPermissionsDto,
+    requesterId: string,
+    requesterRole: string,
+  ) {
+    const requesterPermissions = await this.assertLecturerPermissionManagementAccess(
+      requesterId,
+      requesterRole,
+    );
+
+    const lecturer = await this.prisma.user.findUnique({
+      where: { id: lecturerId },
+      select: {
+        id: true,
+        role: true,
+        lecturerPermissions: {
+          select: { permission: true },
+        },
+      },
+    });
+
+    if (!lecturer || lecturer.role !== 'LECTURER') {
+      throw new NotFoundException('Giảng viên không tồn tại');
+    }
+
+    const requestedPermissions = [...new Set(dto.permissions)] as LecturerPermissionKey[];
+    const currentPermissions = lecturer.lecturerPermissions.map(
+      (item) => item.permission as LecturerPermissionKey,
+    );
+
+    if (
+      requesterRole !== 'ADMIN' &&
+      currentPermissions.includes(LECTURER_ADMIN_PERMISSION)
+    ) {
+      throw new ForbiddenException(
+        'Giảng viên có quyền admin chỉ được quản lý bởi ADMIN gốc.',
+      );
+    }
+
+    for (const permission of requestedPermissions) {
+      this.authorizationService.assertCanGrantPermission(
+        requesterRole,
+        requesterPermissions,
+        permission,
+      );
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.lecturerPermissionAssignment.deleteMany({
+        where: { lecturerId },
+      });
+
+      if (requestedPermissions.length > 0) {
+        await tx.lecturerPermissionAssignment.createMany({
+          data: requestedPermissions.map((permission) => ({
+            lecturerId,
+            permission,
+            grantedByUserId: requesterId,
+          })),
+        });
+      }
+    });
+
+    const refreshedPermissions = await this.authorizationService.getPermissionsForLecturer(lecturerId);
+
+    return {
+      lecturerId,
+      permissions: refreshedPermissions,
+      isLecturerAdmin: refreshedPermissions.includes(LECTURER_ADMIN_PERMISSION),
+      updatedBy: requesterId,
+      canGrantAdminPackage: requesterRole === 'ADMIN',
+    };
+  }
+
   /**
    * Update user status (lock/unlock)
    */
@@ -314,9 +565,7 @@ export class UsersService {
         throw new ForbiddenException('Sinh viên không có quyền đổi email hoặc MSSV');
       }
     } else {
-      if (!['ADMIN', 'LECTURER'].includes(requesterRole)) {
-        throw new ForbiddenException('Bạn không có quyền cập nhật người dùng');
-      }
+      await this.assertStudentManagementAccess(requesterId, requesterRole);
 
       if (user.role !== 'STUDENT') {
         throw new ForbiddenException('Chỉ được thao tác với dữ liệu sinh viên');
@@ -390,9 +639,7 @@ export class UsersService {
         throw new ForbiddenException('Sinh viên chỉ có thể xóa tài khoản của chính mình');
       }
     } else {
-      if (!['ADMIN', 'LECTURER'].includes(requesterRole)) {
-        throw new ForbiddenException('Bạn không có quyền xóa người dùng');
-      }
+      await this.assertStudentManagementAccess(requesterId, requesterRole);
 
       if (user.role !== 'STUDENT') {
         throw new ForbiddenException('Chỉ được thao tác với dữ liệu sinh viên');
@@ -415,10 +662,8 @@ export class UsersService {
    * Import students from CSV/Excel
   * Expected columns: studentCode, email, name, className?, dateOfBirth (YYYY-MM-DD or DD/MM/YYYY)
    */
-  async importStudents(file: Express.Multer.File, requesterRole: string) {
-    if (!['ADMIN', 'LECTURER'].includes(requesterRole)) {
-      throw new ForbiddenException('Bạn không có quyền import dữ liệu sinh viên');
-    }
+  async importStudents(file: Express.Multer.File, requesterId: string, requesterRole: string) {
+    await this.assertStudentManagementAccess(requesterId, requesterRole);
 
     if (!file) throw new BadRequestException('Vui lòng upload file Excel/CSV');
     if (!this.isSupportedImportFile(file)) {

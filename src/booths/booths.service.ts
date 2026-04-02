@@ -13,6 +13,7 @@ import * as bcrypt from 'bcryptjs';
 import { JwtService } from '@nestjs/jwt';
 import * as crypto from 'crypto';
 import { RealtimeService } from '../realtime/realtime.service';
+import { AuthorizationService } from '../common/authorization/authorization.service';
 
 @Injectable()
 export class BoothsService {
@@ -22,7 +23,25 @@ export class BoothsService {
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
     private readonly realtimeService: RealtimeService,
+    private readonly authorizationService: AuthorizationService,
   ) {}
+
+  private async assertBoothManagementPermission(userId: string, userRole: string, actionLabel: string) {
+    if (userRole === 'ADMIN') {
+      return;
+    }
+
+    if (userRole !== 'LECTURER') {
+      throw new ForbiddenException(`Chỉ giảng viên và quản trị viên mới có thể ${actionLabel}`);
+    }
+
+    await this.authorizationService.assertPermission(
+      userId,
+      userRole,
+      'MANAGE_BOOTHS',
+      'Giảng viên chưa được cấp quyền quản lý booth',
+    );
+  }
 
   private getOtpTtlMinutes() {
     return Number(process.env.BOOTH_OTP_TTL_MINUTES || 10);
@@ -91,10 +110,8 @@ export class BoothsService {
     });
   }
 
-  async create(dto: CreateBoothDto, userRole: string) {
-    if (!['ADMIN'].includes(userRole)) {
-      throw new ForbiddenException('Chỉ quản trị viên mới có thể tạo booth');
-    }
+  async create(dto: CreateBoothDto, userRole: string, userId: string) {
+    await this.assertBoothManagementPermission(userId, userRole, 'tạo booth');
 
     const exists = await this.prisma.booth.findUnique({ where: { name: dto.name } });
     if (exists) {
@@ -158,9 +175,7 @@ export class BoothsService {
   }
 
   async update(id: string, dto: UpdateBoothDto, userRole: string, userId: string) {
-    if (!['ADMIN'].includes(userRole)) {
-      throw new ForbiddenException('Chỉ quản trị viên mới có thể cập nhật booth');
-    }
+    await this.assertBoothManagementPermission(userId, userRole, 'cập nhật booth');
 
     const booth = await this.prisma.booth.findUnique({ where: { id } });
     if (!booth) throw new NotFoundException('Booth không tồn tại');
@@ -248,10 +263,8 @@ export class BoothsService {
     });
   }
 
-  async remove(id: string, userRole: string) {
-    if (!['ADMIN'].includes(userRole)) {
-      throw new ForbiddenException('Chỉ quản trị viên mới có thể xóa booth');
-    }
+  async remove(id: string, userRole: string, userId: string) {
+    await this.assertBoothManagementPermission(userId, userRole, 'xóa booth');
 
     const booth = await this.prisma.booth.findUnique({ where: { id } });
     if (!booth) throw new NotFoundException('Booth không tồn tại');
@@ -292,9 +305,7 @@ export class BoothsService {
   }
 
   async generateActivationOtp(boothCode: string, userRole: string, userId: string) {
-    if (userRole !== 'ADMIN') {
-      throw new ForbiddenException('Chỉ quản trị viên mới có thể tạo OTP kích hoạt booth');
-    }
+    await this.assertBoothManagementPermission(userId, userRole, 'tạo OTP kích hoạt booth');
 
     const normalizedCode = this.normalizeBoothCode(boothCode);
     const booth = await this.prisma.booth.findFirst({

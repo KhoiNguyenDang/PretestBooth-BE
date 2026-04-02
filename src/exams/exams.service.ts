@@ -14,6 +14,7 @@ import { PointsService } from '../points/points.service';
 import { Prisma } from '@prisma/client';
 import * as crypto from 'crypto';
 import { shuffleWithSeed } from './utils/shuffle';
+import { AuthorizationService } from '../common/authorization/authorization.service';
 
 import type { CreateExamDto } from './dto/create-exam.dto';
 import type { UpdateExamDto } from './dto/update-exam.dto';
@@ -52,7 +53,25 @@ export class ExamsService {
     private readonly submissionsService: SubmissionsService,
     private readonly bookingsService: BookingsService,
     private readonly pointsService: PointsService,
+    private readonly authorizationService: AuthorizationService,
   ) {}
+
+  private async assertExamManagementPermission(userId: string, userRole: string, actionLabel: string) {
+    if (userRole === 'ADMIN') {
+      return;
+    }
+
+    if (userRole !== 'LECTURER') {
+      throw new ForbiddenException(`Chỉ giảng viên và quản trị viên mới có thể ${actionLabel}`);
+    }
+
+    await this.authorizationService.assertPermission(
+      userId,
+      userRole,
+      'CREATE_EXAM',
+      'Giảng viên chưa được cấp quyền quản lý đề thi',
+    );
+  }
 
   /**
    * Check if a session has exceeded its time limit
@@ -165,9 +184,7 @@ export class ExamsService {
    * Generate and save an exam by randomly selecting questions/problems matching filters.
    */
   async create(creatorId: string, userRole: string, dto: CreateExamDto): Promise<ExamDetailDto> {
-    if (!['LECTURER', 'ADMIN'].includes(userRole)) {
-      throw new ForbiddenException('Chỉ giảng viên và quản trị viên mới có thể tạo đề thi');
-    }
+    await this.assertExamManagementPermission(creatorId, userRole, 'tạo đề thi');
 
     const selectedSubjectIds = dto.subjectIds?.length
       ? dto.subjectIds
@@ -568,9 +585,7 @@ export class ExamsService {
     userId: string,
     userRole: string,
   ): Promise<ExamDetailDto> {
-    if (!['LECTURER', 'ADMIN'].includes(userRole)) {
-      throw new ForbiddenException('Chỉ giảng viên và quản trị viên mới có thể cập nhật đề thi');
-    }
+    await this.assertExamManagementPermission(userId, userRole, 'cập nhật đề thi');
 
     const exam = await this.prisma.exam.findUnique({ where: { id } });
     if (!exam) throw new NotFoundException('Đề thi không tồn tại');
@@ -614,9 +629,7 @@ export class ExamsService {
    * Delete an exam.
    */
   async remove(id: string, userId: string, userRole: string): Promise<{ message: string }> {
-    if (!['LECTURER', 'ADMIN'].includes(userRole)) {
-      throw new ForbiddenException('Chỉ giảng viên và quản trị viên mới có thể xóa đề thi');
-    }
+    await this.assertExamManagementPermission(userId, userRole, 'xóa đề thi');
 
     const exam = await this.prisma.exam.findUnique({ where: { id } });
     if (!exam) throw new NotFoundException('Đề thi không tồn tại');
@@ -1052,8 +1065,13 @@ export class ExamsService {
 
     // Only owner or lecturers can view results
     const isOwner = session.userId === userId;
-    const isLecturer = userRole && ['LECTURER', 'ADMIN'].includes(userRole);
-    if (!isOwner && !isLecturer) {
+    const canViewAsLecturer =
+      userRole === 'ADMIN'
+        ? true
+        : userRole === 'LECTURER'
+          ? await this.authorizationService.hasPermission(userId, userRole, 'CREATE_EXAM')
+          : false;
+    if (!isOwner && !canViewAsLecturer) {
       throw new ForbiddenException('Bạn không có quyền xem kết quả phiên thi này');
     }
 
@@ -1100,9 +1118,7 @@ export class ExamsService {
     userId: string,
     userRole: string,
   ): Promise<SessionResultDto> {
-    if (!['LECTURER', 'ADMIN'].includes(userRole)) {
-      throw new ForbiddenException('Chỉ giảng viên và quản trị viên mới có thể chấm điểm');
-    }
+    await this.assertExamManagementPermission(userId, userRole, 'chấm điểm');
 
     const session = await this.prisma.examSession.findUnique({
       where: { id: sessionId },

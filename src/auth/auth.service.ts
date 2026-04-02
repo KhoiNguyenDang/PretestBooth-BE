@@ -14,6 +14,7 @@ import { UserResponseDto, TokenResponseDto, LogoutResponseDto } from './dto/auth
 import * as crypto from 'crypto';
 import { BoothsService } from '../booths/booths.service';
 import { BookingsService } from '../bookings/bookings.service';
+import { AuthorizationService } from '../common/authorization/authorization.service';
 
 @Injectable()
 export class AuthService {
@@ -23,7 +24,29 @@ export class AuthService {
     private readonly mailService: MailService,
     private readonly boothsService: BoothsService,
     private readonly bookingsService: BookingsService,
+    private readonly authorizationService: AuthorizationService,
   ) {}
+
+  private async buildUserResponse(user: {
+    id: string;
+    email: string;
+    name: string | null;
+    role: string;
+    isEmailVerified: boolean;
+    kycStatus: 'NOT_STARTED' | 'PENDING' | 'VERIFIED' | 'REJECTED';
+  }) {
+    const permissions = await this.authorizationService.getPermissionsForUser(user.id, user.role);
+
+    return new UserResponseDto({
+      id: user.id,
+      email: user.email,
+      name: user.name || undefined,
+      role: user.role,
+      permissions,
+      isEmailVerified: user.isEmailVerified,
+      kycStatus: user.kycStatus,
+    });
+  }
 
   async register(email: string, password: string, name?: string) {
     // Validate school email format and extract student code
@@ -73,13 +96,7 @@ export class AuthService {
     // Send verification email
     await this.mailService.sendVerificationEmail(email, verificationToken);
 
-    return new UserResponseDto({
-      id: user.id,
-      email: user.email,
-      role: user.role,
-      isEmailVerified: user.isEmailVerified,
-      kycStatus: user.kycStatus,
-    });
+    return this.buildUserResponse(user);
   }
 
   private async generateTokens(userId: string, role: string) {
@@ -115,14 +132,7 @@ export class AuthService {
 
     return new TokenResponseDto({
       ...tokens,
-      user: new UserResponseDto({
-        id: user.id,
-        email: user.email,
-        name: user.name || undefined,
-        role: user.role,
-        isEmailVerified: user.isEmailVerified,
-        kycStatus: user.kycStatus,
-      }),
+      user: await this.buildUserResponse(user),
     });
   }
 
@@ -162,14 +172,7 @@ export class AuthService {
     return {
       ...new TokenResponseDto({
         ...tokens,
-        user: new UserResponseDto({
-          id: user.id,
-          email: user.email,
-          name: user.name || undefined,
-          role: user.role,
-          isEmailVerified: user.isEmailVerified,
-          kycStatus: user.kycStatus,
-        }),
+        user: await this.buildUserResponse(user),
       }),
       booth: {
         id: booth.id,
@@ -293,14 +296,7 @@ export class AuthService {
       throw new NotFoundException('Người dùng không tồn tại');
     }
 
-    return new UserResponseDto({
-      id: user.id,
-      email: user.email,
-      name: user.name || undefined,
-      role: user.role,
-      isEmailVerified: user.isEmailVerified,
-      kycStatus: user.kycStatus,
-    });
+    return this.buildUserResponse(user);
   }
 
   async forgotPassword(email: string) {

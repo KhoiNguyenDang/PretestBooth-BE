@@ -8,6 +8,7 @@ import { PrismaModule } from '../prisma/prisma.module';
 import { MailModule } from '../mail/mail.module';
 import { BoothsModule } from '../booths/booths.module';
 import { BookingsModule } from '../bookings/bookings.module';
+import { AuthorizationModule } from '../common/authorization/authorization.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { BookingsModule } from '../bookings/bookings.module';
     MailModule,
     BoothsModule,
     BookingsModule,
+    AuthorizationModule,
   ],
   controllers: [AuthController],
   providers: [AuthService, JwtStrategy],

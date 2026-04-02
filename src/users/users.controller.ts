@@ -1,5 +1,5 @@
 import {
-  Controller, Get, Post, Patch, Delete, Body, Param, Query, Req, Res,
+  Controller, Get, Post, Put, Patch, Delete, Body, Param, Query, Req, Res,
   UseGuards, UseInterceptors, UploadedFile, ParseFilePipe, MaxFileSizeValidator
 } from '@nestjs/common';
 import type { Response } from 'express';
@@ -7,8 +7,20 @@ import { AuthGuard } from '@nestjs/passport';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { UsersService } from './users.service';
 import { ZodValidationPipe } from '../common/zod/zod-validation.pipe';
-import { QueryUserSchema, CreateUserSchema, UpdateUserSchema } from './dto/user.dto';
-import type { QueryUserDto, CreateUserDto, UpdateUserDto } from './dto/user.dto';
+import {
+  QueryUserSchema,
+  CreateUserSchema,
+  UpdateUserSchema,
+  QueryLecturerSchema,
+  UpdateLecturerPermissionsSchema,
+} from './dto/user.dto';
+import type {
+  QueryUserDto,
+  CreateUserDto,
+  UpdateUserDto,
+  QueryLecturerDto,
+  UpdateLecturerPermissionsDto,
+} from './dto/user.dto';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 
@@ -20,7 +32,7 @@ export class UsersController {
   @Get()
   @Roles('ADMIN', 'LECTURER')
   findAll(@Query(new ZodValidationPipe(QueryUserSchema)) query: QueryUserDto, @Req() req) {
-    return this.usersService.findAll(query, req.user['role']);
+    return this.usersService.findAll(query, req.user['sub'], req.user['role']);
   }
 
   @Get('export')
@@ -30,11 +42,36 @@ export class UsersController {
     @Req() req,
     @Res() res: Response,
   ) {
-    const file = await this.usersService.exportStudents(query, req.user['role']);
+    const file = await this.usersService.exportStudents(query, req.user['sub'], req.user['role']);
 
     res.setHeader('Content-Type', file.contentType);
     res.setHeader('Content-Disposition', `attachment; filename="${file.fileName}"`);
     return res.send(file.buffer);
+  }
+
+  @Get('lecturers')
+  @Roles('ADMIN', 'LECTURER')
+  findLecturers(
+    @Query(new ZodValidationPipe(QueryLecturerSchema)) query: QueryLecturerDto,
+    @Req() req,
+  ) {
+    return this.usersService.findLecturers(query, req.user['sub'], req.user['role']);
+  }
+
+  @Get('lecturers/:id/permissions')
+  @Roles('ADMIN', 'LECTURER')
+  getLecturerPermissions(@Param('id') id: string, @Req() req) {
+    return this.usersService.getLecturerPermissions(id, req.user['sub'], req.user['role']);
+  }
+
+  @Put('lecturers/:id/permissions')
+  @Roles('ADMIN', 'LECTURER')
+  updateLecturerPermissions(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(UpdateLecturerPermissionsSchema)) dto: UpdateLecturerPermissionsDto,
+    @Req() req,
+  ) {
+    return this.usersService.updateLecturerPermissions(id, dto, req.user['sub'], req.user['role']);
   }
 
   @Get(':id')
@@ -46,7 +83,7 @@ export class UsersController {
   @Post()
   @Roles('ADMIN', 'LECTURER')
   create(@Body(new ZodValidationPipe(CreateUserSchema)) dto: CreateUserDto, @Req() req) {
-    return this.usersService.create(dto, req.user['role']);
+    return this.usersService.create(dto, req.user['sub'], req.user['role']);
   }
 
   @Patch(':id')
@@ -79,6 +116,6 @@ export class UsersController {
     file: Express.Multer.File,
     @Req() req,
   ) {
-    return this.usersService.importStudents(file, req.user['role']);
+    return this.usersService.importStudents(file, req.user['sub'], req.user['role']);
   }
 }

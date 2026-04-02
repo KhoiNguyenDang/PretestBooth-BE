@@ -30,13 +30,22 @@ export class QuestionReviewController {
   @Get('sessions')
   getSessions(
     @Query(new ZodValidationPipe(QueryReviewSessionsSchema)) query: QueryReviewSessionsDto,
+    @Req() req,
   ) {
-    return this.questionReviewService.getReviewSessions(query);
+    return this.questionReviewService.getReviewSessions(query, req.user['sub'], req.user['role']);
   }
 
   @Get('stats')
-  getStats(@Query(new ZodValidationPipe(QueryReviewSessionsSchema)) query: QueryReviewSessionsDto) {
-    return this.questionReviewService.getReviewStats(query.quarter, query.year);
+  getStats(
+    @Query(new ZodValidationPipe(QueryReviewSessionsSchema)) query: QueryReviewSessionsDto,
+    @Req() req,
+  ) {
+    return this.questionReviewService.getReviewStats(
+      req.user['sub'],
+      req.user['role'],
+      query.quarter,
+      query.year,
+    );
   }
 
   @Post('submit')

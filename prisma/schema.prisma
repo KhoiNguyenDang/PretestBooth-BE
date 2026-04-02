@@ -49,6 +49,8 @@ model User {
   createdQuestions        Question[]         @relation("QuestionCreator")
   reviewedQuestionSessions QuestionReviewSession[] @relation("QuestionReviewSessionReviewer")
   questionReviewActions    QuestionReviewAction[]  @relation("QuestionReviewActionReviewer")
+  lecturerPermissions      LecturerPermissionAssignment[] @relation("LecturerPermissionOwner")
+  grantedLecturerPermissions LecturerPermissionAssignment[] @relation("LecturerPermissionGrantor")
   proctoringEvents        ProctoringEvent[]
   submissions             Submission[]
 
@@ -58,6 +60,22 @@ model User {
   @@index([isEmailVerified])
   @@index([isLocked])
   @@index([kycStatus])
+}
+
+model LecturerPermissionAssignment {
+  id              String             @id @default(uuid())
+  lecturerId      String
+  permission      LecturerPermission
+  grantedByUserId String?
+  grantedAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  lecturer        User               @relation("LecturerPermissionOwner", fields: [lecturerId], references: [id], onDelete: Cascade)
+  grantedByUser   User?              @relation("LecturerPermissionGrantor", fields: [grantedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([lecturerId, permission])
+  @@index([lecturerId])
+  @@index([permission])
+  @@index([grantedByUserId])
 }
 
 model Problem {
@@ -340,7 +358,7 @@ model ExamSession {
   answers         ExamSessionAnswer[]
   proctoringEvents ProctoringEvent[]
 
-  @@unique([examId, userId])
+  @@index([examId, userId])
   @@index([examId])
   @@index([userId])
   @@index([status])
@@ -611,6 +629,15 @@ enum Role {
   STUDENT
   LECTURER
   ADMIN
+}
+
+enum LecturerPermission {
+  CREATE_EXAM
+  REVIEW_QUESTION
+  MANAGE_QUESTION_BANK
+  MANAGE_STUDENTS
+  MANAGE_BOOTHS
+  LECTURER_ADMIN
 }
 
 enum Difficulty {

@@ -1,6 +1,7 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { QuestionReviewStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { AuthorizationService } from '../common/authorization/authorization.service';
 import type { GenerateReviewSessionsDto } from './dto/generate-review-sessions.dto';
 import type { QueryReviewSessionsDto } from './dto/query-review-sessions.dto';
 import type { ResubmitQuestionReviewDto } from './dto/resubmit-question-review.dto';
@@ -8,7 +9,27 @@ import type { SubmitQuestionReviewDto } from './dto/submit-question-review.dto';
 
 @Injectable()
 export class QuestionReviewService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly authorizationService: AuthorizationService,
+  ) {}
+
+  private async assertReviewPermission(userId: string, userRole: string) {
+    if (userRole === 'ADMIN') {
+      return;
+    }
+
+    if (userRole !== 'LECTURER') {
+      throw new ForbiddenException('Chỉ giảng viên và quản trị viên mới có thể review câu hỏi');
+    }
+
+    await this.authorizationService.assertPermission(
+      userId,
+      userRole,
+      'REVIEW_QUESTION',
+      'Giảng viên chưa được cấp quyền review câu hỏi',
+    );
+  }
 
   async createQuarterlySessions(input?: GenerateReviewSessionsDto) {
     const today = new Date();
@@ -56,7 +77,9 @@ export class QuestionReviewService {
     };
   }
 
-  async getReviewSessions(query: QueryReviewSessionsDto) {
+  async getReviewSessions(query: QueryReviewSessionsDto, userId: string, userRole: string) {
+    await this.assertReviewPermission(userId, userRole);
+
     const today = new Date();
     const quarter = query.quarter ?? this.getQuarter(today);
     const year = query.year ?? today.getFullYear();
@@ -133,7 +156,9 @@ export class QuestionReviewService {
     };
   }
 
-  async getReviewStats(quarter?: number, year?: number) {
+  async getReviewStats(userId: string, userRole: string, quarter?: number, year?: number) {
+    await this.assertReviewPermission(userId, userRole);
+
     const today = new Date();
     const resolvedQuarter = quarter ?? this.getQuarter(today);
     const resolvedYear = year ?? today.getFullYear();
@@ -175,9 +200,7 @@ export class QuestionReviewService {
   }
 
   async submitReview(dto: SubmitQuestionReviewDto, reviewerId: string, reviewerRole: string) {
-    if (!['LECTURER', 'ADMIN'].includes(reviewerRole)) {
-      throw new ForbiddenException('Chỉ giảng viên và quản trị viên mới có thể review câu hỏi');
-    }
+    await this.assertReviewPermission(reviewerId, reviewerRole);
 
     const session = await this.prisma.questionReviewSession.findUnique({
       where: { id: dto.sessionId },

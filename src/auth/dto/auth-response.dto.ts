@@ -15,6 +15,9 @@ export class UserResponseDto {
   role: string;
 
   @Expose()
+  permissions?: string[];
+
+  @Expose()
   isEmailVerified?: boolean;
 
   @Expose()
