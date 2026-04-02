@@ -34,10 +34,14 @@ import {
   ShuffledItemDto,
   SessionAnswerDto,
   SessionResultDto,
+  SessionResultChoiceDto,
   SessionResultItemDto,
+  SessionResultSubmissionDto,
+  SessionResultTestCaseDto,
   ExamSessionListItemDto,
   PaginatedExamSessionsDto,
 } from './dto/exam-response.dto';
+import type { TestCaseResultJson } from '../submissions/dto/submission-response.dto';
 
 type Difficulty = 'EASY' | 'MEDIUM' | 'HARD';
 type AllocationPolicy = 'STRICT' | 'FLEXIBLE';
@@ -1034,9 +1038,7 @@ export class ExamsService {
 
     await this.syncExamCompletionPoints(sessionId, session.userId, totalScore, session.maxScore);
 
-    return this.getSessionResult(sessionId, userId, 'STUDENT', {
-      allowOwnerPreview: true,
-    });
+    return this.getSessionResult(sessionId, userId, 'STUDENT');
   }
 
   /**
@@ -1046,7 +1048,6 @@ export class ExamsService {
     sessionId: string,
     userId: string,
     userRole?: string,
-    options?: { allowOwnerPreview?: boolean },
   ): Promise<SessionResultDto> {
     const session = await this.prisma.examSession.findUnique({
       where: { id: sessionId },
@@ -1056,7 +1057,13 @@ export class ExamsService {
           include: {
             examItem: {
               include: {
-                question: true,
+                question: {
+                  include: {
+                    choices: {
+                      orderBy: { order: 'asc' },
+                    },
+                  },
+                },
                 problem: true,
               },
             },
@@ -1067,44 +1074,128 @@ export class ExamsService {
 
     if (!session) throw new NotFoundException('Phiên thi không tồn tại');
 
-    // Lecturers/admin can review all sessions; students can review only their own
-    // sessions when the exam explicitly allows review.
+    // Lecturers/admin can review all sessions. Students can review only their own
+    // sessions and may receive summary-only data when exam review is disabled.
     const isOwner = session.userId === userId;
     const role = userRole || (isOwner ? 'STUDENT' : undefined);
     const canViewAsLecturer = role === 'ADMIN' || role === 'LECTURER';
 
-    if (canViewAsLecturer) {
-      // Allowed.
-    } else if (role === 'STUDENT' && isOwner) {
-      const canStudentReview =
-        session.exam.allowStudentReviewResults || options?.allowOwnerPreview === true;
-
-      if (!canStudentReview) {
-        throw new ForbiddenException(
-          'Đề thi này không cho phép sinh viên xem lại chi tiết kết quả.',
-        );
-      }
-    } else {
+    if (!canViewAsLecturer && !(role === 'STUDENT' && isOwner)) {
       throw new ForbiddenException('Bạn không có quyền xem kết quả phiên thi này');
     }
 
-    const items = session.answers.map(
-      (a) =>
-        new SessionResultItemDto({
-          examItemId: a.examItemId,
-          section: a.examItem.section as 'QUESTION' | 'PROBLEM',
-          points: a.examItem.points,
-          isCorrect: a.isCorrect,
-          score: a.score,
-          questionContent: a.examItem.question?.content,
-          problemTitle: a.examItem.problem?.title,
-          selectedChoiceIds: a.selectedChoiceIds,
-          textAnswer: a.textAnswer,
-        }),
-    );
+    const canViewItemDetails = canViewAsLecturer || session.exam.allowStudentReviewResults;
+    const detailMessage = canViewItemDetails
+      ? null
+      : 'Đề thi này không cho phép sinh viên xem chi tiết từng câu.';
 
-    const correctItems = items.filter((i) => i.isCorrect === true).length;
-    const pendingItems = items.filter((i) => i.isCorrect === null).length;
+    const correctItems = session.answers.filter((i) => i.isCorrect === true).length;
+    const pendingItems = session.answers.filter((i) => i.isCorrect === null).length;
+
+    const items: SessionResultItemDto[] = [];
+
+    if (canViewItemDetails) {
+      const submissionIds = session.answers
+        .map((answer) => answer.submissionId)
+        .filter((id): id is string => Boolean(id));
+
+      const submissions =
+        submissionIds.length > 0
+          ? await this.prisma.submission.findMany({
+              where: { id: { in: submissionIds } },
+              select: {
+                id: true,
+                status: true,
+                passedTestCases: true,
+                failedTestCases: true,
+                totalTestCases: true,
+                executionTime: true,
+                compileOutput: true,
+                errorMessage: true,
+                testCaseResults: true,
+              },
+            })
+          : [];
+
+      const submissionMap = new Map(submissions.map((submission) => [submission.id, submission]));
+
+      for (const answer of session.answers) {
+        const section = answer.examItem.section as 'QUESTION' | 'PROBLEM';
+        const selectedChoiceIds = answer.selectedChoiceIds ?? [];
+        const question = answer.examItem.question;
+
+        const item = new SessionResultItemDto({
+          examItemId: answer.examItemId,
+          section,
+          points: answer.examItem.points,
+          isCorrect: answer.isCorrect,
+          score: answer.score,
+          questionContent: question?.content,
+          problemTitle: answer.examItem.problem?.title,
+          selectedChoiceIds,
+          textAnswer: answer.textAnswer,
+        });
+
+        if (section === 'QUESTION' && question) {
+          item.questionType = question.questionType;
+          item.questionExplanation = question.explanation;
+          item.correctAnswer =
+            question.questionType === 'SHORT_ANSWER' ? question.correctAnswer : null;
+          item.choices = question.choices.map(
+            (choice) =>
+              new SessionResultChoiceDto({
+                id: choice.id,
+                content: choice.content,
+                order: choice.order,
+                isSelected: selectedChoiceIds.includes(choice.id),
+                isCorrect: choice.isCorrect,
+              }),
+          );
+        }
+
+        if (section === 'PROBLEM' && answer.submissionId) {
+          const submission = submissionMap.get(answer.submissionId);
+
+          if (submission) {
+            const rawTestCaseResults = submission.testCaseResults as unknown;
+            const testCaseResults = Array.isArray(rawTestCaseResults)
+              ? (rawTestCaseResults as TestCaseResultJson[]).map(
+                  (tc) =>
+                    new SessionResultTestCaseDto({
+                      testCaseId: tc.testCaseId,
+                      input: tc.input,
+                      expectedOutput: tc.expectedOutput,
+                      actualOutput: tc.actualOutput,
+                      stdout: tc.stdout,
+                      stderr: tc.stderr,
+                      isCorrect: tc.isCorrect,
+                      isHidden: tc.isHidden,
+                      isSample: tc.isSample,
+                      order: tc.order,
+                      executionTime: tc.executionTime,
+                      passed: tc.passed,
+                      message: tc.message,
+                    }),
+                )
+              : null;
+
+            item.submission = new SessionResultSubmissionDto({
+              submissionId: submission.id,
+              status: submission.status,
+              passedTestCases: submission.passedTestCases,
+              failedTestCases: submission.failedTestCases,
+              totalTestCases: submission.totalTestCases,
+              executionTime: canViewAsLecturer ? submission.executionTime : null,
+              compileOutput: canViewAsLecturer ? submission.compileOutput : null,
+              errorMessage: canViewAsLecturer ? submission.errorMessage : null,
+              testCaseResults: canViewAsLecturer ? testCaseResults : null,
+            });
+          }
+        }
+
+        items.push(item);
+      }
+    }
 
     return new SessionResultDto({
       id: session.id,
@@ -1115,9 +1206,11 @@ export class ExamsService {
       finishedAt: session.finishedAt,
       score: session.score,
       maxScore: session.maxScore,
-      totalItems: items.length,
+      totalItems: session.answers.length,
       correctItems,
       pendingItems,
+      canViewItemDetails,
+      detailMessage,
       items,
     });
   }

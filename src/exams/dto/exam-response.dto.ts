@@ -199,6 +199,8 @@ export class SessionResultDto {
   totalItems: number;
   correctItems: number;
   pendingItems: number;
+  canViewItemDetails: boolean;
+  detailMessage: string | null;
   items: SessionResultItemDto[];
 
   constructor(partial: Partial<SessionResultDto>) {
@@ -214,10 +216,63 @@ export class SessionResultItemDto {
   score: number | null;
   questionContent?: string;
   problemTitle?: string;
+  questionType?: 'SINGLE_CHOICE' | 'MULTIPLE_CHOICE' | 'SHORT_ANSWER';
+  questionExplanation?: string | null;
+  correctAnswer?: string | null;
+  choices?: SessionResultChoiceDto[];
+  submission?: SessionResultSubmissionDto | null;
   selectedChoiceIds: string[];
   textAnswer: string | null;
 
   constructor(partial: Partial<SessionResultItemDto>) {
+    Object.assign(this, partial);
+  }
+}
+
+export class SessionResultChoiceDto {
+  id: string;
+  content: string;
+  order: number;
+  isSelected: boolean;
+  isCorrect: boolean;
+
+  constructor(partial: Partial<SessionResultChoiceDto>) {
+    Object.assign(this, partial);
+  }
+}
+
+export class SessionResultTestCaseDto {
+  testCaseId: string;
+  input: string;
+  expectedOutput: string;
+  actualOutput: string;
+  stdout: string;
+  stderr: string;
+  isCorrect: boolean;
+  isHidden: boolean;
+  isSample: boolean;
+  order: number;
+  executionTime: number;
+  passed: boolean;
+  message: string;
+
+  constructor(partial: Partial<SessionResultTestCaseDto>) {
+    Object.assign(this, partial);
+  }
+}
+
+export class SessionResultSubmissionDto {
+  submissionId: string;
+  status: string;
+  passedTestCases: number;
+  failedTestCases: number;
+  totalTestCases: number;
+  executionTime: number | null;
+  compileOutput: string | null;
+  errorMessage: string | null;
+  testCaseResults: SessionResultTestCaseDto[] | null;
+
+  constructor(partial: Partial<SessionResultSubmissionDto>) {
     Object.assign(this, partial);
   }
 }
