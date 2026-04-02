@@ -10,6 +10,7 @@ import { ZodValidationPipe } from '../common/zod/zod-validation.pipe';
 import {
   QueryUserSchema,
   CreateUserSchema,
+  CreateLecturerSchema,
   UpdateUserSchema,
   QueryLecturerSchema,
   UpdateLecturerPermissionsSchema,
@@ -17,6 +18,7 @@ import {
 import type {
   QueryUserDto,
   CreateUserDto,
+  CreateLecturerDto,
   UpdateUserDto,
   QueryLecturerDto,
   UpdateLecturerPermissionsDto,
@@ -56,6 +58,15 @@ export class UsersController {
     @Req() req,
   ) {
     return this.usersService.findLecturers(query, req.user['sub'], req.user['role']);
+  }
+
+  @Post('lecturers')
+  @Roles('ADMIN', 'LECTURER')
+  createLecturer(
+    @Body(new ZodValidationPipe(CreateLecturerSchema)) dto: CreateLecturerDto,
+    @Req() req,
+  ) {
+    return this.usersService.createLecturer(dto, req.user['sub'], req.user['role']);
   }
 
   @Get('lecturers/:id/permissions')

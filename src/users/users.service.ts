@@ -4,6 +4,7 @@ import {
   ConflictException,
   BadRequestException,
   ForbiddenException,
+  Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import * as bcrypt from 'bcryptjs';
@@ -11,12 +12,14 @@ import * as xlsx from 'xlsx';
 import type {
   QueryUserDto,
   CreateUserDto,
+  CreateLecturerDto,
   UpdateUserDto,
   QueryLecturerDto,
   UpdateLecturerPermissionsDto,
 } from './dto/user.dto';
 import type { Prisma, Role } from '@prisma/client';
 import { AuthorizationService } from '../common/authorization/authorization.service';
+import { MailService } from '../mail/mail.service';
 import {
   LECTURER_ADMIN_PERMISSION,
   type LecturerPermissionKey,
@@ -24,9 +27,12 @@ import {
 
 @Injectable()
 export class UsersService {
+  private readonly logger = new Logger(UsersService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly authorizationService: AuthorizationService,
+    private readonly mailService: MailService,
   ) {}
 
   private async assertStudentManagementAccess(requesterId: string, requesterRole: string) {
@@ -354,11 +360,77 @@ export class UsersService {
       },
     });
 
+    try {
+      await this.mailService.sendStudentAccountCredentialsEmail({
+        email: user.email,
+        name: user.name,
+        studentCode: user.studentCode,
+        password: plainPassword,
+      });
+    } catch (error: unknown) {
+      this.logger.error(
+        `Khong gui duoc email thong tin tai khoan cho sinh vien ${user.email}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+
+      try {
+        await this.prisma.user.delete({ where: { id: user.id } });
+      } catch (rollbackError: unknown) {
+        this.logger.error(
+          `Khong the rollback tai khoan sinh vien ${user.email} sau khi gui email that bai`,
+          rollbackError instanceof Error ? rollbackError.stack : undefined,
+        );
+      }
+
+      throw new BadRequestException(
+        'Không thể gửi email thông tin đăng nhập cho sinh viên. Vui lòng kiểm tra cấu hình mail và thử lại.',
+      );
+    }
+
     return {
       id: user.id,
       email: user.email,
       name: user.name,
-      message: `Tài khoản tạo thành công. Mật khẩu mặc định: ${plainPassword}`,
+      emailSent: true,
+      message: 'Tài khoản sinh viên đã tạo thành công và thông tin đăng nhập đã được gửi qua email.',
+    };
+  }
+
+  async createLecturer(dto: CreateLecturerDto, requesterId: string, requesterRole: string) {
+    await this.assertLecturerPermissionManagementAccess(requesterId, requesterRole);
+
+    const email = dto.email.trim().toLowerCase();
+    const existing = await this.prisma.user.findUnique({ where: { email } });
+    if (existing) {
+      throw new ConflictException('Email đã tồn tại');
+    }
+
+    const hashedPassword = await bcrypt.hash(dto.password, 10);
+
+    const lecturer = await this.prisma.user.create({
+      data: {
+        email,
+        name: dto.name.trim(),
+        password: hashedPassword,
+        role: 'LECTURER',
+        isEmailVerified: true,
+      },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        role: true,
+        createdAt: true,
+      },
+    });
+
+    return {
+      id: lecturer.id,
+      email: lecturer.email,
+      name: lecturer.name,
+      role: lecturer.role,
+      createdAt: lecturer.createdAt,
+      message: 'Tạo tài khoản giảng viên thành công.',
     };
   }
 

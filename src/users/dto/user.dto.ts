@@ -17,13 +17,24 @@ export type QueryUserDto = z.output<typeof QueryUserSchema>;
 export const CreateUserSchema = z.object({
   email: z.string().email('Email không hợp lệ'),
   name: z.string().min(1, 'Tên không được để trống'),
-  role: z.enum(['STUDENT', 'LECTURER', 'ADMIN']),
+  role: z.literal('STUDENT'),
   studentCode: z.string().optional(),
   className: z.string().optional(),
   dateOfBirth: z.string().refine((val) => !isNaN(Date.parse(val)), 'Ngày sinh không hợp lệ').optional(),
 });
 
 export type CreateUserDto = z.output<typeof CreateUserSchema>;
+
+export const CreateLecturerSchema = z.object({
+  email: z.string().email('Email không hợp lệ'),
+  name: z.string().min(1, 'Tên không được để trống'),
+  password: z
+    .string()
+    .min(8, 'Mật khẩu phải có ít nhất 8 ký tự')
+    .max(72, 'Mật khẩu không hợp lệ'),
+});
+
+export type CreateLecturerDto = z.output<typeof CreateLecturerSchema>;
 
 export const UpdateUserSchema = z.object({
   email: z.string().email('Email không hợp lệ').optional(),

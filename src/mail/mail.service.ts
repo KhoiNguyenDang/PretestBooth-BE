@@ -53,4 +53,31 @@ export class MailService {
 
     await this.transporter.sendMail(mailOptions);
   }
+
+  async sendStudentAccountCredentialsEmail(params: {
+    email: string;
+    name?: string | null;
+    studentCode?: string | null;
+    password: string;
+  }): Promise<void> {
+    const loginUrl = `${process.env.APP_URL || 'http://localhost:3000'}/login`;
+    const displayName = params.name?.trim() || params.studentCode || 'Sinh viên';
+
+    const mailOptions = {
+      from: process.env.MAIL_FROM || process.env.MAIL_USER,
+      to: params.email,
+      subject: 'Thong tin tai khoan sinh vien - Pretest Booth',
+      html: `
+        <h1>Thong tin tai khoan Pretest Booth</h1>
+        <p>Xin chao ${displayName},</p>
+        <p>Tai khoan sinh vien cua ban da duoc tao boi quan tri vien.</p>
+        <p><strong>Email dang nhap:</strong> ${params.email}</p>
+        <p><strong>Mat khau tam thoi:</strong> ${params.password}</p>
+        <p>Vui long dang nhap tai: <a href="${loginUrl}">${loginUrl}</a></p>
+        <p>Neu ban khong nhan duoc yeu cau nay, vui long lien he quan tri vien.</p>
+      `,
+    };
+
+    await this.transporter.sendMail(mailOptions);
+  }
 }
