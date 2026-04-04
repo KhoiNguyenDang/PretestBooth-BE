@@ -477,6 +477,10 @@ export class ExamsService {
       difficulty,
       visibility,
       search,
+      minDuration,
+      maxDuration,
+      minQuestionCount,
+      maxQuestionCount,
       isPublished,
       sortBy,
       sortOrder,
@@ -503,6 +507,18 @@ export class ExamsService {
     if (topicId) where.topicId = topicId;
     if (difficulty) where.difficulty = difficulty as Difficulty;
     if (visibility && userRole !== 'STUDENT') where.visibility = visibility;
+    if (minDuration !== undefined || maxDuration !== undefined) {
+      where.duration = {
+        ...(minDuration !== undefined && { gte: minDuration }),
+        ...(maxDuration !== undefined && { lte: maxDuration }),
+      };
+    }
+    if (minQuestionCount !== undefined || maxQuestionCount !== undefined) {
+      where.questionCount = {
+        ...(minQuestionCount !== undefined && { gte: minQuestionCount }),
+        ...(maxQuestionCount !== undefined && { lte: maxQuestionCount }),
+      };
+    }
     if (search) {
       where.title = { contains: search, mode: 'insensitive' };
     }
