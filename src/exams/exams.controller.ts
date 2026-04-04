@@ -108,7 +108,8 @@ export class ExamsController {
   @Post(':id/start')
   startSession(@Param('id') id: string, @Req() req) {
     const userId = req.user['sub'];
-    return this.examsService.startSession(id, userId);
+    const userRole = req.user['role'];
+    return this.examsService.startSession(id, userId, userRole);
   }
 
   @Get('sessions')

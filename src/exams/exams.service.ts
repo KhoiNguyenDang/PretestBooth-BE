@@ -62,6 +62,7 @@ type PretestThresholdSource = 'PRETEST_CONFIG' | 'EXAM';
 
 const PRETEST_CONFIG_SETTING_KEY = 'PRETEST_EXAM_FLOW_CONFIG';
 const PRETEST_RANDOM_EXAM_TITLE_PREFIX = 'Pretest Auto';
+const VIETNAM_UTC_OFFSET_MINUTES = 7 * 60;
 
 @Injectable()
 export class ExamsService {
@@ -137,6 +138,33 @@ export class ExamsService {
     // If expiresAt is set, use it; otherwise calculate from startedAt
     const deadline = session.expiresAt ? session.expiresAt.getTime() : session.startedAt.getTime() + durationMinutes * 60 * 1000;
     return now > deadline;
+  }
+
+  private getVietnamDayRange(reference = new Date()): { start: Date; end: Date } {
+    const dateParts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Ho_Chi_Minh',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(reference);
+
+    const year = Number(dateParts.find((part) => part.type === 'year')?.value || 0);
+    const month = Number(dateParts.find((part) => part.type === 'month')?.value || 0);
+    const day = Number(dateParts.find((part) => part.type === 'day')?.value || 0);
+
+    if (!year || !month || !day) {
+      const fallbackStart = new Date(reference);
+      fallbackStart.setHours(0, 0, 0, 0);
+      const fallbackEnd = new Date(fallbackStart.getTime() + 24 * 60 * 60 * 1000);
+      return { start: fallbackStart, end: fallbackEnd };
+    }
+
+    const start = new Date(
+      Date.UTC(year, month - 1, day, 0, 0, 0, 0) - VIETNAM_UTC_OFFSET_MINUTES * 60 * 1000,
+    );
+    const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+
+    return { start, end };
   }
 
   private calculateExamCompletionPoints(score: number, maxScore: number | null): number {
@@ -416,11 +444,16 @@ export class ExamsService {
 
   async getMyPretestStatus(userId: string, _userRole: string): Promise<PretestStatusDto> {
     const config = await this.loadPretestConfigRecord();
+    const todayRange = this.getVietnamDayRange();
     const [attemptsUsed, passedSession] = await Promise.all([
       this.prisma.examSession.count({
         where: {
           userId,
           isPretestSession: true,
+          startedAt: {
+            gte: todayRange.start,
+            lt: todayRange.end,
+          },
         },
       }),
       this.prisma.examSession.findFirst({
@@ -599,6 +632,8 @@ export class ExamsService {
       throw new BadRequestException('Pretest hiện chưa được bật cấu hình');
     }
 
+    const todayRange = this.getVietnamDayRange();
+
     const activeBooking = await this.bookingsService.requireActiveCheckedInBooking(userId, 'EXAM');
 
     const existingInProgress = await this.prisma.examSession.findFirst({
@@ -637,11 +672,15 @@ export class ExamsService {
       }
     }
 
-    const [attemptsUsed, hasPassed] = await Promise.all([
+    const [attemptsUsedToday, hasPassed] = await Promise.all([
       this.prisma.examSession.count({
         where: {
           userId,
           isPretestSession: true,
+          startedAt: {
+            gte: todayRange.start,
+            lt: todayRange.end,
+          },
         },
       }),
       this.prisma.examSession.findFirst({
@@ -658,9 +697,9 @@ export class ExamsService {
       throw new ConflictException('Bạn đã đạt pretest, hệ thống đã khóa thi lại');
     }
 
-    if (attemptsUsed >= config.maxAttempts) {
+    if (attemptsUsedToday >= config.maxAttempts) {
       throw new ConflictException(
-        `Bạn đã dùng hết số lần thi pretest (${config.maxAttempts} lần)`,
+        `Bạn đã dùng hết số lần thi pretest trong ngày (${config.maxAttempts} lần/ngày)`,
       );
     }
 
@@ -712,7 +751,7 @@ export class ExamsService {
         expiresAt,
         maxScore,
         isPretestSession: true,
-        pretestAttemptNumber: attemptsUsed + 1,
+        pretestAttemptNumber: attemptsUsedToday + 1,
         pretestAssignmentMode: assignmentMode,
         pretestThresholdSource: thresholdSource,
         pretestSourceExamId: sourceExamId,
@@ -735,7 +774,7 @@ export class ExamsService {
     this.realtimeService.notify({
       userId,
       boothId: activeBooking.boothId,
-      message: `Đã gán pretest lần ${attemptsUsed + 1}/${config.maxAttempts}. Ngưỡng đạt: ${appliedPassingScoreAbsolute}.`,
+      message: `Đã gán pretest lần ${attemptsUsedToday + 1}/${config.maxAttempts} trong ngày. Ngưỡng đạt: ${appliedPassingScoreAbsolute}.`,
       level: 'info',
       emittedAt,
     });
@@ -1313,7 +1352,7 @@ export class ExamsService {
    * Generates a random seed and returns shuffled items.
     * Requires booth check-in only for EXAM sessions.
    */
-  async startSession(examId: string, userId: string): Promise<ShuffledSessionDto> {
+  async startSession(examId: string, userId: string, userRole: string): Promise<ShuffledSessionDto> {
     await this.syncScheduledExamPublication();
 
     const exam = await this.prisma.exam.findUnique({
@@ -1321,6 +1360,12 @@ export class ExamsService {
       select: { id: true, type: true },
     });
     if (!exam) throw new NotFoundException('Đề thi không tồn tại');
+
+    if (exam.type === 'EXAM' && userRole === 'STUDENT') {
+      throw new ForbiddenException(
+        'Sinh viên có lịch EXAM sẽ được hệ thống gán đề tự động. Vui lòng bắt đầu từ check-in booth.',
+      );
+    }
 
     let activeBooking: Awaited<ReturnType<BookingsService['findActiveCheckedInBooking']>> | null =
       null;
