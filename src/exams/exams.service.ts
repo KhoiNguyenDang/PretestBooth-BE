@@ -44,6 +44,7 @@ import {
 import type { TestCaseResultJson } from '../submissions/dto/submission-response.dto';
 
 type Difficulty = 'EASY' | 'MEDIUM' | 'HARD';
+type QuestionClassification = 'PRACTICE' | 'EXAM';
 type AllocationPolicy = 'STRICT' | 'FLEXIBLE';
 type ExamVisibility = 'PRIVATE' | 'PUBLIC';
 
@@ -198,6 +199,8 @@ export class ExamsService {
     const ruleSubjectIds = dto.questionAllocationRules?.map((r) => r.subjectId) || [];
     const subjectIdsToValidate = [...new Set([...selectedSubjectIds, ...ruleSubjectIds])];
     const allocationPolicy: AllocationPolicy = dto.allocationPolicy || 'STRICT';
+    const targetQuestionClassification: QuestionClassification =
+      dto.type === 'PRACTICE' ? 'PRACTICE' : 'EXAM';
     const isFlexibleAllocation = allocationPolicy === 'FLEXIBLE';
     let subjectNameById: Record<string, string> = {};
 
@@ -261,7 +264,11 @@ export class ExamsService {
 
       // Validate all provided question IDs exist and are published
       const foundQuestions = await this.prisma.question.findMany({
-        where: { id: { in: distinctQuestionIds }, isPublished: true },
+        where: {
+          id: { in: distinctQuestionIds },
+          isPublished: true,
+          classification: targetQuestionClassification,
+        },
         select: { id: true },
       });
       const foundIds = new Set(foundQuestions.map((q) => q.id));
@@ -279,6 +286,7 @@ export class ExamsService {
           {
             topicId: dto.topicId || undefined,
             defaultDifficulty: (dto.difficulty as Difficulty) || undefined,
+            classification: targetQuestionClassification,
             subjectNameById,
           },
           allocationPolicy,
@@ -286,6 +294,7 @@ export class ExamsService {
       } else {
       const useQuestionDetailDistribution = Boolean(dto.questionDifficultyDistribution);
       const questionFilter = {
+        classification: targetQuestionClassification,
         subjectIds: selectedSubjectIds.length > 0 ? selectedSubjectIds : undefined,
         topicId: dto.topicId || undefined,
         difficulty: useQuestionDetailDistribution
@@ -1508,12 +1517,16 @@ export class ExamsService {
   }
 
   private buildQuestionFilterWhereSql(filter: {
+    classification: QuestionClassification;
     subjectIds?: string[];
     topicId?: string;
     difficulty?: Difficulty;
     excludeIds?: string[];
   }): Prisma.Sql {
-    const conditions: Prisma.Sql[] = [Prisma.sql`q."isPublished" = true`];
+    const conditions: Prisma.Sql[] = [
+      Prisma.sql`q."isPublished" = true`,
+      Prisma.sql`q."classification" = ${filter.classification}::"QuestionClassification"`,
+    ];
 
     if (filter.subjectIds?.length) {
       conditions.push(Prisma.sql`q."subjectId" IN (${Prisma.join(filter.subjectIds)})`);
@@ -1533,6 +1546,7 @@ export class ExamsService {
 
   private async pickRandomQuestionIdsBySql(
     filter: {
+      classification: QuestionClassification;
       subjectIds?: string[];
       topicId?: string;
       difficulty?: Difficulty;
@@ -1556,6 +1570,7 @@ export class ExamsService {
 
   private async pickRandomQuestionIdsByDifficultyDistribution(
     filter: {
+      classification: QuestionClassification;
       subjectIds?: string[];
       topicId?: string;
       difficulty?: Difficulty;
@@ -1566,7 +1581,10 @@ export class ExamsService {
     const totalRequested = distribution.easy + distribution.medium + distribution.hard;
     if (totalRequested <= 0) return [];
 
-    const where: Prisma.QuestionWhereInput = { isPublished: true };
+    const where: Prisma.QuestionWhereInput = {
+      isPublished: true,
+      classification: filter.classification,
+    };
     if (filter.subjectIds?.length) where.subjectId = { in: filter.subjectIds };
     if (filter.topicId) where.topicId = filter.topicId;
 
@@ -1636,6 +1654,7 @@ export class ExamsService {
       const missing = totalRequested - selectedIds.length;
       const fallbackIds = await this.pickRandomQuestionIdsBySql(
         {
+          classification: filter.classification,
           subjectIds: filter.subjectIds,
           topicId: filter.topicId,
           excludeIds: selectedIds,
@@ -1656,6 +1675,7 @@ export class ExamsService {
     options: {
       topicId?: string;
       defaultDifficulty?: Difficulty;
+      classification: QuestionClassification;
       subjectNameById: Record<string, string>;
     },
     allocationPolicy: AllocationPolicy,
@@ -1666,6 +1686,7 @@ export class ExamsService {
 
     for (const rule of rules) {
       const questionFilter = {
+        classification: options.classification,
         subjectIds: [rule.subjectId],
         topicId: options.topicId,
         difficulty: (rule.difficulty as Difficulty | undefined) || options.defaultDifficulty,
@@ -1686,6 +1707,7 @@ export class ExamsService {
         const missing = rule.count - picked.length;
         const fallback = await this.pickRandomQuestionIdsBySql(
           {
+            classification: options.classification,
             subjectIds: [rule.subjectId],
             topicId: options.topicId,
             excludeIds: [...selectedIds, ...picked],

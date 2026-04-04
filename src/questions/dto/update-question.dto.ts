@@ -12,6 +12,7 @@ export const UpdateQuestionSchema = z
     content: z.string().min(1, 'Nội dung câu hỏi không được để trống').optional(),
     imageUrl: z.string().max(2048, 'URL ảnh quá dài').optional().nullable(),
     questionType: z.enum(['SINGLE_CHOICE', 'MULTIPLE_CHOICE', 'SHORT_ANSWER']).optional(),
+    classification: z.enum(['PRACTICE', 'EXAM']).optional(),
     difficulty: z.enum(['EASY', 'MEDIUM', 'HARD']).optional(),
     subjectId: z.string().uuid('Subject ID không hợp lệ').optional(),
     topicId: z.string().uuid('Topic ID không hợp lệ').optional().nullable(),

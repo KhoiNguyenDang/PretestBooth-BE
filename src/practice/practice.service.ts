@@ -44,7 +44,10 @@ export class PracticeService {
       throw new BadRequestException('Phải chọn ít nhất một loại bài tập');
     }
 
-    const questionWhere: Prisma.QuestionWhereInput = { isPublished: true };
+    const questionWhere: Prisma.QuestionWhereInput = {
+      isPublished: true,
+      classification: 'PRACTICE',
+    };
     const problemWhere: Prisma.ProblemWhereInput = { isPublished: true };
 
     if (dto.difficulty) {

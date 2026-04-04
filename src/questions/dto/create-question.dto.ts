@@ -11,6 +11,7 @@ export const CreateQuestionSchema = z
     content: z.string().min(1, 'Nội dung câu hỏi không được để trống'),
     imageUrl: z.string().max(2048, 'URL ảnh quá dài').optional().nullable(),
     questionType: z.enum(['SINGLE_CHOICE', 'MULTIPLE_CHOICE', 'SHORT_ANSWER']),
+    classification: z.enum(['PRACTICE', 'EXAM']).default('EXAM'),
     difficulty: z.enum(['EASY', 'MEDIUM', 'HARD']).default('MEDIUM'),
     subjectId: z.string().uuid('Subject ID không hợp lệ'),
     topicId: z.string().uuid('Topic ID không hợp lệ').optional().nullable(),

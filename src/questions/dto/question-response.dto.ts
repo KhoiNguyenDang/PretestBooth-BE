@@ -47,6 +47,7 @@ export class QuestionDetailResponseDto {
   content: string;
   imageUrl: string | null;
   questionType: 'SINGLE_CHOICE' | 'MULTIPLE_CHOICE' | 'SHORT_ANSWER';
+  classification: 'PRACTICE' | 'EXAM';
   difficulty: 'EASY' | 'MEDIUM' | 'HARD';
   correctAnswer: string | null;
   explanation: string | null;
@@ -70,6 +71,7 @@ export class QuestionListItemDto {
   content: string;
   imageUrl: string | null;
   questionType: 'SINGLE_CHOICE' | 'MULTIPLE_CHOICE' | 'SHORT_ANSWER';
+  classification: 'PRACTICE' | 'EXAM';
   difficulty: 'EASY' | 'MEDIUM' | 'HARD';
   isPublished: boolean;
   subjectId: string;

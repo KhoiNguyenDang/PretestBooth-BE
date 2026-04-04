@@ -26,6 +26,7 @@ import * as xlsx from 'xlsx';
 import * as iconv from 'iconv-lite';
 
 type QuestionType = 'SINGLE_CHOICE' | 'MULTIPLE_CHOICE' | 'SHORT_ANSWER';
+type QuestionClassification = 'PRACTICE' | 'EXAM';
 type Difficulty = 'EASY' | 'MEDIUM' | 'HARD';
 
 @Injectable()
@@ -34,6 +35,23 @@ export class QuestionsService {
     private readonly prisma: PrismaService,
     private readonly authorizationService: AuthorizationService,
   ) {}
+
+  private normalizeClassification(rawValue: unknown): QuestionClassification | undefined {
+    if (!rawValue) return undefined;
+
+    const normalized = String(rawValue).trim().toUpperCase();
+    if (!normalized) return undefined;
+
+    if (['PRACTICE', 'LUYEN_TAP', 'LUYENTAP'].includes(normalized)) {
+      return 'PRACTICE';
+    }
+
+    if (['EXAM', 'THI', 'DE_THI'].includes(normalized)) {
+      return 'EXAM';
+    }
+
+    return undefined;
+  }
 
   private async assertQuestionBankPermission(userId: string, userRole: string, actionLabel: string) {
     if (userRole === 'ADMIN') {
@@ -77,6 +95,10 @@ export class QuestionsService {
           content: row['content'] || row['Câu hỏi'],
           imageUrl: row['imageUrl'] || row['image'] || row['Hình ảnh'] || row['Anh'] || null,
           questionType: row['questionType'] || row['Loại'],
+          classification:
+            this.normalizeClassification(
+              row['classification'] || row['questionClassification'] || row['Phân loại'],
+            ) || 'EXAM',
           difficulty: row['difficulty'] || row['Mức độ'],
           correctAnswer: row['correctAnswer'] || row['Đáp án đúng'],
           explanation: row['explanation'] || row['Giải thích'],
@@ -372,6 +394,7 @@ export class QuestionsService {
           content: dto.content,
           imageUrl: dto.imageUrl?.trim() || null,
           questionType: dto.questionType as QuestionType,
+          classification: dto.classification as QuestionClassification,
           difficulty: dto.difficulty as Difficulty,
           correctAnswer: dto.correctAnswer,
           explanation: dto.explanation,
@@ -416,6 +439,7 @@ export class QuestionsService {
       page,
       limit,
       questionType,
+      classification,
       difficulty,
       subjectId,
       topicId,
@@ -437,6 +461,10 @@ export class QuestionsService {
 
     if (questionType) {
       where.questionType = questionType as QuestionType;
+    }
+
+    if (classification) {
+      (where as any).classification = classification as QuestionClassification;
     }
 
     if (difficulty) {
@@ -479,6 +507,7 @@ export class QuestionsService {
           content: q.content,
           imageUrl: q.imageUrl,
           questionType: q.questionType as QuestionListItemDto['questionType'],
+          classification: (q as any).classification as QuestionListItemDto['classification'],
           difficulty: q.difficulty as QuestionListItemDto['difficulty'],
           isPublished: q.isPublished,
           subjectId: q.subjectId,
@@ -582,6 +611,9 @@ export class QuestionsService {
           ...(dto.content && { content: dto.content }),
           ...(dto.imageUrl !== undefined && { imageUrl: dto.imageUrl?.trim() || null }),
           ...(dto.questionType && { questionType: dto.questionType as QuestionType }),
+          ...(dto.classification && {
+            classification: dto.classification as QuestionClassification,
+          }),
           ...(dto.difficulty && { difficulty: dto.difficulty as Difficulty }),
           ...(dto.correctAnswer !== undefined && { correctAnswer: dto.correctAnswer }),
           ...(dto.explanation !== undefined && { explanation: dto.explanation }),
@@ -701,6 +733,7 @@ export class QuestionsService {
       content: question.content,
       imageUrl: question.imageUrl,
       questionType: question.questionType,
+      classification: question.classification,
       difficulty: question.difficulty,
       correctAnswer: question.correctAnswer,
       explanation: question.explanation,

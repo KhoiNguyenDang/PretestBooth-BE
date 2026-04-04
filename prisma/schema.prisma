@@ -197,6 +197,7 @@ model Question {
   content        String
   imageUrl       String?
   questionType   QuestionType          @default(SINGLE_CHOICE)
+  classification QuestionClassification @default(EXAM)
   difficulty     Difficulty            @default(MEDIUM)
   correctAnswer  String?
   explanation    String?
@@ -222,6 +223,7 @@ model Question {
   reviewSessions QuestionReviewSession[]
 
   @@index([questionType])
+  @@index([classification])
   @@index([difficulty])
   @@index([isPublished])
   @@index([subjectId])
@@ -661,6 +663,11 @@ enum QuestionType {
   SINGLE_CHOICE
   MULTIPLE_CHOICE
   SHORT_ANSWER
+}
+
+enum QuestionClassification {
+  PRACTICE
+  EXAM
 }
 
 enum QuestionReviewStatus {
