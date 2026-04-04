@@ -53,6 +53,44 @@ export class QuestionsService {
     return undefined;
   }
 
+  private isUuid(value: string): boolean {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      value,
+    );
+  }
+
+  private parseBoolean(value: unknown): boolean | undefined {
+    if (value === undefined || value === null || value === '') return undefined;
+    const normalized = String(value).trim().toLowerCase();
+    if (['true', '1', 'yes', 'y'].includes(normalized)) return true;
+    if (['false', '0', 'no', 'n'].includes(normalized)) return false;
+    return undefined;
+  }
+
+  private parseAnswerKeys(rawValue: unknown): Set<string> {
+    if (!rawValue) return new Set();
+
+    return new Set(
+      String(rawValue)
+        .toUpperCase()
+        .split(/[,;\s]+/)
+        .map((v) => v.trim())
+        .filter((v) => ['A', 'B', 'C', 'D'].includes(v)),
+    );
+  }
+
+  private normalizeReferenceLabel(rawValue: unknown): string {
+    if (!rawValue) return '';
+
+    return String(rawValue)
+      .trim()
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/đ/g, 'd')
+      .replace(/[^a-z0-9]/g, '');
+  }
+
   private async assertQuestionBankPermission(userId: string, userRole: string, actionLabel: string) {
     if (userRole === 'ADMIN') {
       return;
@@ -88,40 +126,188 @@ export class QuestionsService {
       data = xlsx.utils.sheet_to_json(sheet, { raw: false });
     }
 
+    const total = data.length;
     let imported = 0;
-    for (const row of data) {
+    let failed = 0;
+    const errors: string[] = [];
+    const subjectCache = new Map<string, string>();
+    const topicCache = new Map<string, string>();
+    let subjectReferenceLookup: Array<{ id: string; normalized: string }> | null = null;
+    let topicReferenceLookup: Array<{ id: string; normalized: string; subjectId: string }> | null =
+      null;
+
+    for (let index = 0; index < data.length; index++) {
+      const row = data[index];
+      const rowNumber = index + 2;
+
       try {
+        const subjectRefRaw =
+          row['subjectId'] || row['Môn'] || row['subjectRef'] || row['subject'];
+        const topicRefRaw = row['topicId'] || row['Chủ đề'] || row['topicRef'] || row['topic'];
+
+        let subjectId = subjectRefRaw ? String(subjectRefRaw).trim() : '';
+        if (subjectId && !this.isUuid(subjectId)) {
+          if (subjectCache.has(subjectId)) {
+            subjectId = subjectCache.get(subjectId)!;
+          } else {
+            let matchedSubject = await this.prisma.subject.findFirst({
+              where: { name: { equals: subjectId, mode: 'insensitive' } },
+              select: { id: true },
+            });
+
+            if (!matchedSubject) {
+              if (!subjectReferenceLookup) {
+                const subjects = await this.prisma.subject.findMany({
+                  select: { id: true, name: true },
+                });
+                subjectReferenceLookup = subjects.map((s) => ({
+                  id: s.id,
+                  normalized: this.normalizeReferenceLabel(s.name),
+                }));
+              }
+
+              const normalizedSubjectRef = this.normalizeReferenceLabel(subjectId);
+              const matchedByNormalized = subjectReferenceLookup.find(
+                (s) => s.normalized === normalizedSubjectRef,
+              );
+              if (matchedByNormalized) {
+                matchedSubject = { id: matchedByNormalized.id };
+              }
+            }
+
+            if (!matchedSubject) {
+              failed++;
+              errors.push(`Dòng ${rowNumber}: Không tìm thấy môn học '${subjectRefRaw}'`);
+              continue;
+            }
+            subjectCache.set(subjectId, matchedSubject.id);
+            subjectId = matchedSubject.id;
+          }
+        }
+
+        let topicId: string | null = topicRefRaw ? String(topicRefRaw).trim() : null;
+        if (topicId && !this.isUuid(topicId)) {
+          const cacheKey = `${subjectId || 'any'}::${topicId}`;
+          if (topicCache.has(cacheKey)) {
+            topicId = topicCache.get(cacheKey)!;
+          } else {
+            let matchedTopic = await this.prisma.topic.findFirst({
+              where: {
+                name: { equals: topicId, mode: 'insensitive' },
+                ...(subjectId ? { subjectId } : {}),
+              },
+              select: { id: true },
+            });
+
+            if (!matchedTopic) {
+              if (!topicReferenceLookup) {
+                const topics = await this.prisma.topic.findMany({
+                  select: { id: true, name: true, subjectId: true },
+                });
+                topicReferenceLookup = topics.map((t) => ({
+                  id: t.id,
+                  subjectId: t.subjectId,
+                  normalized: this.normalizeReferenceLabel(t.name),
+                }));
+              }
+
+              const normalizedTopicRef = this.normalizeReferenceLabel(topicId);
+              const matchedByNormalized = topicReferenceLookup.find(
+                (t) =>
+                  t.normalized === normalizedTopicRef &&
+                  (!subjectId || t.subjectId === subjectId),
+              );
+              if (matchedByNormalized) {
+                matchedTopic = { id: matchedByNormalized.id };
+              }
+            }
+
+            if (matchedTopic) {
+              topicCache.set(cacheKey, matchedTopic.id);
+              topicId = matchedTopic.id;
+            } else {
+              topicId = null;
+            }
+          }
+        }
+
+        const answerKeys = this.parseAnswerKeys(
+          row['Đáp án đúng'] || row['correctAnswer'] || row['correctAns'] || row['answerKey'],
+        );
+
         const dto: any = {
           content: row['content'] || row['Câu hỏi'],
           imageUrl: row['imageUrl'] || row['image'] || row['Hình ảnh'] || row['Anh'] || null,
           questionType: row['questionType'] || row['Loại'],
           classification:
             this.normalizeClassification(
-              row['classification'] || row['questionClassification'] || row['Phân loại'],
+              row['classification'] ||
+                row['questionClassification'] ||
+                row['Phân loại'] ||
+                row['examType'] ||
+                row['loaiDe'],
             ) || 'EXAM',
           difficulty: row['difficulty'] || row['Mức độ'],
-          correctAnswer: row['correctAnswer'] || row['Đáp án đúng'],
+          correctAnswer:
+            row['correctAnswer'] || row['Đáp án đúng'] || row['correctAns'] || row['answerKey'],
           explanation: row['explanation'] || row['Giải thích'],
-          subjectId: row['subjectId'] || row['Môn'],
-          topicId: row['topicId'] || row['Chủ đề'],
+          subjectId,
+          topicId,
+          isPublished: this.parseBoolean(row['isPublished'] || row['Công khai']),
         };
-        if (row['A'] || row['B'] || row['C'] || row['D']) {
+        if (
+          row['A'] ||
+          row['B'] ||
+          row['C'] ||
+          row['D'] ||
+          row['optionA'] ||
+          row['optionB'] ||
+          row['optionC'] ||
+          row['optionD']
+        ) {
           dto.choices = [
-            row['A'] && { content: row['A'], isCorrect: row['Đáp án đúng'] === 'A' },
-            row['B'] && { content: row['B'], isCorrect: row['Đáp án đúng'] === 'B' },
-            row['C'] && { content: row['C'], isCorrect: row['Đáp án đúng'] === 'C' },
-            row['D'] && { content: row['D'], isCorrect: row['Đáp án đúng'] === 'D' },
+            (row['A'] || row['optionA']) && {
+              content: row['A'] || row['optionA'],
+              isCorrect: answerKeys.has('A'),
+            },
+            (row['B'] || row['optionB']) && {
+              content: row['B'] || row['optionB'],
+              isCorrect: answerKeys.has('B'),
+            },
+            (row['C'] || row['optionC']) && {
+              content: row['C'] || row['optionC'],
+              isCorrect: answerKeys.has('C'),
+            },
+            (row['D'] || row['optionD']) && {
+              content: row['D'] || row['optionD'],
+              isCorrect: answerKeys.has('D'),
+            },
           ].filter(Boolean);
         }
         // Bắt buộc phải có content, questionType, difficulty, subjectId
-        if (!dto.content || !dto.questionType || !dto.difficulty || !dto.subjectId) continue;
+        if (!dto.content || !dto.questionType || !dto.difficulty || !dto.subjectId) {
+          failed++;
+          errors.push(
+            `Dòng ${rowNumber}: Thiếu trường bắt buộc (content/questionType/difficulty/subjectRef)`,
+          );
+          continue;
+        }
         await this.create(userId, userRole, dto);
         imported++;
-      } catch (e) {
+      } catch (e: any) {
+        failed++;
+        errors.push(`Dòng ${rowNumber}: ${e?.message || 'Import thất bại'}`);
         continue;
       }
     }
-    return { message: `Đã import thành công ${imported} câu hỏi!` };
+
+    return {
+      message: `Đã import thành công ${imported}/${total} câu hỏi!`,
+      total,
+      success: imported,
+      failed,
+      errors: errors.slice(0, 50),
+    };
   }
 
   // ==================== SUBJECT CRUD ====================
