@@ -14,6 +14,7 @@ export class ExamListItemDto {
   publishAt: Date | null;
   publishedAt: Date | null;
   allowStudentReviewResults: boolean;
+  passingScoreAbsolute: number | null;
   subjectId: string | null;
   topicId: string | null;
   subject?: { id: string; name: string } | null;
@@ -45,6 +46,7 @@ export class ExamDetailDto {
   publishAt: Date | null;
   publishedAt: Date | null;
   allowStudentReviewResults: boolean;
+  passingScoreAbsolute: number | null;
   subjectId: string | null;
   topicId: string | null;
   subject?: { id: string; name: string } | null;
@@ -141,6 +143,13 @@ export class ShuffledSessionDto {
   examId: string;
   examType: 'PRACTICE' | 'EXAM';
   proctoringEnabled: boolean;
+  isPretestSession: boolean;
+  pretestAttemptNumber: number | null;
+  pretestAssignmentMode: 'QUESTION_BANK_RANDOM' | 'OFFICIAL_EXAM_POOL' | null;
+  pretestThresholdSource: 'PRETEST_CONFIG' | 'EXAM' | null;
+  pretestSourceExamId: string | null;
+  appliedPassingScoreAbsolute: number | null;
+  passed: boolean | null;
   examTitle: string;
   duration: number;
   status: string;
@@ -191,6 +200,13 @@ export class SessionResultDto {
   id: string;
   examId: string;
   examTitle: string;
+  isPretestSession: boolean;
+  pretestAttemptNumber: number | null;
+  pretestAssignmentMode: 'QUESTION_BANK_RANDOM' | 'OFFICIAL_EXAM_POOL' | null;
+  pretestThresholdSource: 'PRETEST_CONFIG' | 'EXAM' | null;
+  pretestSourceExamId: string | null;
+  appliedPassingScoreAbsolute: number | null;
+  passed: boolean | null;
   status: string;
   startedAt: Date;
   finishedAt: Date | null;
@@ -283,6 +299,10 @@ export class ExamSessionListItemDto {
   id: string;
   examId: string;
   examTitle: string;
+  isPretestSession: boolean;
+  pretestAttemptNumber: number | null;
+  appliedPassingScoreAbsolute: number | null;
+  passed: boolean | null;
   status: string;
   startedAt: Date;
   finishedAt: Date | null;

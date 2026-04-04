@@ -46,6 +46,11 @@ export const CreateExamSchema = z
     // Publication settings
     visibility: z.enum(['PRIVATE', 'PUBLIC']).default('PRIVATE'),
     allowStudentReviewResults: z.boolean().default(false),
+    passingScoreAbsolute: z
+      .number()
+      .positive('Ngưỡng điểm đạt phải lớn hơn 0')
+      .optional()
+      .nullable(),
     publishAt: z.coerce.date().optional().nullable(),
     publishNow: z.boolean().default(false),
     // Exam type classification
@@ -80,6 +85,19 @@ export const CreateExamSchema = z
     {
       message: 'Nếu truyền cả subjectId và subjectIds thì subjectId phải thuộc subjectIds',
       path: ['subjectId'],
+    },
+  )
+  .refine(
+    (data) => {
+      if (data.type === 'PRACTICE') {
+        return data.passingScoreAbsolute === null || data.passingScoreAbsolute === undefined;
+      }
+
+      return true;
+    },
+    {
+      message: 'Đề luyện tập không hỗ trợ ngưỡng điểm đạt',
+      path: ['passingScoreAbsolute'],
     },
   )
   .refine(

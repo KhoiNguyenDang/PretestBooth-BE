@@ -308,6 +308,7 @@ model Exam {
   publishAt                         DateTime?
   publishedAt                       DateTime?
   allowStudentReviewResults         Boolean        @default(false)
+  passingScoreAbsolute              Float?
   creator                           User           @relation("ExamCreator", fields: [creatorId], references: [id])
   subject                           Subject?       @relation(fields: [subjectId], references: [id])
   topic                             Topic?         @relation(fields: [topicId], references: [id])
@@ -347,6 +348,13 @@ model ExamSession {
   examId          String
   userId          String
   bookingId       String?
+  isPretestSession Boolean            @default(false)
+  pretestAttemptNumber Int?
+  pretestAssignmentMode PretestAssignmentMode?
+  pretestThresholdSource PretestThresholdSource?
+  pretestSourceExamId String?
+  appliedPassingScoreAbsolute Float?
+  passed          Boolean?
   seed            Int
   startedAt       DateTime            @default(now())
   finishedAt      DateTime?
@@ -367,6 +375,8 @@ model ExamSession {
   @@index([status])
   @@index([expiresAt])
   @@index([bookingId])
+  @@index([userId, isPretestSession])
+  @@index([bookingId, isPretestSession])
 }
 
 model ExamSessionAnswer {
@@ -693,6 +703,16 @@ enum ExamSessionStatus {
   IN_PROGRESS
   SUBMITTED
   GRADED
+}
+
+enum PretestAssignmentMode {
+  QUESTION_BANK_RANDOM
+  OFFICIAL_EXAM_POOL
+}
+
+enum PretestThresholdSource {
+  PRETEST_CONFIG
+  EXAM
 }
 
 enum BoothStatus {

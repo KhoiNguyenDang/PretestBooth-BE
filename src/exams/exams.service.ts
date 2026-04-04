@@ -24,6 +24,16 @@ import type { SaveAnswerDto } from './dto/save-answer.dto';
 import type { GradeSessionDto } from './dto/grade-session.dto';
 import type { QueryExamSessionsDto } from './dto/query-exam-sessions.dto';
 import {
+  UpsertPretestConfigSchema,
+} from './dto/pretest-config.dto';
+import type {
+  PretestConfigDto,
+  PretestQuestionBankRandomConfig,
+  UpsertPretestConfigDto,
+  PretestStatusDto,
+  PretestAssignmentMode,
+} from './dto/pretest-config.dto';
+import {
   ExamListItemDto,
   ExamDetailDto,
   ExamItemDto,
@@ -48,10 +58,25 @@ type Difficulty = 'EASY' | 'MEDIUM' | 'HARD';
 type QuestionClassification = 'PRACTICE' | 'EXAM';
 type AllocationPolicy = 'STRICT' | 'FLEXIBLE';
 type ExamVisibility = 'PRIVATE' | 'PUBLIC';
+type PretestThresholdSource = 'PRETEST_CONFIG' | 'EXAM';
+
+const PRETEST_CONFIG_SETTING_KEY = 'PRETEST_EXAM_FLOW_CONFIG';
+const PRETEST_RANDOM_EXAM_TITLE_PREFIX = 'Pretest Auto';
 
 @Injectable()
 export class ExamsService {
   private readonly logger = new Logger(ExamsService.name);
+  private readonly defaultPretestConfig: Omit<
+    PretestConfigDto,
+    'updatedAt' | 'updatedByUserId'
+  > = {
+    isEnabled: false,
+    assignmentMode: 'OFFICIAL_EXAM_POOL',
+    maxAttempts: 3,
+    lockAfterPass: true,
+    questionBankRandom: null,
+    officialExamPool: null,
+  };
 
   constructor(
     private readonly prisma: PrismaService,
@@ -174,6 +199,548 @@ export class ExamsService {
       `Điều chỉnh điểm hoàn thành bài thi: ${score}/${maxScore ?? 0}`,
       { examSessionId: sessionId },
     );
+  }
+
+  private parseStoredPretestConfig(
+    rawValue: string | null | undefined,
+  ): Omit<PretestConfigDto, 'updatedAt' | 'updatedByUserId'> {
+    if (!rawValue) {
+      return { ...this.defaultPretestConfig };
+    }
+
+    try {
+      const parsed = JSON.parse(rawValue);
+      const validated = UpsertPretestConfigSchema.parse(parsed);
+      return {
+        isEnabled: validated.isEnabled,
+        assignmentMode: validated.assignmentMode,
+        maxAttempts: validated.maxAttempts,
+        lockAfterPass: validated.lockAfterPass,
+        questionBankRandom: validated.questionBankRandom ?? null,
+        officialExamPool: validated.officialExamPool ?? null,
+      };
+    } catch {
+      return { ...this.defaultPretestConfig };
+    }
+  }
+
+  private async loadPretestConfigRecord(): Promise<PretestConfigDto> {
+    const setting = await this.prisma.systemSetting.findUnique({
+      where: { key: PRETEST_CONFIG_SETTING_KEY },
+    });
+    const config = this.parseStoredPretestConfig(setting?.value);
+
+    return {
+      ...config,
+      updatedAt: setting?.updatedAt ?? null,
+      updatedByUserId: setting?.updatedByUserId ?? null,
+    };
+  }
+
+  private async validatePretestConfigReferences(config: UpsertPretestConfigDto) {
+    if (!config.isEnabled) {
+      return;
+    }
+
+    if (config.assignmentMode === 'OFFICIAL_EXAM_POOL') {
+      const examIds = [...new Set(config.officialExamPool?.examIds || [])];
+      if (examIds.length === 0) {
+        throw new BadRequestException('Pool đề thi chính thức không được rỗng');
+      }
+
+      const exams = await this.prisma.exam.findMany({
+        where: { id: { in: examIds } },
+        select: {
+          id: true,
+          type: true,
+          visibility: true,
+          publishAt: true,
+          isPublished: true,
+          passingScoreAbsolute: true,
+        },
+      });
+
+      const foundIds = new Set(exams.map((exam) => exam.id));
+      const missingIds = examIds.filter((id) => !foundIds.has(id));
+      if (missingIds.length > 0) {
+        throw new BadRequestException(`Không tìm thấy đề thi trong pool: ${missingIds.join(', ')}`);
+      }
+
+      const invalidType = exams.filter((exam) => exam.type !== 'EXAM').map((exam) => exam.id);
+      if (invalidType.length > 0) {
+        throw new BadRequestException(
+          `Pool pretest chỉ nhận đề loại EXAM. Sai ở: ${invalidType.join(', ')}`,
+        );
+      }
+
+      const invalidVisibility = exams
+        .filter(
+          (exam) =>
+            exam.visibility !== 'PUBLIC' ||
+            !exam.isPublished ||
+            !this.isExamPubliclyAvailable(exam),
+        )
+        .map((exam) => exam.id);
+      if (invalidVisibility.length > 0) {
+        throw new BadRequestException(
+          `Pool pretest chỉ nhận đề EXAM PUBLIC đã công bố. Sai ở: ${invalidVisibility.join(', ')}`,
+        );
+      }
+
+      const missingThreshold = exams
+        .filter(
+          (exam) =>
+            exam.passingScoreAbsolute === null || exam.passingScoreAbsolute === undefined,
+        )
+        .map((exam) => exam.id);
+      if (missingThreshold.length > 0) {
+        throw new BadRequestException(
+          `Pool pretest chỉ nhận đề có ngưỡng đạt. Thiếu ở: ${missingThreshold.join(', ')}`,
+        );
+      }
+
+      return;
+    }
+
+    const randomConfig = config.questionBankRandom;
+    if (!randomConfig) {
+      throw new BadRequestException('Thiếu cấu hình random từ question bank');
+    }
+
+    const subjectIds = randomConfig.subjectIds || [];
+    if (subjectIds.length > 0) {
+      const subjects = await this.prisma.subject.findMany({
+        where: { id: { in: subjectIds } },
+        select: { id: true },
+      });
+      const foundIds = new Set(subjects.map((subject) => subject.id));
+      const missingIds = subjectIds.filter((id) => !foundIds.has(id));
+      if (missingIds.length > 0) {
+        throw new BadRequestException(`Môn học không tồn tại: ${missingIds.join(', ')}`);
+      }
+    }
+
+    if (randomConfig.topicId) {
+      const topic = await this.prisma.topic.findUnique({
+        where: { id: randomConfig.topicId },
+        select: { id: true, subjectId: true },
+      });
+      if (!topic) {
+        throw new BadRequestException('Chủ đề trong cấu hình pretest không tồn tại');
+      }
+      if (subjectIds.length > 0 && !subjectIds.includes(topic.subjectId)) {
+        throw new BadRequestException('Chủ đề không thuộc môn học đã chọn trong cấu hình pretest');
+      }
+    }
+
+    const maxScore = randomConfig.questionCount + randomConfig.problemCount;
+    if (randomConfig.passThresholdAbsolute > maxScore) {
+      throw new BadRequestException(
+        `Ngưỡng đạt không được vượt quá tổng điểm tối đa (${maxScore}) của pretest random`,
+      );
+    }
+
+    const questionWhere: Prisma.QuestionWhereInput = {
+      isPublished: true,
+      classification: 'EXAM',
+      ...(subjectIds.length > 0 && { subjectId: { in: subjectIds } }),
+      ...(randomConfig.topicId && { topicId: randomConfig.topicId }),
+      ...(randomConfig.difficulty && { difficulty: randomConfig.difficulty }),
+    };
+    const problemWhere: Prisma.ProblemWhereInput = {
+      isPublished: true,
+      ...(subjectIds.length > 0 && { subjectId: { in: subjectIds } }),
+      ...(randomConfig.topicId && { topicId: randomConfig.topicId }),
+      ...(randomConfig.difficulty && { difficulty: randomConfig.difficulty }),
+    };
+
+    const [availableQuestions, availableProblems] = await Promise.all([
+      randomConfig.questionCount > 0 ? this.prisma.question.count({ where: questionWhere }) : 0,
+      randomConfig.problemCount > 0 ? this.prisma.problem.count({ where: problemWhere }) : 0,
+    ]);
+
+    if (availableQuestions < randomConfig.questionCount) {
+      throw new BadRequestException(
+        `Không đủ câu hỏi EXAM cho pretest random. Yêu cầu ${randomConfig.questionCount}, hiện có ${availableQuestions}.`,
+      );
+    }
+
+    if (availableProblems < randomConfig.problemCount) {
+      throw new BadRequestException(
+        `Không đủ bài code cho pretest random. Yêu cầu ${randomConfig.problemCount}, hiện có ${availableProblems}.`,
+      );
+    }
+  }
+
+  async getPretestConfig(userId: string, userRole: string): Promise<PretestConfigDto> {
+    await this.assertExamManagementPermission(userId, userRole, 'xem cấu hình pretest');
+    return this.loadPretestConfigRecord();
+  }
+
+  async upsertPretestConfig(
+    userId: string,
+    userRole: string,
+    dto: UpsertPretestConfigDto,
+  ): Promise<PretestConfigDto> {
+    await this.assertExamManagementPermission(userId, userRole, 'cập nhật cấu hình pretest');
+    await this.syncScheduledExamPublication();
+
+    const normalized = UpsertPretestConfigSchema.parse(dto);
+    await this.validatePretestConfigReferences(normalized);
+
+    const savedSetting = await this.prisma.systemSetting.upsert({
+      where: { key: PRETEST_CONFIG_SETTING_KEY },
+      update: {
+        value: JSON.stringify(normalized),
+        updatedByUserId: userId,
+      },
+      create: {
+        key: PRETEST_CONFIG_SETTING_KEY,
+        value: JSON.stringify(normalized),
+        description: 'Global pretest exam-flow config for booth EXAM check-in sessions',
+        updatedByUserId: userId,
+      },
+    });
+
+    return {
+      isEnabled: normalized.isEnabled,
+      assignmentMode: normalized.assignmentMode,
+      maxAttempts: normalized.maxAttempts,
+      lockAfterPass: normalized.lockAfterPass,
+      questionBankRandom: normalized.questionBankRandom ?? null,
+      officialExamPool: normalized.officialExamPool ?? null,
+      updatedAt: savedSetting.updatedAt,
+      updatedByUserId: savedSetting.updatedByUserId,
+    };
+  }
+
+  async getMyPretestStatus(userId: string, _userRole: string): Promise<PretestStatusDto> {
+    const config = await this.loadPretestConfigRecord();
+    const [attemptsUsed, passedSession] = await Promise.all([
+      this.prisma.examSession.count({
+        where: {
+          userId,
+          isPretestSession: true,
+        },
+      }),
+      this.prisma.examSession.findFirst({
+        where: {
+          userId,
+          isPretestSession: true,
+          passed: true,
+        },
+        select: { id: true },
+      }),
+    ]);
+
+    return {
+      isEnabled: config.isEnabled,
+      assignmentMode: config.assignmentMode,
+      maxAttempts: config.maxAttempts,
+      attemptsUsed,
+      remainingAttempts: Math.max(0, config.maxAttempts - attemptsUsed),
+      passed: Boolean(passedSession),
+      lockAfterPass: config.lockAfterPass,
+    };
+  }
+
+  private resolvePassedState(
+    score: number,
+    threshold: number | null | undefined,
+    allGraded: boolean,
+  ): boolean | null {
+    if (!allGraded) {
+      return null;
+    }
+
+    if (threshold === null || threshold === undefined) {
+      return null;
+    }
+
+    return score >= threshold;
+  }
+
+  private async pickAssignedOfficialExamFromPool(examIds: string[]) {
+    await this.syncScheduledExamPublication();
+
+    const candidates = await this.prisma.exam.findMany({
+      where: {
+        id: { in: examIds },
+        type: 'EXAM',
+        visibility: 'PUBLIC',
+        isPublished: true,
+        passingScoreAbsolute: { not: null },
+      },
+      include: {
+        items: {
+          orderBy: { order: 'asc' },
+          include: {
+            question: { include: { choices: { orderBy: { order: 'asc' } } } },
+            problem: true,
+          },
+        },
+      },
+    });
+
+    if (candidates.length === 0) {
+      throw new BadRequestException(
+        'Pool pretest hiện không có đề phù hợp (EXAM PUBLIC đã công bố và có ngưỡng pass)',
+      );
+    }
+
+    return this.pickRandom(candidates, 1)[0];
+  }
+
+  private async createPretestRandomExamFromQuestionBank(
+    userId: string,
+    randomConfig: PretestQuestionBankRandomConfig,
+  ) {
+    const subjectIds = randomConfig.subjectIds || [];
+
+    const questionIds = await this.pickRandomQuestionIdsBySql(
+      {
+        classification: 'EXAM',
+        subjectIds: subjectIds.length > 0 ? subjectIds : undefined,
+        topicId: randomConfig.topicId || undefined,
+        difficulty: (randomConfig.difficulty as Difficulty | undefined) || undefined,
+      },
+      randomConfig.questionCount,
+    );
+
+    if (questionIds.length < randomConfig.questionCount) {
+      throw new BadRequestException(
+        `Không đủ câu hỏi EXAM để tạo pretest random (${questionIds.length}/${randomConfig.questionCount})`,
+      );
+    }
+
+    const problemIds = await this.pickRandomProblemIdsBySql(
+      {
+        subjectIds: subjectIds.length > 0 ? subjectIds : undefined,
+        topicId: randomConfig.topicId || undefined,
+        difficulty: (randomConfig.difficulty as Difficulty | undefined) || undefined,
+      },
+      randomConfig.problemCount,
+    );
+
+    if (problemIds.length < randomConfig.problemCount) {
+      throw new BadRequestException(
+        `Không đủ bài code để tạo pretest random (${problemIds.length}/${randomConfig.problemCount})`,
+      );
+    }
+
+    const titlePrefix = randomConfig.titlePrefix?.trim() || PRETEST_RANDOM_EXAM_TITLE_PREFIX;
+    const generatedTitle = `${titlePrefix} ${new Date().toISOString()}`;
+
+    return this.prisma.$transaction(async (tx) => {
+      const createdExam = await tx.exam.create({
+        data: {
+          title: generatedTitle,
+          description: 'Đề thi pretest được tạo ngẫu nhiên từ question bank',
+          type: 'EXAM',
+          questionCount: questionIds.length,
+          problemCount: problemIds.length,
+          duration: randomConfig.duration,
+          difficulty: (randomConfig.difficulty as Difficulty | undefined) || null,
+          includeProblemsRelatedToQuestions: false,
+          shuffleQuestions: randomConfig.shuffleQuestions,
+          shuffleChoices: randomConfig.shuffleChoices,
+          subjectId: subjectIds.length === 1 ? subjectIds[0] : null,
+          topicId: randomConfig.topicId || null,
+          isPublished: false,
+          visibility: 'PRIVATE',
+          allowStudentReviewResults: false,
+          passingScoreAbsolute: null,
+          creatorId: userId,
+        },
+      });
+
+      const questionItems = questionIds.map((questionId, index) => ({
+        examId: createdExam.id,
+        questionId,
+        problemId: null as string | null,
+        section: 'QUESTION' as const,
+        order: index,
+        points: 1.0,
+      }));
+
+      const problemItems = problemIds.map((problemId, index) => ({
+        examId: createdExam.id,
+        questionId: null as string | null,
+        problemId,
+        section: 'PROBLEM' as const,
+        order: questionItems.length + index,
+        points: 1.0,
+      }));
+
+      if (questionItems.length > 0 || problemItems.length > 0) {
+        await tx.examItem.createMany({
+          data: [...questionItems, ...problemItems],
+        });
+      }
+
+      return tx.exam.findUniqueOrThrow({
+        where: { id: createdExam.id },
+        include: {
+          items: {
+            orderBy: { order: 'asc' },
+            include: {
+              question: { include: { choices: { orderBy: { order: 'asc' } } } },
+              problem: true,
+            },
+          },
+        },
+      });
+    });
+  }
+
+  async startAutoPretestSession(userId: string): Promise<ShuffledSessionDto> {
+    const config = await this.loadPretestConfigRecord();
+    if (!config.isEnabled) {
+      throw new BadRequestException('Pretest hiện chưa được bật cấu hình');
+    }
+
+    const activeBooking = await this.bookingsService.requireActiveCheckedInBooking(userId, 'EXAM');
+
+    const existingInProgress = await this.prisma.examSession.findFirst({
+      where: {
+        userId,
+        isPretestSession: true,
+        status: 'IN_PROGRESS',
+      },
+      include: {
+        exam: {
+          select: {
+            duration: true,
+          },
+        },
+      },
+      orderBy: { startedAt: 'desc' },
+    });
+
+    if (existingInProgress) {
+      const existingAppliedThreshold = (existingInProgress as any)
+        .appliedPassingScoreAbsolute as number | null | undefined;
+      if (this.isSessionExpired(existingInProgress, existingInProgress.exam.duration)) {
+        await this.prisma.examSession.update({
+          where: { id: existingInProgress.id },
+          data: {
+            status: 'SUBMITTED',
+            finishedAt: new Date(),
+            passed:
+              existingAppliedThreshold !== null && existingAppliedThreshold !== undefined
+                ? false
+                : null,
+          },
+        });
+      } else {
+        return this.getSessionData(existingInProgress.id, userId);
+      }
+    }
+
+    const [attemptsUsed, hasPassed] = await Promise.all([
+      this.prisma.examSession.count({
+        where: {
+          userId,
+          isPretestSession: true,
+        },
+      }),
+      this.prisma.examSession.findFirst({
+        where: {
+          userId,
+          isPretestSession: true,
+          passed: true,
+        },
+        select: { id: true },
+      }),
+    ]);
+
+    if (config.lockAfterPass && hasPassed) {
+      throw new ConflictException('Bạn đã đạt pretest, hệ thống đã khóa thi lại');
+    }
+
+    if (attemptsUsed >= config.maxAttempts) {
+      throw new ConflictException(
+        `Bạn đã dùng hết số lần thi pretest (${config.maxAttempts} lần)`,
+      );
+    }
+
+    let assignedExam: any;
+    let assignmentMode: PretestAssignmentMode;
+    let thresholdSource: PretestThresholdSource;
+    let appliedPassingScoreAbsolute: number;
+    let sourceExamId: string | null;
+
+    if (config.assignmentMode === 'OFFICIAL_EXAM_POOL') {
+      const poolExamIds = config.officialExamPool?.examIds || [];
+      assignedExam = await this.pickAssignedOfficialExamFromPool(poolExamIds);
+      assignmentMode = 'OFFICIAL_EXAM_POOL';
+      thresholdSource = 'EXAM';
+      appliedPassingScoreAbsolute = Number((assignedExam as any).passingScoreAbsolute);
+      sourceExamId = assignedExam.id;
+    } else {
+      const randomConfig = config.questionBankRandom;
+      if (!randomConfig) {
+        throw new BadRequestException('Thiếu cấu hình QUESTION_BANK_RANDOM cho pretest');
+      }
+      assignedExam = await this.createPretestRandomExamFromQuestionBank(userId, randomConfig);
+      assignmentMode = 'QUESTION_BANK_RANDOM';
+      thresholdSource = 'PRETEST_CONFIG';
+      appliedPassingScoreAbsolute = randomConfig.passThresholdAbsolute;
+      sourceExamId = null;
+    }
+
+    const seed = crypto.randomInt(0, 2147483647);
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + assignedExam.duration * 60 * 1000);
+    const maxScore = assignedExam.items.reduce(
+      (sum: number, item: { points: number }) => sum + item.points,
+      0,
+    );
+
+    if (appliedPassingScoreAbsolute > maxScore) {
+      throw new BadRequestException(
+        `Ngưỡng đạt áp dụng không được vượt quá tổng điểm tối đa của đề được gán (${maxScore})`,
+      );
+    }
+
+    const session = await this.prisma.examSession.create({
+      data: {
+        examId: assignedExam.id,
+        userId,
+        bookingId: activeBooking.id,
+        seed,
+        expiresAt,
+        maxScore,
+        isPretestSession: true,
+        pretestAttemptNumber: attemptsUsed + 1,
+        pretestAssignmentMode: assignmentMode,
+        pretestThresholdSource: thresholdSource,
+        pretestSourceExamId: sourceExamId,
+        appliedPassingScoreAbsolute,
+      },
+    });
+
+    const emittedAt = new Date().toISOString();
+    this.realtimeService.monitoringUpdated({
+      scope: 'EXAM',
+      action: 'START',
+      bookingId: activeBooking.id,
+      boothId: activeBooking.boothId,
+      userId,
+      sessionType: 'EXAM',
+      sessionId: session.id,
+      emittedAt,
+    });
+
+    this.realtimeService.notify({
+      userId,
+      boothId: activeBooking.boothId,
+      message: `Đã gán pretest lần ${attemptsUsed + 1}/${config.maxAttempts}. Ngưỡng đạt: ${appliedPassingScoreAbsolute}.`,
+      level: 'info',
+      emittedAt,
+    });
+
+    return this.buildShuffledSession(session, assignedExam);
   }
 
   // ==================== EXAM CRUD ====================
@@ -406,6 +973,20 @@ export class ExamsService {
 
     const effectiveQuestionCount = finalQuestionIds.length;
     const effectiveProblemCount = finalProblemIds.length;
+    const examType = (dto.type as 'PRACTICE' | 'EXAM') || 'EXAM';
+    const maxExamScore = effectiveQuestionCount + effectiveProblemCount;
+
+    let passingScoreAbsolute: number | null = null;
+    if (examType === 'EXAM' && dto.passingScoreAbsolute !== undefined && dto.passingScoreAbsolute !== null) {
+      if (dto.passingScoreAbsolute > maxExamScore) {
+        throw new BadRequestException(
+          `Ngưỡng điểm đạt không được vượt quá tổng điểm tối đa (${maxExamScore})`,
+        );
+      }
+
+      passingScoreAbsolute = dto.passingScoreAbsolute;
+    }
+
     const publication = this.buildPublicationState({
       visibility: dto.visibility,
       publishAt: dto.publishAt || null,
@@ -427,6 +1008,7 @@ export class ExamsService {
           shuffleChoices: dto.shuffleChoices,
           visibility: publication.visibility,
           allowStudentReviewResults: dto.allowStudentReviewResults,
+          passingScoreAbsolute,
           publishAt: publication.publishAt,
           publishedAt: publication.publishedAt,
           isPublished: publication.isPublished,
@@ -436,7 +1018,7 @@ export class ExamsService {
               : dto.subjectId || null,
           topicId: dto.topicId || null,
           creatorId,
-          type: (dto.type as any) || 'EXAM',
+          type: examType,
         },
       });
 
@@ -579,6 +1161,7 @@ export class ExamsService {
           publishAt: e.publishAt,
           publishedAt: e.publishedAt,
           allowStudentReviewResults: e.allowStudentReviewResults,
+          passingScoreAbsolute: (e as any).passingScoreAbsolute ?? null,
           subjectId: e.subjectId,
           topicId: e.topicId,
           subject: e.subject,
@@ -646,6 +1229,31 @@ export class ExamsService {
     const exam = await this.prisma.exam.findUnique({ where: { id } });
     if (!exam) throw new NotFoundException('Đề thi không tồn tại');
 
+    const nextType = (dto.type as 'PRACTICE' | 'EXAM' | undefined) || exam.type;
+    const currentPassingScoreAbsolute = (exam as any).passingScoreAbsolute as number | null;
+    let nextPassingScoreAbsolute =
+      dto.passingScoreAbsolute !== undefined ? dto.passingScoreAbsolute : currentPassingScoreAbsolute;
+
+    if (nextType === 'PRACTICE') {
+      if (dto.passingScoreAbsolute !== undefined && dto.passingScoreAbsolute !== null) {
+        throw new BadRequestException('Đề luyện tập không hỗ trợ ngưỡng điểm đạt');
+      }
+
+      nextPassingScoreAbsolute = null;
+    } else if (nextPassingScoreAbsolute !== null) {
+      const pointAggregate = await this.prisma.examItem.aggregate({
+        where: { examId: id },
+        _sum: { points: true },
+      });
+      const maxScore = pointAggregate._sum.points ?? 0;
+
+      if (nextPassingScoreAbsolute > maxScore) {
+        throw new BadRequestException(
+          `Ngưỡng điểm đạt không được vượt quá tổng điểm tối đa (${maxScore})`,
+        );
+      }
+    }
+
     const publicationUpdate = this.resolvePublicationUpdate(dto, exam);
 
     const updated = await this.prisma.exam.update({
@@ -659,9 +1267,10 @@ export class ExamsService {
         ...(dto.allowStudentReviewResults !== undefined && {
           allowStudentReviewResults: dto.allowStudentReviewResults,
         }),
+        passingScoreAbsolute: nextPassingScoreAbsolute,
         ...(dto.shuffleQuestions !== undefined && { shuffleQuestions: dto.shuffleQuestions }),
         ...(dto.shuffleChoices !== undefined && { shuffleChoices: dto.shuffleChoices }),
-        ...(dto.type !== undefined && { type: dto.type as any }),
+        type: nextType,
       },
       include: {
         subject: { select: { id: true, name: true } },
@@ -826,6 +1435,7 @@ export class ExamsService {
         expiresAt,
         bookingId: activeBooking?.id ?? null,
         maxScore: fullExam.items.reduce((sum, item) => sum + item.points, 0),
+        appliedPassingScoreAbsolute: (fullExam as any).passingScoreAbsolute ?? null,
       },
     });
 
@@ -1086,6 +1696,13 @@ export class ExamsService {
         where: { sessionId },
       });
       const allGraded = allAnswers.every((a) => a.isCorrect !== null);
+      const appliedPassingScoreAbsolute = (session as any)
+        .appliedPassingScoreAbsolute as number | null | undefined;
+      const passed = this.resolvePassedState(
+        totalScore,
+        appliedPassingScoreAbsolute,
+        allGraded,
+      );
 
       await tx.examSession.update({
         where: { id: sessionId },
@@ -1093,6 +1710,7 @@ export class ExamsService {
           status: allGraded ? 'GRADED' : 'SUBMITTED',
           finishedAt: new Date(),
           score: totalScore,
+          passed,
         },
       });
     });
@@ -1287,10 +1905,20 @@ export class ExamsService {
       }
     }
 
+    const sessionAppliedPassingScoreAbsolute = (session as any)
+      .appliedPassingScoreAbsolute as number | null | undefined;
+
     return new SessionResultDto({
       id: session.id,
       examId: session.examId,
       examTitle: session.exam.title,
+      isPretestSession: Boolean((session as any).isPretestSession),
+      pretestAttemptNumber: ((session as any).pretestAttemptNumber as number | null) ?? null,
+      pretestAssignmentMode: (session as any).pretestAssignmentMode ?? null,
+      pretestThresholdSource: (session as any).pretestThresholdSource ?? null,
+      pretestSourceExamId: (session as any).pretestSourceExamId ?? null,
+      appliedPassingScoreAbsolute: sessionAppliedPassingScoreAbsolute ?? null,
+      passed: ((session as any).passed as boolean | null) ?? null,
       status: session.status,
       startedAt: session.startedAt,
       finishedAt: session.finishedAt,
@@ -1346,12 +1974,20 @@ export class ExamsService {
 
       const totalScore = allAnswers.reduce((sum, a) => sum + (a.score || 0), 0);
       const allGraded = allAnswers.every((a) => a.isCorrect !== null);
+      const appliedPassingScoreAbsolute = (session as any)
+        .appliedPassingScoreAbsolute as number | null | undefined;
+      const passed = this.resolvePassedState(
+        totalScore,
+        appliedPassingScoreAbsolute,
+        allGraded,
+      );
 
       await tx.examSession.update({
         where: { id: sessionId },
         data: {
           score: totalScore,
           status: allGraded ? 'GRADED' : 'SUBMITTED',
+          passed,
         },
       });
 
@@ -1432,6 +2068,11 @@ export class ExamsService {
         id: s.id,
         examId: s.exam.id,
         examTitle: s.exam.title,
+        isPretestSession: Boolean((s as any).isPretestSession),
+        pretestAttemptNumber: ((s as any).pretestAttemptNumber as number | null) ?? null,
+        appliedPassingScoreAbsolute:
+          ((s as any).appliedPassingScoreAbsolute as number | null) ?? null,
+        passed: ((s as any).passed as boolean | null) ?? null,
         status: s.status,
         startedAt: s.startedAt,
         finishedAt: s.finishedAt,
@@ -1490,6 +2131,11 @@ export class ExamsService {
         data: {
           status: 'SUBMITTED',
           finishedAt: new Date(),
+          passed:
+            (session as any).appliedPassingScoreAbsolute !== null &&
+            (session as any).appliedPassingScoreAbsolute !== undefined
+              ? false
+              : null,
         },
       });
 
@@ -1569,6 +2215,11 @@ export class ExamsService {
           status: 'SUBMITTED',
           finishedAt: new Date(),
           score: 0,
+          passed:
+            (session as any).appliedPassingScoreAbsolute !== null &&
+            (session as any).appliedPassingScoreAbsolute !== undefined
+              ? false
+              : null,
         },
       });
 
@@ -2306,6 +2957,13 @@ export class ExamsService {
       examId: exam.id,
       examType: exam.type,
       proctoringEnabled: exam.type === 'EXAM',
+      isPretestSession: Boolean(session.isPretestSession),
+      pretestAttemptNumber: session.pretestAttemptNumber ?? null,
+      pretestAssignmentMode: (session as any).pretestAssignmentMode ?? null,
+      pretestThresholdSource: (session as any).pretestThresholdSource ?? null,
+      pretestSourceExamId: (session as any).pretestSourceExamId ?? null,
+      appliedPassingScoreAbsolute: session.appliedPassingScoreAbsolute ?? null,
+      passed: session.passed ?? null,
       examTitle: exam.title,
       duration: exam.duration,
       status: session.status,
@@ -2385,6 +3043,7 @@ export class ExamsService {
       publishAt: exam.publishAt,
       publishedAt: exam.publishedAt,
       allowStudentReviewResults: exam.allowStudentReviewResults,
+      passingScoreAbsolute: exam.passingScoreAbsolute,
       subjectId: exam.subjectId,
       topicId: exam.topicId,
       subject: exam.subject,

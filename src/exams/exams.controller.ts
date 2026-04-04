@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Put,
   Patch,
   Delete,
   Body,
@@ -37,6 +38,10 @@ import type {
   ExtendExamSessionDto,
   ForceSubmitExamSessionDto,
 } from './dto/monitor-session.dto';
+import {
+  UpsertPretestConfigSchema,
+} from './dto/pretest-config.dto';
+import type { UpsertPretestConfigDto } from './dto/pretest-config.dto';
 
 @Controller('exams')
 @UseGuards(AuthGuard('jwt'))
@@ -151,6 +156,29 @@ export class ExamsController {
     const userId = req.user['sub'];
     const userRole = req.user['role'];
     return this.examsService.getSessionResult(sessionId, userId, userRole);
+  }
+
+  @Get('pretest/config')
+  getPretestConfig(@Req() req) {
+    return this.examsService.getPretestConfig(req.user['sub'], req.user['role']);
+  }
+
+  @Put('pretest/config')
+  upsertPretestConfig(
+    @Body(new ZodValidationPipe(UpsertPretestConfigSchema)) dto: UpsertPretestConfigDto,
+    @Req() req,
+  ) {
+    return this.examsService.upsertPretestConfig(req.user['sub'], req.user['role'], dto);
+  }
+
+  @Get('pretest/status')
+  getPretestStatus(@Req() req) {
+    return this.examsService.getMyPretestStatus(req.user['sub'], req.user['role']);
+  }
+
+  @Post('pretest/session/start')
+  startPretestSession(@Req() req) {
+    return this.examsService.startAutoPretestSession(req.user['sub']);
   }
 
   @Patch('sessions/:sessionId/grade')
