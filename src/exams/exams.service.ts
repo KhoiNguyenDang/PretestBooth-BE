@@ -199,8 +199,8 @@ export class ExamsService {
     const ruleSubjectIds = dto.questionAllocationRules?.map((r) => r.subjectId) || [];
     const subjectIdsToValidate = [...new Set([...selectedSubjectIds, ...ruleSubjectIds])];
     const allocationPolicy: AllocationPolicy = dto.allocationPolicy || 'STRICT';
-    const targetQuestionClassification: QuestionClassification =
-      dto.type === 'PRACTICE' ? 'PRACTICE' : 'EXAM';
+    const questionClassificationFilter: QuestionClassification | undefined =
+      dto.type === 'PRACTICE' ? 'PRACTICE' : undefined;
     const isFlexibleAllocation = allocationPolicy === 'FLEXIBLE';
     let subjectNameById: Record<string, string> = {};
 
@@ -267,7 +267,9 @@ export class ExamsService {
         where: {
           id: { in: distinctQuestionIds },
           isPublished: true,
-          classification: targetQuestionClassification,
+          ...(questionClassificationFilter && {
+            classification: questionClassificationFilter,
+          }),
         },
         select: { id: true },
       });
@@ -286,7 +288,7 @@ export class ExamsService {
           {
             topicId: dto.topicId || undefined,
             defaultDifficulty: (dto.difficulty as Difficulty) || undefined,
-            classification: targetQuestionClassification,
+            classification: questionClassificationFilter,
             subjectNameById,
           },
           allocationPolicy,
@@ -294,7 +296,7 @@ export class ExamsService {
       } else {
       const useQuestionDetailDistribution = Boolean(dto.questionDifficultyDistribution);
       const questionFilter = {
-        classification: targetQuestionClassification,
+        classification: questionClassificationFilter,
         subjectIds: selectedSubjectIds.length > 0 ? selectedSubjectIds : undefined,
         topicId: dto.topicId || undefined,
         difficulty: useQuestionDetailDistribution
@@ -1517,16 +1519,19 @@ export class ExamsService {
   }
 
   private buildQuestionFilterWhereSql(filter: {
-    classification: QuestionClassification;
+    classification?: QuestionClassification;
     subjectIds?: string[];
     topicId?: string;
     difficulty?: Difficulty;
     excludeIds?: string[];
   }): Prisma.Sql {
-    const conditions: Prisma.Sql[] = [
-      Prisma.sql`q."isPublished" = true`,
-      Prisma.sql`q."classification" = ${filter.classification}::"QuestionClassification"`,
-    ];
+    const conditions: Prisma.Sql[] = [Prisma.sql`q."isPublished" = true`];
+
+    if (filter.classification) {
+      conditions.push(
+        Prisma.sql`q."classification" = ${filter.classification}::"QuestionClassification"`,
+      );
+    }
 
     if (filter.subjectIds?.length) {
       conditions.push(Prisma.sql`q."subjectId" IN (${Prisma.join(filter.subjectIds)})`);
@@ -1546,7 +1551,7 @@ export class ExamsService {
 
   private async pickRandomQuestionIdsBySql(
     filter: {
-      classification: QuestionClassification;
+      classification?: QuestionClassification;
       subjectIds?: string[];
       topicId?: string;
       difficulty?: Difficulty;
@@ -1570,7 +1575,7 @@ export class ExamsService {
 
   private async pickRandomQuestionIdsByDifficultyDistribution(
     filter: {
-      classification: QuestionClassification;
+      classification?: QuestionClassification;
       subjectIds?: string[];
       topicId?: string;
       difficulty?: Difficulty;
@@ -1583,7 +1588,7 @@ export class ExamsService {
 
     const where: Prisma.QuestionWhereInput = {
       isPublished: true,
-      classification: filter.classification,
+      ...(filter.classification && { classification: filter.classification }),
     };
     if (filter.subjectIds?.length) where.subjectId = { in: filter.subjectIds };
     if (filter.topicId) where.topicId = filter.topicId;
@@ -1675,7 +1680,7 @@ export class ExamsService {
     options: {
       topicId?: string;
       defaultDifficulty?: Difficulty;
-      classification: QuestionClassification;
+      classification?: QuestionClassification;
       subjectNameById: Record<string, string>;
     },
     allocationPolicy: AllocationPolicy,
