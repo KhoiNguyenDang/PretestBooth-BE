@@ -7,10 +7,17 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { BoothsService } from '../booths/booths.service';
-import type { CreateBookingDto, QueryBookingDto } from './dto/booking.dto';
+import type {
+  CreateBookingDto,
+  ForceCheckoutDto,
+  MonitoringNotifyDto,
+  QueryActiveMonitoringDto,
+  QueryBookingDto,
+} from './dto/booking.dto';
 import type { Prisma, BookingStatus, BookingType } from '@prisma/client';
 import { RealtimeService } from '../realtime/realtime.service';
 import { PointsService } from '../points/points.service';
+import { AuthorizationService } from '../common/authorization/authorization.service';
 
 @Injectable()
 export class BookingsService {
@@ -19,7 +26,25 @@ export class BookingsService {
     private readonly boothsService: BoothsService,
     private readonly realtimeService: RealtimeService,
     private readonly pointsService: PointsService,
+    private readonly authorizationService: AuthorizationService,
   ) {}
+
+  private async assertMonitoringPermission(userId: string, userRole: string, actionLabel: string) {
+    if (userRole === 'ADMIN') {
+      return;
+    }
+
+    if (userRole !== 'LECTURER') {
+      throw new ForbiddenException(`Chỉ giảng viên và quản trị viên mới có thể ${actionLabel}`);
+    }
+
+    await this.authorizationService.assertPermission(
+      userId,
+      userRole,
+      'MONITOR_SESSIONS',
+      'Giảng viên chưa được cấp quyền giám sát phiên thi/booth',
+    );
+  }
 
   private getCheckInEarlyMinutes() {
     return Number(process.env.CHECKIN_EARLY_MINUTES || 15);
@@ -277,6 +302,360 @@ export class BookingsService {
       page,
       limit,
       totalPages: Math.ceil(total / limit),
+    };
+  }
+
+  async findActiveMonitoringSessions(
+    requesterId: string,
+    requesterRole: string,
+    query: QueryActiveMonitoringDto,
+  ) {
+    await this.assertMonitoringPermission(requesterId, requesterRole, 'xem giám sát phiên thi/booth');
+    await this.autoCheckOutExpiredBookings();
+
+    const { page, limit, boothId, activityType, search, sortOrder } = query;
+    const skip = (page - 1) * limit;
+
+    const where: Prisma.BookingWhereInput = {
+      status: 'CHECKED_IN',
+      checkedOutAt: null,
+      endTime: { gte: this.getNowInVietnamConvention() },
+    };
+
+    if (boothId) {
+      where.boothId = boothId;
+    }
+
+    if (activityType === 'EXAM') {
+      where.examSessions = {
+        some: { status: 'IN_PROGRESS' },
+      };
+    } else if (activityType === 'PRACTICE') {
+      where.practiceSessions = {
+        some: { status: 'IN_PROGRESS' },
+      };
+    } else if (activityType === 'IDLE') {
+      where.examSessions = {
+        none: { status: 'IN_PROGRESS' },
+      };
+      where.practiceSessions = {
+        none: { status: 'IN_PROGRESS' },
+      };
+    }
+
+    if (search) {
+      const textFilter = {
+        contains: search,
+        mode: 'insensitive' as const,
+      };
+
+      where.OR = [
+        { user: { name: textFilter } },
+        { user: { email: textFilter } },
+        { user: { studentCode: textFilter } },
+        { booth: { name: textFilter } },
+        { booth: { code: textFilter } },
+      ];
+    }
+
+    const [bookings, total] = await Promise.all([
+      this.prisma.booking.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: {
+          endTime: sortOrder,
+        },
+        include: {
+          user: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              studentCode: true,
+            },
+          },
+          booth: {
+            select: {
+              id: true,
+              name: true,
+              code: true,
+            },
+          },
+          examSessions: {
+            where: {
+              status: 'IN_PROGRESS',
+            },
+            include: {
+              exam: {
+                select: {
+                  id: true,
+                  title: true,
+                  duration: true,
+                },
+              },
+            },
+            orderBy: { startedAt: 'desc' },
+            take: 1,
+          },
+          practiceSessions: {
+            where: {
+              status: 'IN_PROGRESS',
+            },
+            orderBy: { startedAt: 'desc' },
+            take: 1,
+          },
+        },
+      }),
+      this.prisma.booking.count({ where }),
+    ]);
+
+    const nowForBooking = this.getNowInVietnamConvention().getTime();
+    const now = Date.now();
+
+    const data = bookings.map((booking) => {
+      const activeExam = booking.examSessions[0] || null;
+      const activePractice = booking.practiceSessions[0] || null;
+
+      const examRemainingSeconds = activeExam
+        ? Math.max(0, Math.floor((new Date(activeExam.expiresAt).getTime() - now) / 1000))
+        : null;
+
+      const practiceExpiresAt = activePractice
+        ? new Date(activePractice.startedAt.getTime() + activePractice.duration * 60 * 1000)
+        : null;
+
+      const practiceRemainingSeconds = practiceExpiresAt
+        ? Math.max(0, Math.floor((practiceExpiresAt.getTime() - now) / 1000))
+        : null;
+
+      const bookingRemainingSeconds = Math.max(
+        0,
+        Math.floor((new Date(booking.endTime).getTime() - nowForBooking) / 1000),
+      );
+
+      const currentActivityType = activeExam ? 'EXAM' : activePractice ? 'PRACTICE' : 'IDLE';
+      const currentRemainingSeconds =
+        examRemainingSeconds ?? practiceRemainingSeconds ?? bookingRemainingSeconds;
+
+      return {
+        bookingId: booking.id,
+        boothId: booking.boothId,
+        boothName: booking.booth.name,
+        boothCode: booking.booth.code,
+        userId: booking.userId,
+        studentName: booking.user.name,
+        studentEmail: booking.user.email,
+        studentCode: booking.user.studentCode,
+        bookingType: booking.type,
+        status: booking.status,
+        checkedInAt: booking.checkedInAt,
+        bookingStartTime: booking.startTime,
+        bookingEndTime: booking.endTime,
+        bookingRemainingSeconds,
+        currentActivityType,
+        currentRemainingSeconds,
+        isWarning: currentRemainingSeconds <= 10 * 60,
+        activeExam: activeExam
+          ? {
+              sessionId: activeExam.id,
+              examId: activeExam.examId,
+              examTitle: activeExam.exam.title,
+              startedAt: activeExam.startedAt,
+              expiresAt: activeExam.expiresAt,
+              duration: activeExam.exam.duration,
+              remainingSeconds: examRemainingSeconds,
+            }
+          : null,
+        activePractice: activePractice
+          ? {
+              sessionId: activePractice.id,
+              startedAt: activePractice.startedAt,
+              duration: activePractice.duration,
+              expiresAt: practiceExpiresAt,
+              remainingSeconds: practiceRemainingSeconds,
+            }
+          : null,
+      };
+    });
+
+    return {
+      data,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
+  }
+
+  async forceCheckoutByMonitor(
+    bookingId: string,
+    dto: ForceCheckoutDto,
+    requesterId: string,
+    requesterRole: string,
+  ) {
+    await this.assertMonitoringPermission(requesterId, requesterRole, 'buộc checkout phiên booth');
+
+    const booking = await this.prisma.booking.findUnique({
+      where: { id: bookingId },
+      include: {
+        examSessions: {
+          where: { status: 'IN_PROGRESS' },
+          select: { id: true },
+        },
+        practiceSessions: {
+          where: { status: 'IN_PROGRESS' },
+          select: { id: true },
+        },
+      },
+    });
+
+    if (!booking) {
+      throw new NotFoundException('Booking không tồn tại');
+    }
+
+    if (booking.status !== 'CHECKED_IN') {
+      throw new BadRequestException('Booking không ở trạng thái CHECKED_IN');
+    }
+
+    const now = this.getNowInVietnamConvention();
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.booking.update({
+        where: { id: bookingId },
+        data: {
+          status: 'COMPLETED',
+          checkedOutAt: now,
+        },
+      });
+
+      await tx.examSession.updateMany({
+        where: {
+          bookingId,
+          status: 'IN_PROGRESS',
+        },
+        data: {
+          status: 'SUBMITTED',
+          finishedAt: new Date(),
+        },
+      });
+
+      await tx.practiceSession.updateMany({
+        where: {
+          bookingId,
+          status: 'IN_PROGRESS',
+        },
+        data: {
+          status: 'ABANDONED',
+          finishedAt: new Date(),
+        },
+      });
+    });
+
+    this.realtimeService.bookingCheckout({
+      bookingId: booking.id,
+      boothId: booking.boothId,
+      userId: booking.userId,
+      status: 'COMPLETED',
+      type: booking.type,
+      startTime: booking.startTime.toISOString(),
+      endTime: booking.endTime.toISOString(),
+      checkedOutAt: now.toISOString(),
+      emittedAt: new Date().toISOString(),
+    });
+
+    for (const examSession of booking.examSessions) {
+      this.realtimeService.sessionTerminated({
+        sessionType: 'EXAM',
+        sessionId: examSession.id,
+        userId: booking.userId,
+        boothId: booking.boothId,
+        status: 'SUBMITTED',
+        reason: dto.reason,
+        emittedAt: new Date().toISOString(),
+      });
+    }
+
+    for (const practiceSession of booking.practiceSessions) {
+      this.realtimeService.sessionTerminated({
+        sessionType: 'PRACTICE',
+        sessionId: practiceSession.id,
+        userId: booking.userId,
+        boothId: booking.boothId,
+        status: 'ABANDONED',
+        reason: dto.reason,
+        emittedAt: new Date().toISOString(),
+      });
+    }
+
+    this.realtimeService.monitoringUpdated({
+      scope: 'BOOKING',
+      action: 'FORCE_CHECKOUT',
+      bookingId: booking.id,
+      boothId: booking.boothId,
+      userId: booking.userId,
+      emittedAt: new Date().toISOString(),
+    });
+
+    this.realtimeService.notify({
+      userId: booking.userId,
+      boothId: booking.boothId,
+      message: `Phiên booth đã bị kết thúc bởi quản trị viên/giảng viên. Lý do: ${dto.reason}`,
+      level: 'warning',
+      emittedAt: new Date().toISOString(),
+    });
+
+    return {
+      message: 'Buộc checkout thành công',
+      bookingId,
+      affectedExamSessions: booking.examSessions.length,
+      affectedPracticeSessions: booking.practiceSessions.length,
+    };
+  }
+
+  async notifyByMonitor(
+    bookingId: string,
+    dto: MonitoringNotifyDto,
+    requesterId: string,
+    requesterRole: string,
+  ) {
+    await this.assertMonitoringPermission(requesterId, requesterRole, 'gửi cảnh báo realtime');
+
+    const booking = await this.prisma.booking.findUnique({
+      where: { id: bookingId },
+      select: {
+        id: true,
+        boothId: true,
+        userId: true,
+      },
+    });
+
+    if (!booking) {
+      throw new NotFoundException('Booking không tồn tại');
+    }
+
+    const emittedAt = new Date().toISOString();
+
+    this.realtimeService.notify({
+      userId: booking.userId,
+      boothId: booking.boothId,
+      message: dto.message,
+      level: dto.level || 'warning',
+      emittedAt,
+    });
+
+    this.realtimeService.monitoringUpdated({
+      scope: 'BOOKING',
+      action: 'NOTIFY',
+      bookingId: booking.id,
+      boothId: booking.boothId,
+      userId: booking.userId,
+      emittedAt,
+    });
+
+    return {
+      message: 'Đã gửi cảnh báo realtime',
+      bookingId: booking.id,
     };
   }
 

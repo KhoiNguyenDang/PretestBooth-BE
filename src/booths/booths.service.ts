@@ -43,6 +43,23 @@ export class BoothsService {
     );
   }
 
+  private async assertMonitoringPermission(userId: string, userRole: string, actionLabel: string) {
+    if (userRole === 'ADMIN') {
+      return;
+    }
+
+    if (userRole !== 'LECTURER') {
+      throw new ForbiddenException(`Chỉ giảng viên và quản trị viên mới có thể ${actionLabel}`);
+    }
+
+    await this.authorizationService.assertPermission(
+      userId,
+      userRole,
+      'MONITOR_SESSIONS',
+      'Giảng viên chưa được cấp quyền giám sát phiên thi/booth',
+    );
+  }
+
   private getOtpTtlMinutes() {
     return Number(process.env.BOOTH_OTP_TTL_MINUTES || 10);
   }
@@ -520,6 +537,63 @@ export class BoothsService {
     });
 
     return { message: 'Đăng xuất booth thành công' };
+  }
+
+  async forceDeactivateBoothSessionByBoothId(
+    boothId: string,
+    reason: string,
+    userRole: string,
+    userId: string,
+  ) {
+    await this.assertMonitoringPermission(userId, userRole, 'buộc đăng xuất kiosk booth');
+
+    const booth = await this.prisma.booth.findUnique({ where: { id: boothId } });
+    if (!booth) {
+      throw new NotFoundException('Booth không tồn tại');
+    }
+
+    if (!booth.sessionTokenHash) {
+      return { message: 'Booth hiện không có phiên kiosk đang hoạt động', boothId };
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.booth.update({
+        where: { id: booth.id },
+        data: {
+          sessionTokenHash: null,
+        },
+      });
+
+      await this.appendBoothActivityLog(
+        booth.id,
+        booth.status,
+        `Buộc kiosk đăng xuất. Lý do: ${reason}`,
+        userId,
+        tx,
+      );
+    });
+
+    const emittedAt = new Date().toISOString();
+
+    this.realtimeService.notify({
+      boothId: booth.id,
+      message: `Booth ${booth.code || booth.name} bị buộc đăng xuất kiosk. Lý do: ${reason}`,
+      level: 'warning',
+      emittedAt,
+    });
+
+    this.realtimeService.monitoringUpdated({
+      scope: 'BOOTH',
+      action: 'FORCE_LOGOUT_BOOTH',
+      boothId: booth.id,
+      emittedAt,
+    });
+
+    return {
+      message: 'Buộc đăng xuất kiosk booth thành công',
+      boothId: booth.id,
+      boothCode: booth.code || booth.name,
+    };
   }
 
   async getBoothSessionStatus(boothSessionToken: string) {

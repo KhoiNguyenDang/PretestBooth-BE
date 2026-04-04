@@ -10,6 +10,8 @@ import { BookingsService } from '../bookings/bookings.service';
 import { PointsService } from '../points/points.service';
 import type { Prisma } from '@prisma/client';
 import type { CreatePracticeSessionDto, SubmitPracticeAnswerDto } from './dto/practice.dto';
+import { AuthorizationService } from '../common/authorization/authorization.service';
+import { RealtimeService } from '../realtime/realtime.service';
 
 @Injectable()
 export class PracticeService {
@@ -17,7 +19,26 @@ export class PracticeService {
     private readonly prisma: PrismaService,
     private readonly bookingsService: BookingsService,
     private readonly pointsService: PointsService,
+    private readonly authorizationService: AuthorizationService,
+    private readonly realtimeService: RealtimeService,
   ) {}
+
+  private async assertMonitoringPermission(userId: string, userRole: string, actionLabel: string) {
+    if (userRole === 'ADMIN') {
+      return;
+    }
+
+    if (userRole !== 'LECTURER') {
+      throw new ForbiddenException(`Chỉ giảng viên và quản trị viên mới có thể ${actionLabel}`);
+    }
+
+    await this.authorizationService.assertPermission(
+      userId,
+      userRole,
+      'MONITOR_SESSIONS',
+      'Giảng viên chưa được cấp quyền giám sát phiên thi/booth',
+    );
+  }
 
   private calculatePracticeCompletionPoints(score: number, maxScore: number | null): number {
     if (!maxScore || maxScore <= 0) {
@@ -93,7 +114,7 @@ export class PracticeService {
     }
 
     // 2. Create the session
-    return this.prisma.$transaction(async (tx) => {
+    const created = await this.prisma.$transaction(async (tx) => {
       const session = await tx.practiceSession.create({
         data: {
           userId,
@@ -141,6 +162,19 @@ export class PracticeService {
 
       return { sessionId: session.id, totalItems: totalActualItems };
     });
+
+    this.realtimeService.monitoringUpdated({
+      scope: 'PRACTICE',
+      action: 'START',
+      bookingId: activeBooking?.id,
+      boothId: activeBooking?.boothId,
+      userId,
+      sessionType: 'PRACTICE',
+      sessionId: created.sessionId,
+      emittedAt: new Date().toISOString(),
+    });
+
+    return created;
   }
 
   /**
@@ -306,7 +340,14 @@ export class PracticeService {
     // Get booking ID from practice session via session fetch
     const practiceSessionWithBooking = await this.prisma.practiceSession.findUnique({
       where: { id: sessionId },
-      select: { bookingId: true },
+      select: {
+        bookingId: true,
+        booking: {
+          select: {
+            boothId: true,
+          },
+        },
+      },
     });
 
     if (practiceSessionWithBooking?.bookingId) {
@@ -330,6 +371,178 @@ export class PracticeService {
       }
     }
 
+    const emittedAt = new Date().toISOString();
+
+    this.realtimeService.sessionTerminated({
+      sessionType: 'PRACTICE',
+      sessionId,
+      userId,
+      boothId: practiceSessionWithBooking?.booking?.boothId || undefined,
+      status: 'COMPLETED',
+      emittedAt,
+    });
+
+    this.realtimeService.monitoringUpdated({
+      scope: 'PRACTICE',
+      action: 'SUBMIT',
+      bookingId: practiceSessionWithBooking?.bookingId || undefined,
+      boothId: practiceSessionWithBooking?.booking?.boothId || undefined,
+      userId,
+      sessionType: 'PRACTICE',
+      sessionId,
+      emittedAt,
+    });
+
     return updatedSession;
+  }
+
+  async extendSessionByMonitor(
+    sessionId: string,
+    minutes: number,
+    reason: string,
+    requesterId: string,
+    requesterRole: string,
+  ) {
+    await this.assertMonitoringPermission(requesterId, requesterRole, 'gia hạn phiên luyện tập');
+
+    const session = await this.prisma.practiceSession.findUnique({
+      where: { id: sessionId },
+      include: {
+        booking: {
+          select: {
+            boothId: true,
+          },
+        },
+      },
+    });
+
+    if (!session) {
+      throw new NotFoundException('Phiên luyện tập không tồn tại');
+    }
+
+    if (session.status !== 'IN_PROGRESS') {
+      throw new BadRequestException('Phiên luyện tập không còn ở trạng thái IN_PROGRESS');
+    }
+
+    const nextDuration = session.duration + minutes;
+    if (nextDuration > 720) {
+      throw new BadRequestException('Tổng thời lượng sau gia hạn không được vượt quá 720 phút');
+    }
+
+    await this.prisma.practiceSession.update({
+      where: { id: sessionId },
+      data: {
+        duration: nextDuration,
+      },
+    });
+
+    const nextExpiresAt = new Date(session.startedAt.getTime() + nextDuration * 60 * 1000);
+    const emittedAt = new Date().toISOString();
+
+    this.realtimeService.sessionTimerAdjusted({
+      sessionType: 'PRACTICE',
+      sessionId,
+      userId: session.userId,
+      boothId: session.booking?.boothId || undefined,
+      expiresAt: nextExpiresAt.toISOString(),
+      reason,
+      emittedAt,
+    });
+
+    this.realtimeService.monitoringUpdated({
+      scope: 'PRACTICE',
+      action: 'EXTEND',
+      userId: session.userId,
+      boothId: session.booking?.boothId || undefined,
+      sessionType: 'PRACTICE',
+      sessionId,
+      bookingId: session.bookingId || undefined,
+      emittedAt,
+    });
+
+    return {
+      sessionId,
+      sessionType: 'PRACTICE',
+      previousDuration: session.duration,
+      duration: nextDuration,
+      expiresAt: nextExpiresAt,
+      extendedMinutes: minutes,
+      reason,
+      updatedBy: requesterId,
+    };
+  }
+
+  async abortSessionByMonitor(
+    sessionId: string,
+    reason: string,
+    requesterId: string,
+    requesterRole: string,
+  ) {
+    await this.assertMonitoringPermission(requesterId, requesterRole, 'hủy phiên luyện tập');
+
+    const session = await this.prisma.practiceSession.findUnique({
+      where: { id: sessionId },
+      include: {
+        booking: {
+          select: {
+            boothId: true,
+          },
+        },
+      },
+    });
+
+    if (!session) {
+      throw new NotFoundException('Phiên luyện tập không tồn tại');
+    }
+
+    if (session.status !== 'IN_PROGRESS') {
+      throw new BadRequestException('Phiên luyện tập không còn ở trạng thái IN_PROGRESS');
+    }
+
+    await this.prisma.practiceSession.update({
+      where: { id: sessionId },
+      data: {
+        status: 'ABANDONED',
+        finishedAt: new Date(),
+      },
+    });
+
+    const emittedAt = new Date().toISOString();
+
+    this.realtimeService.sessionTerminated({
+      sessionType: 'PRACTICE',
+      sessionId,
+      userId: session.userId,
+      boothId: session.booking?.boothId || undefined,
+      status: 'ABANDONED',
+      reason,
+      emittedAt,
+    });
+
+    this.realtimeService.monitoringUpdated({
+      scope: 'PRACTICE',
+      action: 'ABORT',
+      userId: session.userId,
+      boothId: session.booking?.boothId || undefined,
+      sessionType: 'PRACTICE',
+      sessionId,
+      bookingId: session.bookingId || undefined,
+      emittedAt,
+    });
+
+    this.realtimeService.notify({
+      userId: session.userId,
+      boothId: session.booking?.boothId || undefined,
+      message: `Phiên luyện tập đã bị hủy bởi quản trị viên/giảng viên. Lý do: ${reason}`,
+      level: 'error',
+      emittedAt,
+    });
+
+    return {
+      message: 'Hủy phiên luyện tập thành công',
+      sessionId,
+      reason,
+      updatedBy: requesterId,
+    };
   }
 }

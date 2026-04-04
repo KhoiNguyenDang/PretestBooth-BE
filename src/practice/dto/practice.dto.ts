@@ -37,3 +37,16 @@ export const SubmitPracticeAnswerSchema = z.object({
 );
 
 export type SubmitPracticeAnswerDto = z.output<typeof SubmitPracticeAnswerSchema>;
+
+export const ExtendPracticeSessionSchema = z.object({
+  minutes: z.coerce.number().int().min(1).max(120),
+  reason: z.string().trim().min(3, 'Lý do tối thiểu 3 ký tự').max(300),
+});
+
+export type ExtendPracticeSessionDto = z.output<typeof ExtendPracticeSessionSchema>;
+
+export const AbortPracticeSessionSchema = z.object({
+  reason: z.string().trim().min(3, 'Lý do tối thiểu 3 ký tự').max(300),
+});
+
+export type AbortPracticeSessionDto = z.output<typeof AbortPracticeSessionSchema>;

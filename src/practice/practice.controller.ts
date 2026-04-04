@@ -4,8 +4,18 @@ import {
 import { AuthGuard } from '@nestjs/passport';
 import { PracticeService } from './practice.service';
 import { ZodValidationPipe } from '../common/zod/zod-validation.pipe';
-import { CreatePracticeSessionSchema, SubmitPracticeAnswerSchema } from './dto/practice.dto';
-import type { CreatePracticeSessionDto, SubmitPracticeAnswerDto } from './dto/practice.dto';
+import {
+  AbortPracticeSessionSchema,
+  CreatePracticeSessionSchema,
+  ExtendPracticeSessionSchema,
+  SubmitPracticeAnswerSchema,
+} from './dto/practice.dto';
+import type {
+  AbortPracticeSessionDto,
+  CreatePracticeSessionDto,
+  ExtendPracticeSessionDto,
+  SubmitPracticeAnswerDto,
+} from './dto/practice.dto';
 
 @Controller('practice')
 @UseGuards(AuthGuard('jwt'))
@@ -39,5 +49,31 @@ export class PracticeController {
   @HttpCode(HttpStatus.OK)
   completeSession(@Param('id') id: string, @Req() req) {
     return this.practiceService.completeSession(id, req.user['sub']);
+  }
+
+  @Post(':id/monitor/extend')
+  @HttpCode(HttpStatus.OK)
+  extendSessionByMonitor(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(ExtendPracticeSessionSchema)) dto: ExtendPracticeSessionDto,
+    @Req() req,
+  ) {
+    return this.practiceService.extendSessionByMonitor(
+      id,
+      dto.minutes,
+      dto.reason,
+      req.user['sub'],
+      req.user['role'],
+    );
+  }
+
+  @Post(':id/monitor/abort')
+  @HttpCode(HttpStatus.OK)
+  abortSessionByMonitor(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(AbortPracticeSessionSchema)) dto: AbortPracticeSessionDto,
+    @Req() req,
+  ) {
+    return this.practiceService.abortSessionByMonitor(id, dto.reason, req.user['sub'], req.user['role']);
   }
 }

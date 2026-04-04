@@ -27,6 +27,16 @@ import { GradeSessionSchema } from './dto/grade-session.dto';
 import type { GradeSessionDto } from './dto/grade-session.dto';
 import { QueryExamSessionsSchema } from './dto/query-exam-sessions.dto';
 import type { QueryExamSessionsDto } from './dto/query-exam-sessions.dto';
+import {
+  AbortExamSessionSchema,
+  ExtendExamSessionSchema,
+  ForceSubmitExamSessionSchema,
+} from './dto/monitor-session.dto';
+import type {
+  AbortExamSessionDto,
+  ExtendExamSessionDto,
+  ForceSubmitExamSessionDto,
+} from './dto/monitor-session.dto';
 
 @Controller('exams')
 @UseGuards(AuthGuard('jwt'))
@@ -152,6 +162,52 @@ export class ExamsController {
     const userId = req.user['sub'];
     const userRole = req.user['role'];
     return this.examsService.gradeSession(sessionId, dto, userId, userRole);
+  }
+
+  @Post('sessions/:sessionId/force-submit')
+  @HttpCode(HttpStatus.OK)
+  forceSubmitSession(
+    @Param('sessionId') sessionId: string,
+    @Body(new ZodValidationPipe(ForceSubmitExamSessionSchema)) dto: ForceSubmitExamSessionDto,
+    @Req() req,
+  ) {
+    return this.examsService.forceSubmitSessionByMonitor(
+      sessionId,
+      dto.reason,
+      req.user['sub'],
+      req.user['role'],
+    );
+  }
+
+  @Post('sessions/:sessionId/abort')
+  @HttpCode(HttpStatus.OK)
+  abortSession(
+    @Param('sessionId') sessionId: string,
+    @Body(new ZodValidationPipe(AbortExamSessionSchema)) dto: AbortExamSessionDto,
+    @Req() req,
+  ) {
+    return this.examsService.abortSessionByMonitor(
+      sessionId,
+      dto.reason,
+      req.user['sub'],
+      req.user['role'],
+    );
+  }
+
+  @Post('sessions/:sessionId/extend')
+  @HttpCode(HttpStatus.OK)
+  extendSession(
+    @Param('sessionId') sessionId: string,
+    @Body(new ZodValidationPipe(ExtendExamSessionSchema)) dto: ExtendExamSessionDto,
+    @Req() req,
+  ) {
+    return this.examsService.extendSessionByMonitor(
+      sessionId,
+      dto.minutes,
+      dto.reason,
+      req.user['sub'],
+      req.user['role'],
+    );
   }
 
   @Get(':id')

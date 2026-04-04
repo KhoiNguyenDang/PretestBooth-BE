@@ -46,3 +46,9 @@ export const ActivateBoothSchema = z.object({
 });
 
 export type ActivateBoothDto = z.output<typeof ActivateBoothSchema>;
+
+export const ForceBoothLogoutSchema = z.object({
+  reason: z.string().trim().min(3, 'Lý do tối thiểu 3 ký tự').max(300),
+});
+
+export type ForceBoothLogoutDto = z.output<typeof ForceBoothLogoutSchema>;

@@ -4,6 +4,9 @@ import type {
   BookingRealtimePayload,
   BoothNotificationPayload,
   BoothStatusUpdatedPayload,
+  MonitoringUpdatedPayload,
+  SessionTerminatedPayload,
+  SessionTimerAdjustedPayload,
 } from './realtime.types';
 
 @Injectable()
@@ -27,5 +30,20 @@ export class RealtimeService {
 
   notify(payload: BoothNotificationPayload) {
     this.gateway.emitBoothNotification(payload);
+  }
+
+  monitoringUpdated(payload: MonitoringUpdatedPayload) {
+    this.gateway.emitMonitoringUpdated(payload);
+    this.gateway.emitDashboardStatsUpdated();
+  }
+
+  sessionTimerAdjusted(payload: SessionTimerAdjustedPayload) {
+    this.gateway.emitSessionTimerAdjusted(payload);
+    this.gateway.emitDashboardStatsUpdated();
+  }
+
+  sessionTerminated(payload: SessionTerminatedPayload) {
+    this.gateway.emitSessionTerminated(payload);
+    this.gateway.emitDashboardStatsUpdated();
   }
 }

@@ -18,8 +18,18 @@ import {
   CreateBookingSchema,
   QueryBookingSchema,
   AvailabilityQuerySchema,
+  ForceCheckoutSchema,
+  MonitoringNotifySchema,
+  QueryActiveMonitoringSchema,
 } from './dto/booking.dto';
-import type { CreateBookingDto, QueryBookingDto, AvailabilityQueryDto } from './dto/booking.dto';
+import type {
+  AvailabilityQueryDto,
+  CreateBookingDto,
+  ForceCheckoutDto,
+  MonitoringNotifyDto,
+  QueryActiveMonitoringDto,
+  QueryBookingDto,
+} from './dto/booking.dto';
 
 @Controller('bookings')
 @UseGuards(AuthGuard('jwt'))
@@ -47,6 +57,34 @@ export class BookingsController {
     @Query(new ZodValidationPipe(AvailabilityQuerySchema)) query: AvailabilityQueryDto,
   ) {
     return this.bookingsService.getAvailability(query.date);
+  }
+
+  @Get('monitor/active')
+  getActiveMonitoringSessions(
+    @Query(new ZodValidationPipe(QueryActiveMonitoringSchema)) query: QueryActiveMonitoringDto,
+    @Req() req,
+  ) {
+    return this.bookingsService.findActiveMonitoringSessions(req.user['sub'], req.user['role'], query);
+  }
+
+  @Post(':id/force-checkout')
+  @HttpCode(HttpStatus.OK)
+  forceCheckout(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(ForceCheckoutSchema)) dto: ForceCheckoutDto,
+    @Req() req,
+  ) {
+    return this.bookingsService.forceCheckoutByMonitor(id, dto, req.user['sub'], req.user['role']);
+  }
+
+  @Post(':id/notify')
+  @HttpCode(HttpStatus.OK)
+  notifyByMonitor(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(MonitoringNotifySchema)) dto: MonitoringNotifyDto,
+    @Req() req,
+  ) {
+    return this.bookingsService.notifyByMonitor(id, dto, req.user['sub'], req.user['role']);
   }
 
   @Patch(':id/cancel')

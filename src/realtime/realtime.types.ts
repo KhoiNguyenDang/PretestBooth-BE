@@ -4,6 +4,9 @@ export const realtimeEvents = {
   bookingCheckout: 'booking.checkout',
   dashboardStatsUpdated: 'dashboard.stats.updated',
   boothNotification: 'booth.notification',
+  monitoringUpdated: 'monitoring.updated',
+  sessionTimerAdjusted: 'session.timer.adjusted',
+  sessionTerminated: 'session.terminated',
 } as const;
 
 export interface BoothStatusUpdatedPayload {
@@ -33,5 +36,45 @@ export interface BoothNotificationPayload {
   boothId?: string;
   message: string;
   level?: 'info' | 'success' | 'warning' | 'error';
+  emittedAt: string;
+}
+
+export interface MonitoringUpdatedPayload {
+  scope: 'BOOKING' | 'BOOTH' | 'EXAM' | 'PRACTICE';
+  action:
+    | 'CHECKIN'
+    | 'CHECKOUT'
+    | 'FORCE_CHECKOUT'
+    | 'FORCE_LOGOUT_BOOTH'
+    | 'START'
+    | 'SUBMIT'
+    | 'ABORT'
+    | 'EXTEND'
+    | 'NOTIFY';
+  bookingId?: string;
+  boothId?: string;
+  userId?: string;
+  sessionType?: 'EXAM' | 'PRACTICE';
+  sessionId?: string;
+  emittedAt: string;
+}
+
+export interface SessionTimerAdjustedPayload {
+  sessionType: 'EXAM' | 'PRACTICE';
+  sessionId: string;
+  userId: string;
+  boothId?: string;
+  expiresAt: string;
+  reason: string;
+  emittedAt: string;
+}
+
+export interface SessionTerminatedPayload {
+  sessionType: 'EXAM' | 'PRACTICE';
+  sessionId: string;
+  userId: string;
+  boothId?: string;
+  status: string;
+  reason?: string;
   emittedAt: string;
 }

@@ -15,6 +15,9 @@ import {
   type BookingRealtimePayload,
   type BoothNotificationPayload,
   type BoothStatusUpdatedPayload,
+  type MonitoringUpdatedPayload,
+  type SessionTerminatedPayload,
+  type SessionTimerAdjustedPayload,
 } from './realtime.types';
 
 interface WsUser {
@@ -137,5 +140,35 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     }
 
     this.server.to('admin:global').emit(realtimeEvents.boothNotification, payload);
+  }
+
+  emitMonitoringUpdated(payload: MonitoringUpdatedPayload) {
+    this.server.to('admin:global').emit(realtimeEvents.monitoringUpdated, payload);
+
+    if (payload.boothId) {
+      this.server.to(`booth:${payload.boothId}`).emit(realtimeEvents.monitoringUpdated, payload);
+    }
+
+    if (payload.userId) {
+      this.server.to(`user:${payload.userId}`).emit(realtimeEvents.monitoringUpdated, payload);
+    }
+  }
+
+  emitSessionTimerAdjusted(payload: SessionTimerAdjustedPayload) {
+    this.server.to('admin:global').emit(realtimeEvents.sessionTimerAdjusted, payload);
+    this.server.to(`user:${payload.userId}`).emit(realtimeEvents.sessionTimerAdjusted, payload);
+
+    if (payload.boothId) {
+      this.server.to(`booth:${payload.boothId}`).emit(realtimeEvents.sessionTimerAdjusted, payload);
+    }
+  }
+
+  emitSessionTerminated(payload: SessionTerminatedPayload) {
+    this.server.to('admin:global').emit(realtimeEvents.sessionTerminated, payload);
+    this.server.to(`user:${payload.userId}`).emit(realtimeEvents.sessionTerminated, payload);
+
+    if (payload.boothId) {
+      this.server.to(`booth:${payload.boothId}`).emit(realtimeEvents.sessionTerminated, payload);
+    }
   }
 }

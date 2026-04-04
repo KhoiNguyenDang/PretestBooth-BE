@@ -5,9 +5,10 @@ import { PrismaModule } from '../prisma/prisma.module';
 import { BoothsModule } from '../booths/booths.module';
 import { RealtimeModule } from '../realtime/realtime.module';
 import { PointsModule } from '../points/points.module';
+import { AuthorizationModule } from '../common/authorization/authorization.module';
 
 @Module({
-  imports: [PrismaModule, BoothsModule, RealtimeModule, PointsModule],
+  imports: [PrismaModule, BoothsModule, RealtimeModule, PointsModule, AuthorizationModule],
   controllers: [BookingsController],
   providers: [BookingsService],
   exports: [BookingsService],

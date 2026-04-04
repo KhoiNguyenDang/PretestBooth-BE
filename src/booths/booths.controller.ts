@@ -20,12 +20,14 @@ import {
   UpdateBoothSchema,
   QueryBoothSchema,
   GenerateActivationOtpSchema,
+  ForceBoothLogoutSchema,
 } from './dto/booth.dto';
 import type {
   CreateBoothDto,
   UpdateBoothDto,
   QueryBoothDto,
   GenerateActivationOtpDto,
+  ForceBoothLogoutDto,
 } from './dto/booth.dto';
 
 @Controller('booths')
@@ -84,6 +86,21 @@ export class BoothsController {
     @Req() req,
   ) {
     return this.boothsService.generateActivationOtp(dto.boothCode, req.user['role'], req.user['sub']);
+  }
+
+  @Post(':id/force-logout')
+  @HttpCode(HttpStatus.OK)
+  forceLogoutBooth(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(ForceBoothLogoutSchema)) dto: ForceBoothLogoutDto,
+    @Req() req,
+  ) {
+    return this.boothsService.forceDeactivateBoothSessionByBoothId(
+      id,
+      dto.reason,
+      req.user['role'],
+      req.user['sub'],
+    );
   }
 
   @Delete(':id')

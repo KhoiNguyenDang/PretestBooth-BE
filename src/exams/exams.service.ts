@@ -15,6 +15,7 @@ import { Prisma } from '@prisma/client';
 import * as crypto from 'crypto';
 import { shuffleWithSeed } from './utils/shuffle';
 import { AuthorizationService } from '../common/authorization/authorization.service';
+import { RealtimeService } from '../realtime/realtime.service';
 
 import type { CreateExamDto } from './dto/create-exam.dto';
 import type { UpdateExamDto } from './dto/update-exam.dto';
@@ -59,6 +60,7 @@ export class ExamsService {
     private readonly bookingsService: BookingsService,
     private readonly pointsService: PointsService,
     private readonly authorizationService: AuthorizationService,
+    private readonly realtimeService: RealtimeService,
   ) {}
 
   private async assertExamManagementPermission(userId: string, userRole: string, actionLabel: string) {
@@ -75,6 +77,27 @@ export class ExamsService {
       userRole,
       'CREATE_EXAM',
       'Giảng viên chưa được cấp quyền quản lý đề thi',
+    );
+  }
+
+  private async assertSessionMonitoringPermission(
+    userId: string,
+    userRole: string,
+    actionLabel: string,
+  ) {
+    if (userRole === 'ADMIN') {
+      return;
+    }
+
+    if (userRole !== 'LECTURER') {
+      throw new ForbiddenException(`Chỉ giảng viên và quản trị viên mới có thể ${actionLabel}`);
+    }
+
+    await this.authorizationService.assertPermission(
+      userId,
+      userRole,
+      'MONITOR_SESSIONS',
+      'Giảng viên chưa được cấp quyền giám sát phiên thi/booth',
     );
   }
 
@@ -806,6 +829,17 @@ export class ExamsService {
       },
     });
 
+    this.realtimeService.monitoringUpdated({
+      scope: 'EXAM',
+      action: 'START',
+      bookingId: activeBooking?.id,
+      boothId: activeBooking?.boothId,
+      userId,
+      sessionType: 'EXAM',
+      sessionId: session.id,
+      emittedAt: new Date().toISOString(),
+    });
+
     return this.buildShuffledSession(session, fullExam);
   }
 
@@ -1064,8 +1098,37 @@ export class ExamsService {
     });
 
     await this.syncExamCompletionPoints(sessionId, session.userId, totalScore, session.maxScore);
+    const linkedBooking = session.bookingId
+      ? await this.prisma.booking.findUnique({
+          where: { id: session.bookingId },
+          select: { boothId: true },
+        })
+      : null;
 
-    return this.getSessionResult(sessionId, userId, 'STUDENT');
+    const result = await this.getSessionResult(sessionId, userId, 'STUDENT');
+    const emittedAt = new Date().toISOString();
+
+    this.realtimeService.sessionTerminated({
+      sessionType: 'EXAM',
+      sessionId,
+      userId: session.userId,
+      boothId: linkedBooking?.boothId || undefined,
+      status: result.status,
+      emittedAt,
+    });
+
+    this.realtimeService.monitoringUpdated({
+      scope: 'EXAM',
+      action: 'SUBMIT',
+      bookingId: session.bookingId || undefined,
+      boothId: linkedBooking?.boothId || undefined,
+      userId: session.userId,
+      sessionType: 'EXAM',
+      sessionId,
+      emittedAt,
+    });
+
+    return result;
   }
 
   /**
@@ -1389,6 +1452,246 @@ export class ExamsService {
       limit,
       totalPages: Math.ceil(total / limit),
     });
+  }
+
+  async forceSubmitSessionByMonitor(
+    sessionId: string,
+    reason: string,
+    requesterId: string,
+    requesterRole: string,
+  ) {
+    await this.assertSessionMonitoringPermission(requesterId, requesterRole, 'buộc nộp bài thi');
+
+    const session = await this.prisma.examSession.findUnique({
+      where: { id: sessionId },
+      include: {
+        booking: { select: { boothId: true } },
+      },
+    });
+
+    if (!session) {
+      throw new NotFoundException('Phiên thi không tồn tại');
+    }
+
+    if (session.status !== 'IN_PROGRESS') {
+      throw new BadRequestException('Phiên thi không còn ở trạng thái IN_PROGRESS');
+    }
+
+    let forcedByFallback = false;
+    let result;
+
+    try {
+      result = await this.submitSession(sessionId, session.userId);
+    } catch (error) {
+      forcedByFallback = true;
+
+      await this.prisma.examSession.update({
+        where: { id: sessionId },
+        data: {
+          status: 'SUBMITTED',
+          finishedAt: new Date(),
+        },
+      });
+
+      result = await this.getSessionResult(sessionId, requesterId, requesterRole);
+    }
+
+    const emittedAt = new Date().toISOString();
+
+    if (forcedByFallback) {
+      this.realtimeService.sessionTerminated({
+        sessionType: 'EXAM',
+        sessionId,
+        userId: session.userId,
+        boothId: session.booking?.boothId || undefined,
+        status: 'SUBMITTED',
+        reason,
+        emittedAt,
+      });
+
+      this.realtimeService.monitoringUpdated({
+        scope: 'EXAM',
+        action: 'SUBMIT',
+        userId: session.userId,
+        boothId: session.booking?.boothId || undefined,
+        sessionType: 'EXAM',
+        sessionId,
+        bookingId: session.bookingId || undefined,
+        emittedAt,
+      });
+    }
+
+    this.realtimeService.notify({
+      userId: session.userId,
+      boothId: session.booking?.boothId || undefined,
+      message: `Bài thi đã được buộc nộp bởi quản trị viên/giảng viên. Lý do: ${reason}`,
+      level: 'warning',
+      emittedAt,
+    });
+
+    return {
+      ...result,
+      forceAction: {
+        type: 'FORCE_SUBMIT',
+        reason,
+        forcedByFallback,
+      },
+    };
+  }
+
+  async abortSessionByMonitor(
+    sessionId: string,
+    reason: string,
+    requesterId: string,
+    requesterRole: string,
+  ) {
+    await this.assertSessionMonitoringPermission(requesterId, requesterRole, 'hủy phiên thi');
+
+    const session = await this.prisma.examSession.findUnique({
+      where: { id: sessionId },
+      include: {
+        booking: { select: { boothId: true } },
+      },
+    });
+
+    if (!session) {
+      throw new NotFoundException('Phiên thi không tồn tại');
+    }
+
+    if (session.status !== 'IN_PROGRESS') {
+      throw new BadRequestException('Phiên thi không còn ở trạng thái IN_PROGRESS');
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.examSession.update({
+        where: { id: sessionId },
+        data: {
+          status: 'SUBMITTED',
+          finishedAt: new Date(),
+          score: 0,
+        },
+      });
+
+      await tx.proctoringEvent.create({
+        data: {
+          userId: session.userId,
+          examSessionId: sessionId,
+          eventType: 'SESSION_ABORTED',
+          warningLevel: 3,
+          metadata: {
+            reason,
+            abortedBy: requesterId,
+          },
+        },
+      });
+    });
+
+    const emittedAt = new Date().toISOString();
+
+    this.realtimeService.sessionTerminated({
+      sessionType: 'EXAM',
+      sessionId,
+      userId: session.userId,
+      boothId: session.booking?.boothId || undefined,
+      status: 'ABORTED',
+      reason,
+      emittedAt,
+    });
+
+    this.realtimeService.monitoringUpdated({
+      scope: 'EXAM',
+      action: 'ABORT',
+      userId: session.userId,
+      boothId: session.booking?.boothId || undefined,
+      sessionType: 'EXAM',
+      sessionId,
+      bookingId: session.bookingId || undefined,
+      emittedAt,
+    });
+
+    this.realtimeService.notify({
+      userId: session.userId,
+      boothId: session.booking?.boothId || undefined,
+      message: `Phiên thi đã bị hủy bởi quản trị viên/giảng viên. Lý do: ${reason}`,
+      level: 'error',
+      emittedAt,
+    });
+
+    return {
+      ...(await this.getSessionResult(sessionId, requesterId, requesterRole)),
+      forceAction: {
+        type: 'ABORT',
+        reason,
+      },
+    };
+  }
+
+  async extendSessionByMonitor(
+    sessionId: string,
+    minutes: number,
+    reason: string,
+    requesterId: string,
+    requesterRole: string,
+  ) {
+    await this.assertSessionMonitoringPermission(requesterId, requesterRole, 'gia hạn phiên thi');
+
+    const session = await this.prisma.examSession.findUnique({
+      where: { id: sessionId },
+      include: {
+        booking: { select: { boothId: true } },
+      },
+    });
+
+    if (!session) {
+      throw new NotFoundException('Phiên thi không tồn tại');
+    }
+
+    if (session.status !== 'IN_PROGRESS') {
+      throw new BadRequestException('Phiên thi không còn ở trạng thái IN_PROGRESS');
+    }
+
+    const currentExpiresAt = session.expiresAt || new Date();
+    const nextExpiresAt = new Date(currentExpiresAt.getTime() + minutes * 60 * 1000);
+
+    await this.prisma.examSession.update({
+      where: { id: sessionId },
+      data: {
+        expiresAt: nextExpiresAt,
+      },
+    });
+
+    const emittedAt = new Date().toISOString();
+
+    this.realtimeService.sessionTimerAdjusted({
+      sessionType: 'EXAM',
+      sessionId,
+      userId: session.userId,
+      boothId: session.booking?.boothId || undefined,
+      expiresAt: nextExpiresAt.toISOString(),
+      reason,
+      emittedAt,
+    });
+
+    this.realtimeService.monitoringUpdated({
+      scope: 'EXAM',
+      action: 'EXTEND',
+      userId: session.userId,
+      boothId: session.booking?.boothId || undefined,
+      sessionType: 'EXAM',
+      sessionId,
+      bookingId: session.bookingId || undefined,
+      emittedAt,
+    });
+
+    return {
+      sessionId,
+      sessionType: 'EXAM',
+      extendedMinutes: minutes,
+      previousExpiresAt: currentExpiresAt,
+      expiresAt: nextExpiresAt,
+      reason,
+      updatedBy: requesterId,
+    };
   }
 
   // ==================== HELPER METHODS ====================
