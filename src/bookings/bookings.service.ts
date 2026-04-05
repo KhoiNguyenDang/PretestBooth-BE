@@ -87,6 +87,34 @@ export class BookingsService {
     return `${get('year')}-${get('month')}-${get('day')} ${get('hour')}:${get('minute')}:${get('second')}`;
   }
 
+  // Convert an absolute timestamp to a Date whose UTC clock matches Vietnam wall-clock.
+  // Example: 2026-04-10T00:00:00.000Z (07:00 VN) -> 2026-04-10T07:00:00.000Z
+  private toVietnamWallClockDate(input: Date) {
+    const parts = new Intl.DateTimeFormat('sv-SE', {
+      timeZone: 'Asia/Ho_Chi_Minh',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    }).formatToParts(input);
+
+    const getNumber = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? '0');
+
+    return new Date(
+      Date.UTC(
+        getNumber('year'),
+        getNumber('month') - 1,
+        getNumber('day'),
+        getNumber('hour'),
+        getNumber('minute'),
+        getNumber('second'),
+      ),
+    );
+  }
+
   /**
    * Create a booking with full business rule validation:
    * - Must book at least 7 days in advance
@@ -116,8 +144,8 @@ export class BookingsService {
     }
 
     const bookingDate = new Date(dto.date);
-    const startTime = new Date(dto.startTime);
-    const endTime = new Date(dto.endTime);
+    const startTime = this.toVietnamWallClockDate(new Date(dto.startTime));
+    const endTime = this.toVietnamWallClockDate(new Date(dto.endTime));
     const now = this.getNowInVietnamConvention();
 
     // Rule 1: Must book at least 7 days in advance
@@ -129,15 +157,10 @@ export class BookingsService {
       throw new BadRequestException('Phải đăng ký trước tối thiểu 1 tuần');
     }
 
-    // Rule 2: Time slot must be within 7:00 - 17:00 (Vietnam Time +07)
-    const startVNTimeOffset = startTime.getTime() + (7 * 60 * 60 * 1000);
-    const startVNDate = new Date(startVNTimeOffset);
-    const startHour = startVNDate.getUTCHours();
-    
-    const endVNTimeOffset = endTime.getTime() + (7 * 60 * 60 * 1000);
-    const endVNDate = new Date(endVNTimeOffset);
-    const endHour = endVNDate.getUTCHours();
-    const endMinute = endVNDate.getUTCMinutes();
+    // Rule 2: Time slot must be within 7:00 - 17:00 (Vietnam wall-clock)
+    const startHour = startTime.getUTCHours();
+    const endHour = endTime.getUTCHours();
+    const endMinute = endTime.getUTCMinutes();
 
     if (startHour < 7 || (endHour > 17 || (endHour === 17 && endMinute > 0))) {
       throw new BadRequestException('Khung giờ sử dụng booth: 7:00 - 17:00');
