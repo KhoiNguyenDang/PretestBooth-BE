@@ -1361,17 +1361,17 @@ export class ExamsService {
     });
     if (!exam) throw new NotFoundException('Đề thi không tồn tại');
 
-    if (exam.type === 'EXAM' && userRole === 'STUDENT') {
-      throw new ForbiddenException(
-        'Sinh viên có lịch EXAM sẽ được hệ thống gán đề tự động. Vui lòng bắt đầu từ check-in booth.',
-      );
-    }
-
     let activeBooking: Awaited<ReturnType<BookingsService['findActiveCheckedInBooking']>> | null =
       null;
 
     if (exam.type === 'EXAM') {
-      activeBooking = await this.bookingsService.requireActiveCheckedInBooking(userId, 'EXAM');
+      activeBooking = await this.bookingsService.findActiveCheckedInBooking(userId, 'EXAM');
+
+      if (userRole === 'STUDENT' && activeBooking) {
+        throw new ForbiddenException(
+          'Bạn đang trong ca EXAM tại booth. Vui lòng vào bài qua bước khởi động từ kiosk.',
+        );
+      }
     } else {
       activeBooking = await this.bookingsService.findActiveCheckedInBooking(userId, 'PRACTICE');
     }
