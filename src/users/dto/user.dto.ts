@@ -7,6 +7,7 @@ export const QueryUserSchema = z.object({
   role: z.enum(['STUDENT', 'LECTURER', 'ADMIN']).optional(),
   search: z.string().optional(),
   className: z.string().optional(),
+  cohort: z.coerce.number().int().min(1).max(99).optional(),
   isLocked: z.preprocess((val) => val === 'true' ? true : val === 'false' ? false : undefined, z.boolean().optional()),
   sortOrder: z.enum(['asc', 'desc']).default('desc'),
   format: z.enum(['csv', 'xlsx']).optional(),

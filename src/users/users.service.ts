@@ -93,14 +93,23 @@ export class UsersService {
     };
   }
 
+  private getStudentCodePrefixForCohort(cohort: number) {
+    return String(cohort + 4).padStart(2, '0');
+  }
+
   private buildStudentWhere(query: QueryUserDto): Prisma.UserWhereInput {
-    const { role, search, className, isLocked } = query;
+    const { role, search, className, cohort, isLocked } = query;
     const where: Prisma.UserWhereInput = {};
 
     // This module is scoped to student data management.
     where.role = role ? (role as Role) : 'STUDENT';
     if (isLocked !== undefined) where.isLocked = isLocked;
     if (className) where.className = { contains: className, mode: 'insensitive' };
+    if (cohort !== undefined) {
+      where.studentCode = {
+        startsWith: this.getStudentCodePrefixForCohort(cohort),
+      };
+    }
 
     if (search) {
       where.OR = [
@@ -145,7 +154,7 @@ export class UsersService {
   async findAll(query: QueryUserDto, requesterId: string, requesterRole: string) {
     await this.assertStudentManagementAccess(requesterId, requesterRole);
 
-    const { page, limit, role, search, className, isLocked, sortOrder } = query;
+    const { page, limit, role, search, className, cohort, isLocked, sortOrder } = query;
     const skip = (page - 1) * limit;
 
     const where = this.buildStudentWhere({
@@ -154,6 +163,7 @@ export class UsersService {
       role,
       search,
       className,
+      cohort,
       isLocked,
       sortOrder,
       format: query.format,
