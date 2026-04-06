@@ -24,6 +24,11 @@ interface TokenBoothContext {
   boothId?: string;
 }
 
+interface BoothSessionBindingContext {
+  boothClientId: string;
+  userAgent?: string | null;
+}
+
 const NO_PENDING_BOOKING_MESSAGE = 'Không có booking hợp lệ theo booth và khung giờ để check-in';
 
 @Injectable()
@@ -152,18 +157,23 @@ export class AuthService {
     });
   }
 
-  async activateBooth(boothCode: string, otp: string) {
-    return this.boothsService.activateBoothSession(boothCode, otp);
+  async activateBooth(boothCode: string, otp: string, boothBinding: BoothSessionBindingContext) {
+    return this.boothsService.activateBoothSession(boothCode, otp, boothBinding);
   }
 
-  async boothLogin(email: string, password: string, boothSessionToken: string) {
+  async boothLogin(
+    email: string,
+    password: string,
+    boothSessionToken: string,
+    boothBinding: BoothSessionBindingContext,
+  ) {
     const user = await this.validateUserCredentials(email, password);
 
     if (user.role !== 'STUDENT') {
       throw new ForbiddenException('Booth login chỉ áp dụng cho sinh viên');
     }
 
-    const booth = await this.boothsService.validateBoothSessionToken(boothSessionToken);
+    const booth = await this.boothsService.validateBoothSessionToken(boothSessionToken, boothBinding);
     let accessMode: BoothAccessMode = 'SCHEDULED';
     let checkedInBooking: any = null;
     let pendingCheckinBooking: any = null;
@@ -230,16 +240,28 @@ export class AuthService {
     };
   }
 
-  async boothLogout(boothSessionToken: string, role?: string, userId?: string) {
+  async boothLogout(
+    boothSessionToken: string,
+    role?: string,
+    userId?: string,
+    boothBinding?: BoothSessionBindingContext,
+  ) {
     if (role !== 'ADMIN') {
       throw new ForbiddenException('Chỉ ADMIN mới được phép đăng xuất booth');
     }
 
-    return this.boothsService.deactivateBoothSession(boothSessionToken, userId);
+    if (!boothBinding) {
+      throw new BadRequestException('Thiếu ngữ cảnh phiên kiosk');
+    }
+
+    return this.boothsService.deactivateBoothSession(boothSessionToken, boothBinding, userId);
   }
 
-  async getBoothSessionStatus(boothSessionToken: string) {
-    return this.boothsService.getBoothSessionStatus(boothSessionToken);
+  async getBoothSessionStatus(
+    boothSessionToken: string,
+    boothBinding: BoothSessionBindingContext,
+  ) {
+    return this.boothsService.getBoothSessionStatus(boothSessionToken, boothBinding);
   }
 
   private async validateUserCredentials(email: string, password: string) {

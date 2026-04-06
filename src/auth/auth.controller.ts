@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Post,
@@ -36,6 +37,25 @@ import { ActivateBoothSchema } from '../booths/dto/booth.dto';
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
+  private extractBoothSessionBinding(req: any) {
+    const rawBoothClientId = req?.headers?.['x-booth-client-id'];
+    const boothClientId = Array.isArray(rawBoothClientId)
+      ? rawBoothClientId[0]
+      : rawBoothClientId;
+
+    if (typeof boothClientId !== 'string' || boothClientId.trim().length < 16) {
+      throw new BadRequestException('Thiếu hoặc không hợp lệ header x-booth-client-id');
+    }
+
+    const rawUserAgent = req?.headers?.['user-agent'];
+    const userAgent = Array.isArray(rawUserAgent) ? rawUserAgent[0] : rawUserAgent;
+
+    return {
+      boothClientId: boothClientId.trim(),
+      userAgent: typeof userAgent === 'string' ? userAgent : null,
+    };
+  }
+
   @Post('register')
   register(
     @Body(new ZodValidationPipe(RegisterSchema))
@@ -56,19 +76,30 @@ export class AuthController {
   @Post('booth-activate')
   @HttpCode(HttpStatus.OK)
   boothActivate(
+    @Req() req,
     @Body(new ZodValidationPipe(ActivateBoothSchema))
     dto: ActivateBoothDto,
   ) {
-    return this.authService.activateBooth(dto.boothCode, dto.otp);
+    return this.authService.activateBooth(
+      dto.boothCode,
+      dto.otp,
+      this.extractBoothSessionBinding(req),
+    );
   }
 
   @Post('booth-login')
   @HttpCode(HttpStatus.OK)
   boothLogin(
+    @Req() req,
     @Body(new ZodValidationPipe(BoothLoginSchema))
     dto: BoothLoginDto,
   ) {
-    return this.authService.boothLogin(dto.email, dto.password, dto.boothSessionToken);
+    return this.authService.boothLogin(
+      dto.email,
+      dto.password,
+      dto.boothSessionToken,
+      this.extractBoothSessionBinding(req),
+    );
   }
 
   @Post('booth-logout')
@@ -79,13 +110,21 @@ export class AuthController {
     @Body(new ZodValidationPipe(BoothLogoutSchema))
     dto: BoothLogoutDto,
   ) {
-    return this.authService.boothLogout(dto.boothSessionToken, req.user?.role, req.user?.sub);
+    return this.authService.boothLogout(
+      dto.boothSessionToken,
+      req.user?.role,
+      req.user?.sub,
+      this.extractBoothSessionBinding(req),
+    );
   }
 
   @Get('booth-session')
   @HttpCode(HttpStatus.OK)
-  boothSessionStatus(@Query('boothSessionToken') boothSessionToken: string) {
-    return this.authService.getBoothSessionStatus(boothSessionToken);
+  boothSessionStatus(@Req() req, @Query('boothSessionToken') boothSessionToken: string) {
+    return this.authService.getBoothSessionStatus(
+      boothSessionToken,
+      this.extractBoothSessionBinding(req),
+    );
   }
 
   @Post('refresh')

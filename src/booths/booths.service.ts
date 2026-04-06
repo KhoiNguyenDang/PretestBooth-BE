@@ -15,6 +15,11 @@ import * as crypto from 'crypto';
 import { RealtimeService } from '../realtime/realtime.service';
 import { AuthorizationService } from '../common/authorization/authorization.service';
 
+interface BoothSessionBindingContext {
+  boothClientId: string;
+  userAgent?: string | null;
+}
+
 @Injectable()
 export class BoothsService {
   private static readonly VIETNAM_TZ = 'Asia/Ho_Chi_Minh';
@@ -74,6 +79,20 @@ export class BoothsService {
 
   private normalizeBoothCode(code: string) {
     return code.trim().toUpperCase();
+  }
+
+  private normalizeBoothClientId(boothClientId: string) {
+    return boothClientId.trim();
+  }
+
+  private createBoothSessionBindingHash(boothClientId: string, userAgent?: string | null) {
+    const normalizedClientId = this.normalizeBoothClientId(boothClientId);
+    const normalizedUserAgent = (userAgent || '').trim().toLowerCase();
+
+    return crypto
+      .createHash('sha256')
+      .update(`${normalizedClientId}|${normalizedUserAgent}`)
+      .digest('hex');
   }
 
   private generateNumericOtp(length = 6) {
@@ -339,6 +358,12 @@ export class BoothsService {
       throw new BadRequestException('Booth không ở trạng thái ACTIVE');
     }
 
+    if (booth.sessionTokenHash) {
+      throw new ConflictException(
+        'Booth đang có phiên kiosk hoạt động trên một thiết bị/trình duyệt khác. Vui lòng đăng xuất trước khi tạo OTP mới',
+      );
+    }
+
     const otp = this.generateNumericOtp(6);
     const otpHash = await bcrypt.hash(otp, 10);
     const now = new Date();
@@ -380,7 +405,11 @@ export class BoothsService {
     };
   }
 
-  async activateBoothSession(boothCode: string, otp: string) {
+  async activateBoothSession(
+    boothCode: string,
+    otp: string,
+    bindingContext: BoothSessionBindingContext,
+  ) {
     const normalizedCode = this.normalizeBoothCode(boothCode);
     const booth = await this.prisma.booth.findFirst({
       where: {
@@ -394,6 +423,12 @@ export class BoothsService {
 
     if (booth.status !== 'ACTIVE') {
       throw new BadRequestException('Booth không ở trạng thái ACTIVE');
+    }
+
+    if (booth.sessionTokenHash) {
+      throw new ConflictException(
+        'Booth đã được kích hoạt trên một thiết bị/trình duyệt khác. Vui lòng đăng xuất booth hiện tại trước khi kích hoạt lại',
+      );
     }
 
     if (!booth.activationOtpHash || !booth.activationOtpExpiresAt) {
@@ -425,11 +460,16 @@ export class BoothsService {
     }
 
     const activatedAt = now;
+    const boothBindingHash = this.createBoothSessionBindingHash(
+      bindingContext.boothClientId,
+      bindingContext.userAgent,
+    );
     const boothSessionToken = this.jwtService.sign(
       {
         boothId: booth.id,
         boothCode: booth.code || booth.name,
         scope: 'booth-session',
+        boothBindingHash,
       },
       {
         secret: this.getBoothSessionSecret(),
@@ -473,8 +513,16 @@ export class BoothsService {
     };
   }
 
-  async validateBoothSessionToken(boothSessionToken: string) {
-    let payload: { boothId: string; boothCode: string; scope: string };
+  async validateBoothSessionToken(
+    boothSessionToken: string,
+    bindingContext: BoothSessionBindingContext,
+  ) {
+    let payload: {
+      boothId: string;
+      boothCode: string;
+      scope: string;
+      boothBindingHash?: string;
+    };
 
     try {
       payload = this.jwtService.verify(boothSessionToken, {
@@ -486,6 +534,17 @@ export class BoothsService {
 
     if (payload.scope !== 'booth-session') {
       throw new UnauthorizedException('Booth session token không hợp lệ');
+    }
+
+    const expectedBindingHash = this.createBoothSessionBindingHash(
+      bindingContext.boothClientId,
+      bindingContext.userAgent,
+    );
+
+    if (!payload.boothBindingHash || payload.boothBindingHash !== expectedBindingHash) {
+      throw new UnauthorizedException(
+        'Booth session chỉ hợp lệ trên thiết bị/trình duyệt đã kích hoạt',
+      );
     }
 
     const booth = await this.prisma.booth.findUnique({ where: { id: payload.boothId } });
@@ -509,8 +568,12 @@ export class BoothsService {
     return booth;
   }
 
-  async deactivateBoothSession(boothSessionToken: string, userId?: string) {
-    const booth = await this.validateBoothSessionToken(boothSessionToken);
+  async deactivateBoothSession(
+    boothSessionToken: string,
+    bindingContext: BoothSessionBindingContext,
+    userId?: string,
+  ) {
+    const booth = await this.validateBoothSessionToken(boothSessionToken, bindingContext);
 
     await this.prisma.$transaction(async (tx) => {
       await tx.booth.update({
@@ -596,8 +659,11 @@ export class BoothsService {
     };
   }
 
-  async getBoothSessionStatus(boothSessionToken: string) {
-    const booth = await this.validateBoothSessionToken(boothSessionToken);
+  async getBoothSessionStatus(
+    boothSessionToken: string,
+    bindingContext: BoothSessionBindingContext,
+  ) {
+    const booth = await this.validateBoothSessionToken(boothSessionToken, bindingContext);
 
     return {
       active: true,
