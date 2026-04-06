@@ -217,9 +217,22 @@ export class SessionResultDto {
   pendingItems: number;
   canViewItemDetails: boolean;
   detailMessage: string | null;
+  proctoringWarnings?: SessionResultProctoringWarningDto[];
   items: SessionResultItemDto[];
 
   constructor(partial: Partial<SessionResultDto>) {
+    Object.assign(this, partial);
+  }
+}
+
+export class SessionResultProctoringWarningDto {
+  id: string;
+  eventType: string;
+  warningLevel: number;
+  timestamp: Date;
+  metadata: any;
+
+  constructor(partial: Partial<SessionResultProctoringWarningDto>) {
     Object.assign(this, partial);
   }
 }

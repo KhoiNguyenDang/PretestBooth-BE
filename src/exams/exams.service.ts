@@ -45,6 +45,7 @@ import {
   ShuffledItemDto,
   SessionAnswerDto,
   SessionResultDto,
+  SessionResultProctoringWarningDto,
   SessionResultChoiceDto,
   SessionResultItemDto,
   SessionResultSubmissionDto,
@@ -1865,6 +1866,7 @@ export class ExamsService {
     }
 
     const canViewItemDetails = canViewAsLecturer || session.exam.allowStudentReviewResults;
+    const canViewProctoringWarnings = canViewAsLecturer && session.exam.type === 'EXAM';
     const detailMessage = canViewItemDetails
       ? null
       : 'Đề thi này không cho phép sinh viên xem chi tiết từng câu.';
@@ -1873,6 +1875,34 @@ export class ExamsService {
     const pendingItems = session.answers.filter((i) => i.isCorrect === null).length;
 
     const items: SessionResultItemDto[] = [];
+
+    let proctoringWarnings: SessionResultProctoringWarningDto[] | undefined;
+    if (canViewProctoringWarnings) {
+      const events = await this.prisma.proctoringEvent.findMany({
+        where: {
+          examSessionId: session.id,
+        },
+        orderBy: { timestamp: 'desc' },
+        select: {
+          id: true,
+          eventType: true,
+          warningLevel: true,
+          timestamp: true,
+          metadata: true,
+        },
+      });
+
+      proctoringWarnings = events.map(
+        (event) =>
+          new SessionResultProctoringWarningDto({
+            id: event.id,
+            eventType: event.eventType,
+            warningLevel: event.warningLevel,
+            timestamp: event.timestamp,
+            metadata: event.metadata ?? null,
+          }),
+      );
+    }
 
     if (canViewItemDetails) {
       const submissionIds = session.answers
@@ -2001,6 +2031,7 @@ export class ExamsService {
       pendingItems,
       canViewItemDetails,
       detailMessage,
+      proctoringWarnings,
       items,
     });
   }
