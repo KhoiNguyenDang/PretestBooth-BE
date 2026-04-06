@@ -109,7 +109,11 @@ export class ExamsController {
   startSession(@Param('id') id: string, @Req() req) {
     const userId = req.user['sub'];
     const userRole = req.user['role'];
-    return this.examsService.startSession(id, userId, userRole);
+    return this.examsService.startSession(id, userId, userRole, {
+      isActivatedBoothContext: Boolean(req.user['isActivatedBoothContext']),
+      boothAccessMode: req.user['boothAccessMode'] || null,
+      boothId: req.user['boothId'] || null,
+    });
   }
 
   @Get('sessions')
@@ -179,7 +183,11 @@ export class ExamsController {
 
   @Post('pretest/session/start')
   startPretestSession(@Req() req) {
-    return this.examsService.startAutoPretestSession(req.user['sub']);
+    return this.examsService.startAutoPretestSession(req.user['sub'], {
+      isActivatedBoothContext: Boolean(req.user['isActivatedBoothContext']),
+      boothAccessMode: req.user['boothAccessMode'] || null,
+      boothId: req.user['boothId'] || null,
+    });
   }
 
   @Patch('sessions/:sessionId/grade')

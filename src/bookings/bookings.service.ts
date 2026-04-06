@@ -18,6 +18,7 @@ import type { Prisma, BookingStatus, BookingType } from '@prisma/client';
 import { RealtimeService } from '../realtime/realtime.service';
 import { PointsService } from '../points/points.service';
 import { AuthorizationService } from '../common/authorization/authorization.service';
+import { BoothPoliciesService } from '../booth-policies/booth-policies.service';
 
 @Injectable()
 export class BookingsService {
@@ -27,6 +28,7 @@ export class BookingsService {
     private readonly realtimeService: RealtimeService,
     private readonly pointsService: PointsService,
     private readonly authorizationService: AuthorizationService,
+    private readonly boothPoliciesService: BoothPoliciesService,
   ) {}
 
   private async assertMonitoringPermission(userId: string, userRole: string, actionLabel: string) {
@@ -65,6 +67,31 @@ export class BookingsService {
   // Keep runtime "now" aligned with that convention to avoid -7h mismatches during comparisons.
   private getNowInVietnamConvention() {
     return new Date(Date.now() + 7 * 60 * 60 * 1000);
+  }
+
+  private normalizeVietnamDayBoundary(input: Date) {
+    const date = new Date(input);
+    date.setUTCHours(0, 0, 0, 0);
+    return date;
+  }
+
+  private addDaysVietnam(date: Date, days: number) {
+    const result = new Date(date);
+    result.setUTCDate(result.getUTCDate() + days);
+    result.setUTCHours(0, 0, 0, 0);
+    return result;
+  }
+
+  private findNextExamBookingForBooth(boothId: string, now: Date) {
+    return this.prisma.booking.findFirst({
+      where: {
+        boothId,
+        type: 'EXAM',
+        status: { in: ['CONFIRMED', 'CHECKED_IN'] },
+        endTime: { gte: now },
+      },
+      orderBy: { startTime: 'asc' },
+    });
   }
 
   private formatUtcDateTime(date: Date) {
@@ -117,9 +144,9 @@ export class BookingsService {
 
   /**
    * Create a booking with full business rule validation:
-   * - Must book at least 7 days in advance
+   * - Booking date must be within admin-configured min/max days in advance
    * - Time slot must be within 7:00 - 17:00
-    * - Duration must be in admin-configured options (stored in DB)
+   * - Duration must be in admin-configured options (stored in DB)
    * - 15 min gap between consecutive sessions for same student
    * - Cannot exceed active booth count at any time slot
    * - Student account must be active (not locked)
@@ -143,18 +170,27 @@ export class BookingsService {
       );
     }
 
-    const bookingDate = new Date(dto.date);
+    const policy = await this.boothPoliciesService.getConfig();
+
+    const bookingDate = this.normalizeVietnamDayBoundary(new Date(dto.date));
     const startTime = this.toVietnamWallClockDate(new Date(dto.startTime));
     const endTime = this.toVietnamWallClockDate(new Date(dto.endTime));
-    const now = this.getNowInVietnamConvention();
+    const now = this.normalizeVietnamDayBoundary(this.getNowInVietnamConvention());
 
-    // Rule 1: Must book at least 7 days in advance
-    const minBookingDate = new Date(now);
-    minBookingDate.setDate(minBookingDate.getDate() + 7);
-    minBookingDate.setHours(0, 0, 0, 0);
+    // Rule 1: Booking date must be within policy range
+    const minBookingDate = this.addDaysVietnam(now, policy.bookingMinDaysInAdvance);
+    const maxBookingDate = this.addDaysVietnam(now, policy.bookingMaxDaysInAdvance);
 
     if (bookingDate < minBookingDate) {
-      throw new BadRequestException('Phải đăng ký trước tối thiểu 1 tuần');
+      throw new BadRequestException(
+        `Phai dang ky truoc toi thieu ${policy.bookingMinDaysInAdvance} ngay`,
+      );
+    }
+
+    if (bookingDate > maxBookingDate) {
+      throw new BadRequestException(
+        `Chi duoc dang ky toi da ${policy.bookingMaxDaysInAdvance} ngay ke tu hom nay`,
+      );
     }
 
     // Rule 2: Time slot must be within 7:00 - 17:00 (Vietnam wall-clock)
@@ -686,7 +722,24 @@ export class BookingsService {
    * Get availability for a specific date
    */
   async getAvailability(dateStr: string) {
-    const date = new Date(dateStr);
+    const policy = await this.boothPoliciesService.getConfig();
+    const date = this.normalizeVietnamDayBoundary(new Date(dateStr));
+
+    if (Number.isNaN(date.getTime())) {
+      throw new BadRequestException('Ngay truy van khong hop le');
+    }
+
+    const today = this.normalizeVietnamDayBoundary(this.getNowInVietnamConvention());
+    const minBookingDate = this.addDaysVietnam(today, policy.bookingMinDaysInAdvance);
+    const maxBookingDate = this.addDaysVietnam(today, policy.bookingMaxDaysInAdvance);
+
+    if (date < minBookingDate || date > maxBookingDate) {
+      throw new BadRequestException(
+        `Ngay dat lich phai trong khoang ${policy.bookingMinDaysInAdvance}-${policy.bookingMaxDaysInAdvance} ngay ke tu hom nay`,
+      );
+    }
+
+    const normalizedDateStr = date.toISOString().slice(0, 10);
     const activeBooths = await this.prisma.booth.findMany({
       where: { status: 'ACTIVE' },
     });
@@ -708,7 +761,7 @@ export class BookingsService {
     for (let hour = 7; hour < 17; hour++) {
       for (const minute of [0, 30]) {
         // Enforce VN timezone (+07:00) so that slot times are inherently timezone-independent
-        const isoStringStart = `${dateStr}T${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}:00.000+07:00`;
+        const isoStringStart = `${normalizedDateStr}T${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}:00.000+07:00`;
         const slotStart = new Date(isoStringStart);
         
         const slotEnd = new Date(slotStart.getTime() + 30 * 60000);
@@ -806,6 +859,177 @@ export class BookingsService {
     });
 
     return checkedInBooking;
+  }
+
+  async createWalkInPracticeForBoothLogin(userId: string, boothId: string) {
+    const policy = await this.boothPoliciesService.getConfig();
+    if (!policy.walkInPracticeEnabled) {
+      throw new ForbiddenException('Tinh nang tan dung booth dang duoc tat');
+    }
+
+    const booth = await this.prisma.booth.findUnique({
+      where: { id: boothId },
+      select: { id: true, name: true, code: true, status: true },
+    });
+
+    if (!booth) {
+      throw new NotFoundException('Booth khong ton tai');
+    }
+
+    if (booth.status !== 'ACTIVE') {
+      throw new ForbiddenException('Booth hien khong o trang thai hoat dong');
+    }
+
+    const now = this.getNowInVietnamConvention();
+
+    const activeCheckedInBooking = await this.prisma.booking.findFirst({
+      where: {
+        userId,
+        status: 'CHECKED_IN',
+        checkedOutAt: null,
+        endTime: { gte: now },
+      },
+      orderBy: { checkedInAt: 'desc' },
+    });
+
+    if (activeCheckedInBooking && activeCheckedInBooking.boothId !== boothId) {
+      throw new ForbiddenException('Ban dang co phien su dung booth khac, khong the tan dung booth nay');
+    }
+
+    let nextExamStartTime: string | null = null;
+    let warnAt: string | null = null;
+    let forceLogoutAt: string | null = null;
+    let noShowGraceUntil: string | null = null;
+
+    let nextExamBooking = await this.findNextExamBookingForBooth(boothId, now);
+
+    if (nextExamBooking && nextExamBooking.status === 'CONFIRMED') {
+      const noShowGraceTime = new Date(
+        nextExamBooking.startTime.getTime() + policy.noShowGraceMinutes * 60 * 1000,
+      );
+
+      if (now >= noShowGraceTime) {
+        await this.markBookingNoShowAndApplyPenalty({
+          id: nextExamBooking.id,
+          userId: nextExamBooking.userId,
+          type: nextExamBooking.type,
+          startTime: nextExamBooking.startTime,
+          endTime: nextExamBooking.endTime,
+        });
+
+        nextExamBooking = await this.findNextExamBookingForBooth(boothId, now);
+      }
+    }
+
+    let walkInEndTime = new Date(now.getTime() + 120 * 60 * 1000);
+
+    if (nextExamBooking) {
+      const examStartTime = nextExamBooking.startTime;
+      const warnTime = new Date(
+        examStartTime.getTime() - policy.warnBeforeNextExamMinutes * 60 * 1000,
+      );
+      const forceTime = new Date(
+        examStartTime.getTime() - policy.forceLogoutBeforeNextExamMinutes * 60 * 1000,
+      );
+      const noShowGraceTime = new Date(
+        examStartTime.getTime() + policy.noShowGraceMinutes * 60 * 1000,
+      );
+
+      if (nextExamBooking.status === 'CHECKED_IN') {
+        throw new ForbiddenException('Booth dang duoc su dung cho ca thi khac');
+      }
+
+      const inProtectedWindow = now >= forceTime && now <= noShowGraceTime;
+      if (inProtectedWindow) {
+        throw new ForbiddenException(
+          'Booth dang duoc giu cho ca EXAM sap toi. Vui long doi den khi ket thuc thoi gian no-show grace.',
+        );
+      }
+
+      if (now < forceTime) {
+        walkInEndTime = forceTime;
+        nextExamStartTime = examStartTime.toISOString();
+        warnAt = warnTime.toISOString();
+        forceLogoutAt = forceTime.toISOString();
+        noShowGraceUntil = noShowGraceTime.toISOString();
+      }
+    }
+
+    if (walkInEndTime <= now) {
+      throw new ForbiddenException('Khong con khoang thoi gian hop le de tan dung booth');
+    }
+
+    if (activeCheckedInBooking) {
+      return {
+        accessMode: 'WALK_IN' as const,
+        booking: activeCheckedInBooking,
+        policy,
+        protection: {
+          nextExamStartTime,
+          warnAt,
+          forceLogoutAt,
+          noShowGraceUntil,
+        },
+      };
+    }
+
+    const bookingDate = this.normalizeVietnamDayBoundary(now);
+    const durationMinutes = Math.max(
+      5,
+      Math.round((walkInEndTime.getTime() - now.getTime()) / (60 * 1000)),
+    );
+
+    const walkInBooking = await this.prisma.booking.create({
+      data: {
+        userId,
+        boothId,
+        type: 'PRACTICE',
+        date: bookingDate,
+        startTime: now,
+        endTime: walkInEndTime,
+        durationMinutes,
+        bufferMinutes: 0,
+        status: 'CHECKED_IN',
+        checkedInAt: now,
+        checkinStatus: 'PASSED',
+        checkinVerifiedAt: now,
+      },
+    });
+
+    const emittedAt = new Date().toISOString();
+    this.realtimeService.bookingCheckin({
+      bookingId: walkInBooking.id,
+      boothId: walkInBooking.boothId,
+      userId: walkInBooking.userId,
+      status: 'CHECKED_IN',
+      type: walkInBooking.type,
+      startTime: walkInBooking.startTime.toISOString(),
+      endTime: walkInBooking.endTime.toISOString(),
+      checkedInAt: walkInBooking.checkedInAt?.toISOString(),
+      emittedAt,
+    });
+
+    this.realtimeService.monitoringUpdated({
+      scope: 'BOOKING',
+      action: 'CHECKIN',
+      bookingId: walkInBooking.id,
+      boothId: walkInBooking.boothId,
+      userId: walkInBooking.userId,
+      sessionType: 'PRACTICE',
+      emittedAt,
+    });
+
+    return {
+      accessMode: 'WALK_IN' as const,
+      booking: walkInBooking,
+      policy,
+      protection: {
+        nextExamStartTime,
+        warnAt,
+        forceLogoutAt,
+        noShowGraceUntil,
+      },
+    };
   }
 
   async getPendingCheckInByBooth(userId: string, boothId: string) {
@@ -1070,13 +1294,64 @@ export class BookingsService {
   /**
    * Mark expired confirmed bookings as NO_SHOW and apply penalty points.
    */
+  private async markBookingNoShowAndApplyPenalty(booking: {
+    id: string;
+    userId: string;
+    type: BookingType;
+    startTime: Date;
+    endTime: Date;
+  }) {
+    const updateResult = await this.prisma.booking.updateMany({
+      where: {
+        id: booking.id,
+        status: 'CONFIRMED',
+      },
+      data: { status: 'NO_SHOW' },
+    });
+
+    if (updateResult.count === 0) {
+      return { marked: false, penalized: false };
+    }
+
+    const existingPenalty = await this.prisma.pointTransaction.findFirst({
+      where: {
+        userId: booking.userId,
+        type: 'NO_SHOW_PENALTY',
+        bookingId: booking.id,
+      },
+      select: { id: true },
+    });
+
+    if (existingPenalty) {
+      return { marked: true, penalized: false };
+    }
+
+    await this.pointsService.addTransaction(
+      booking.userId,
+      'NO_SHOW_PENALTY',
+      -8,
+      `Vắng mặt ca ${booking.type}: ${this.formatUtcDateTime(booking.startTime)} - ${this.formatUtcDateTime(booking.endTime)}`,
+      { bookingId: booking.id },
+    );
+
+    return { marked: true, penalized: true };
+  }
+
   async autoMarkNoShowAndApplyPenalty() {
     const now = this.getNowInVietnamConvention();
+    const policy = await this.boothPoliciesService.getConfig();
+    const examNoShowGraceCutoff = new Date(now.getTime() - policy.noShowGraceMinutes * 60 * 1000);
 
     const noShowCandidates = await this.prisma.booking.findMany({
       where: {
         status: 'CONFIRMED',
-        endTime: { lt: now },
+        OR: [
+          { endTime: { lt: now } },
+          {
+            type: 'EXAM',
+            startTime: { lte: examNoShowGraceCutoff },
+          },
+        ],
       },
       select: {
         id: true,
@@ -1091,36 +1366,27 @@ export class BookingsService {
       return { markedCount: 0, penalizedCount: 0 };
     }
 
-    await this.prisma.booking.updateMany({
-      where: { id: { in: noShowCandidates.map((booking) => booking.id) } },
-      data: { status: 'NO_SHOW' },
-    });
-
+    let markedCount = 0;
     let penalizedCount = 0;
+
     for (const booking of noShowCandidates) {
-      const existingPenalty = await this.prisma.pointTransaction.findFirst({
-        where: {
-          userId: booking.userId,
-          type: 'NO_SHOW_PENALTY',
-          bookingId: booking.id,
-        },
-        select: { id: true },
+      const result = await this.markBookingNoShowAndApplyPenalty({
+        id: booking.id,
+        userId: booking.userId,
+        type: booking.type,
+        startTime: booking.startTime,
+        endTime: booking.endTime,
       });
 
-      if (existingPenalty) {
-        continue;
+      if (result.marked) {
+        markedCount++;
       }
 
-      await this.pointsService.addTransaction(
-        booking.userId,
-        'NO_SHOW_PENALTY',
-        -8,
-        `Vắng mặt ca ${booking.type}: ${this.formatUtcDateTime(booking.startTime)} - ${this.formatUtcDateTime(booking.endTime)}`,
-        { bookingId: booking.id },
-      );
-      penalizedCount++;
+      if (result.penalized) {
+        penalizedCount++;
+      }
     }
 
-    return { markedCount: noShowCandidates.length, penalizedCount };
+    return { markedCount, penalizedCount };
   }
 }

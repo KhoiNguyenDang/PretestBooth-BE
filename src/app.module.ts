@@ -20,6 +20,7 @@ import { BookingDurationsModule } from './booking-durations/booking-durations.mo
 import { RealtimeModule } from './realtime/realtime.module';
 import { KycModule } from './kyc/kyc.module';
 import { CheckinModule } from './checkin/checkin.module';
+import { BoothPoliciesModule } from './booth-policies/booth-policies.module';
 
 @Module({
   imports: [
@@ -41,6 +42,7 @@ import { CheckinModule } from './checkin/checkin.module';
     TasksModule,
     DashboardModule,
     BookingDurationsModule,
+    BoothPoliciesModule,
     RealtimeModule,
     KycModule,
     CheckinModule,

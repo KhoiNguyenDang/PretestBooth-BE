@@ -16,6 +16,16 @@ import { BoothsService } from '../booths/booths.service';
 import { BookingsService } from '../bookings/bookings.service';
 import { AuthorizationService } from '../common/authorization/authorization.service';
 
+type BoothAccessMode = 'SCHEDULED' | 'WALK_IN';
+
+interface TokenBoothContext {
+  isActivatedBoothContext?: boolean;
+  boothAccessMode?: BoothAccessMode;
+  boothId?: string;
+}
+
+const NO_PENDING_BOOKING_MESSAGE = 'Không có booking hợp lệ theo booth và khung giờ để check-in';
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -99,8 +109,14 @@ export class AuthService {
     return this.buildUserResponse(user);
   }
 
-  private async generateTokens(userId: string, role: string) {
-    const payload = { sub: userId, role };
+  private async generateTokens(userId: string, role: string, boothContext?: TokenBoothContext) {
+    const payload = {
+      sub: userId,
+      role,
+      isActivatedBoothContext: boothContext?.isActivatedBoothContext || false,
+      boothAccessMode: boothContext?.boothAccessMode || null,
+      boothId: boothContext?.boothId || null,
+    };
 
     const accessToken = this.jwtService.sign(payload, {
       secret: process.env.JWT_ACCESS_SECRET,
@@ -148,19 +164,47 @@ export class AuthService {
     }
 
     const booth = await this.boothsService.validateBoothSessionToken(boothSessionToken);
-    const bookingForCheckin = await this.bookingsService.getPendingCheckInByBooth(user.id, booth.id);
-    const bookingForFreshCheckin = await this.prisma.booking.update({
-      where: { id: bookingForCheckin.id },
-      data: {
-        status: 'CONFIRMED',
-        checkedInAt: null,
-        checkinStatus: 'PENDING',
-        checkinSimilarityScore: null,
-        checkinVerifiedAt: null,
-      },
-    });
+    let accessMode: BoothAccessMode = 'SCHEDULED';
+    let checkedInBooking: any = null;
+    let pendingCheckinBooking: any = null;
+    let walkInProtection: {
+      nextExamStartTime: string | null;
+      warnAt: string | null;
+      forceLogoutAt: string | null;
+      noShowGraceUntil: string | null;
+    } | null = null;
 
-    const tokens = await this.generateTokens(user.id, user.role);
+    try {
+      const bookingForCheckin = await this.bookingsService.getPendingCheckInByBooth(user.id, booth.id);
+      const bookingForFreshCheckin = await this.prisma.booking.update({
+        where: { id: bookingForCheckin.id },
+        data: {
+          status: 'CONFIRMED',
+          checkedInAt: null,
+          checkinStatus: 'PENDING',
+          checkinSimilarityScore: null,
+          checkinVerifiedAt: null,
+        },
+      });
+
+      pendingCheckinBooking = bookingForFreshCheckin;
+    } catch (error: any) {
+      const message = typeof error?.message === 'string' ? error.message : '';
+      if (!message.includes(NO_PENDING_BOOKING_MESSAGE)) {
+        throw error;
+      }
+
+      const walkInResult = await this.bookingsService.createWalkInPracticeForBoothLogin(user.id, booth.id);
+      accessMode = 'WALK_IN';
+      checkedInBooking = walkInResult.booking;
+      walkInProtection = walkInResult.protection;
+    }
+
+    const tokens = await this.generateTokens(user.id, user.role, {
+      isActivatedBoothContext: true,
+      boothAccessMode: accessMode,
+      boothId: booth.id,
+    });
 
     await this.prisma.user.update({
       where: { id: user.id },
@@ -179,8 +223,10 @@ export class AuthService {
         code: booth.code || booth.name,
         name: booth.name,
       },
-      checkedInBooking: null,
-      pendingCheckinBooking: bookingForFreshCheckin,
+      accessMode,
+      checkedInBooking,
+      pendingCheckinBooking,
+      walkInProtection,
     };
   }
 
@@ -241,12 +287,20 @@ export class AuthService {
 
   async refresh(refreshToken: string) {
     let userId: string;
+    let boothContext: TokenBoothContext | undefined;
 
     try {
       const payload = this.jwtService.verify(refreshToken, {
         secret: process.env.JWT_REFRESH_SECRET,
       });
       userId = payload.sub;
+      boothContext = payload?.isActivatedBoothContext
+        ? {
+            isActivatedBoothContext: true,
+            boothAccessMode: payload?.boothAccessMode || null,
+            boothId: payload?.boothId || null,
+          }
+        : undefined;
     } catch (error) {
       throw new ForbiddenException('Access denied');
     }
@@ -265,7 +319,7 @@ export class AuthService {
       throw new ForbiddenException('Access denied');
     }
 
-    const tokens = await this.generateTokens(user.id, user.role);
+    const tokens = await this.generateTokens(user.id, user.role, boothContext);
 
     await this.prisma.user.update({
       where: { id: user.id },

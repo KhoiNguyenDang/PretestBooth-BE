@@ -60,6 +60,12 @@ type AllocationPolicy = 'STRICT' | 'FLEXIBLE';
 type ExamVisibility = 'PRIVATE' | 'PUBLIC';
 type PretestThresholdSource = 'PRETEST_CONFIG' | 'EXAM';
 
+interface BoothAuthContext {
+  isActivatedBoothContext?: boolean;
+  boothAccessMode?: 'SCHEDULED' | 'WALK_IN' | null;
+  boothId?: string | null;
+}
+
 const PRETEST_CONFIG_SETTING_KEY = 'PRETEST_EXAM_FLOW_CONFIG';
 const PRETEST_RANDOM_EXAM_TITLE_PREFIX = 'Pretest Auto';
 const VIETNAM_UTC_OFFSET_MINUTES = 7 * 60;
@@ -249,6 +255,14 @@ export class ExamsService {
       };
     } catch {
       return { ...this.defaultPretestConfig };
+    }
+  }
+
+  private assertWalkInCannotStartExam(authContext?: BoothAuthContext) {
+    if (authContext?.isActivatedBoothContext && authContext?.boothAccessMode === 'WALK_IN') {
+      throw new ForbiddenException(
+        'Phien kiosk walk-in chi duoc phep luyen tap, khong duoc phep vao luong thi EXAM',
+      );
     }
   }
 
@@ -626,7 +640,11 @@ export class ExamsService {
     });
   }
 
-  async startAutoPretestSession(userId: string): Promise<ShuffledSessionDto> {
+  async startAutoPretestSession(
+    userId: string,
+    authContext?: BoothAuthContext,
+  ): Promise<ShuffledSessionDto> {
+    this.assertWalkInCannotStartExam(authContext);
     const config = await this.loadPretestConfigRecord();
     if (!config.isEnabled) {
       throw new BadRequestException('Pretest hiện chưa được bật cấu hình');
@@ -1352,7 +1370,12 @@ export class ExamsService {
    * Generates a random seed and returns shuffled items.
     * Requires booth check-in only for EXAM sessions.
    */
-  async startSession(examId: string, userId: string, userRole: string): Promise<ShuffledSessionDto> {
+  async startSession(
+    examId: string,
+    userId: string,
+    userRole: string,
+    authContext?: BoothAuthContext,
+  ): Promise<ShuffledSessionDto> {
     await this.syncScheduledExamPublication();
 
     const exam = await this.prisma.exam.findUnique({
@@ -1360,6 +1383,10 @@ export class ExamsService {
       select: { id: true, type: true },
     });
     if (!exam) throw new NotFoundException('Đề thi không tồn tại');
+
+    if (exam.type === 'EXAM') {
+      this.assertWalkInCannotStartExam(authContext);
+    }
 
     let activeBooking: Awaited<ReturnType<BookingsService['findActiveCheckedInBooking']>> | null =
       null;
