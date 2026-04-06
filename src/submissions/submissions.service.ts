@@ -1,8 +1,12 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ExecutionService } from '../execution/execution.service';
 import type { CreateSubmissionDto, QuerySubmissionsDto } from './dto/submission.dto';
 import type { QueryUnifiedSubmissionsDto } from './dto/unified-submission.dto';
+import type {
+  QuerySubmissionTestGroupsDto,
+  QuerySubmissionTestMembersDto,
+} from './dto/test-submission.dto';
 import {
   SubmissionResponseDto,
   SubmissionListItemDto,
@@ -139,6 +143,405 @@ export class SubmissionsService {
 
       throw error;
     }
+  }
+
+  async findSubmissionTestGroups(
+    userId: string,
+    userRole: string,
+    query: QuerySubmissionTestGroupsDto,
+  ) {
+    const { page, limit, type, keyword, sortOrder } = query;
+    const normalizedKeyword = keyword.trim().toLowerCase();
+
+    const unifiedGroups: Array<{
+      type: 'PROBLEM' | 'EXAM';
+      entityId: string;
+      title: string;
+      slug: string | null;
+      difficulty: string | null;
+      questionCount: number | null;
+      problemCount: number | null;
+      totalSubmissions: number;
+      totalSubmitters: number;
+      passedCount: number;
+      latestSubmittedAt: Date;
+    }> = [];
+
+    if (type === 'ALL' || type === 'PROBLEM') {
+      const problemWhere: Prisma.SubmissionWhereInput = {
+        ...(userRole === 'STUDENT' ? { userId } : {}),
+      };
+
+      const problemSubmissions = await this.prisma.submission.findMany({
+        where: problemWhere,
+        select: {
+          id: true,
+          userId: true,
+          status: true,
+          createdAt: true,
+          problemId: true,
+          problem: {
+            select: {
+              id: true,
+              title: true,
+              slug: true,
+              difficulty: true,
+            },
+          },
+        },
+      });
+
+      const groupedByProblem = new Map<
+        string,
+        {
+          type: 'PROBLEM';
+          entityId: string;
+          title: string;
+          slug: string | null;
+          difficulty: string | null;
+          questionCount: number | null;
+          problemCount: number | null;
+          totalSubmissions: number;
+          submitterIds: Set<string>;
+          passedCount: number;
+          latestSubmittedAt: Date;
+        }
+      >();
+
+      for (const submission of problemSubmissions) {
+        if (!submission.problemId || !submission.problem) {
+          continue;
+        }
+
+        const key = submission.problemId;
+        const existing = groupedByProblem.get(key);
+
+        if (!existing) {
+          groupedByProblem.set(key, {
+            type: 'PROBLEM',
+            entityId: key,
+            title: submission.problem.title,
+            slug: submission.problem.slug,
+            difficulty: submission.problem.difficulty,
+            questionCount: null,
+            problemCount: null,
+            totalSubmissions: 1,
+            submitterIds: new Set([submission.userId]),
+            passedCount: submission.status === 'ACCEPTED' ? 1 : 0,
+            latestSubmittedAt: submission.createdAt,
+          });
+          continue;
+        }
+
+        existing.totalSubmissions += 1;
+        existing.submitterIds.add(submission.userId);
+        if (submission.status === 'ACCEPTED') {
+          existing.passedCount += 1;
+        }
+        if (submission.createdAt > existing.latestSubmittedAt) {
+          existing.latestSubmittedAt = submission.createdAt;
+        }
+      }
+
+      for (const group of groupedByProblem.values()) {
+        unifiedGroups.push({
+          type: group.type,
+          entityId: group.entityId,
+          title: group.title,
+          slug: group.slug,
+          difficulty: group.difficulty,
+          questionCount: group.questionCount,
+          problemCount: group.problemCount,
+          totalSubmissions: group.totalSubmissions,
+          totalSubmitters: group.submitterIds.size,
+          passedCount: group.passedCount,
+          latestSubmittedAt: group.latestSubmittedAt,
+        });
+      }
+    }
+
+    if (type === 'ALL' || type === 'EXAM') {
+      const examWhere: Prisma.ExamSessionWhereInput = {
+        ...(userRole === 'STUDENT' ? { userId } : {}),
+      };
+
+      const examSessions = await this.prisma.examSession.findMany({
+        where: examWhere,
+        select: {
+          id: true,
+          userId: true,
+          startedAt: true,
+          examId: true,
+          passed: true,
+          exam: {
+            select: {
+              id: true,
+              title: true,
+              questionCount: true,
+              problemCount: true,
+            },
+          },
+        },
+      });
+
+      const groupedByExam = new Map<
+        string,
+        {
+          type: 'EXAM';
+          entityId: string;
+          title: string;
+          slug: string | null;
+          difficulty: string | null;
+          questionCount: number | null;
+          problemCount: number | null;
+          totalSubmissions: number;
+          submitterIds: Set<string>;
+          passedCount: number;
+          latestSubmittedAt: Date;
+        }
+      >();
+
+      for (const session of examSessions) {
+        if (!session.examId || !session.exam) {
+          continue;
+        }
+
+        const key = session.examId;
+        const existing = groupedByExam.get(key);
+
+        if (!existing) {
+          groupedByExam.set(key, {
+            type: 'EXAM',
+            entityId: key,
+            title: session.exam.title,
+            slug: null,
+            difficulty: null,
+            questionCount: session.exam.questionCount,
+            problemCount: session.exam.problemCount,
+            totalSubmissions: 1,
+            submitterIds: new Set([session.userId]),
+            passedCount: session.passed === true ? 1 : 0,
+            latestSubmittedAt: session.startedAt,
+          });
+          continue;
+        }
+
+        existing.totalSubmissions += 1;
+        existing.submitterIds.add(session.userId);
+        if (session.passed === true) {
+          existing.passedCount += 1;
+        }
+        if (session.startedAt > existing.latestSubmittedAt) {
+          existing.latestSubmittedAt = session.startedAt;
+        }
+      }
+
+      for (const group of groupedByExam.values()) {
+        unifiedGroups.push({
+          type: group.type,
+          entityId: group.entityId,
+          title: group.title,
+          slug: group.slug,
+          difficulty: group.difficulty,
+          questionCount: group.questionCount,
+          problemCount: group.problemCount,
+          totalSubmissions: group.totalSubmissions,
+          totalSubmitters: group.submitterIds.size,
+          passedCount: group.passedCount,
+          latestSubmittedAt: group.latestSubmittedAt,
+        });
+      }
+    }
+
+    const keywordFiltered = normalizedKeyword
+      ? unifiedGroups.filter((item) => item.title.toLowerCase().includes(normalizedKeyword))
+      : unifiedGroups;
+
+    keywordFiltered.sort((a, b) => {
+      const aTs = a.latestSubmittedAt.getTime();
+      const bTs = b.latestSubmittedAt.getTime();
+      return sortOrder === 'desc' ? bTs - aTs : aTs - bTs;
+    });
+
+    const total = keywordFiltered.length;
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+    const start = (page - 1) * limit;
+    const data = keywordFiltered.slice(start, start + limit).map((item) => ({
+      ...item,
+      latestSubmittedAt: item.latestSubmittedAt,
+    }));
+
+    return {
+      data,
+      total,
+      page,
+      limit,
+      totalPages,
+    };
+  }
+
+  async findSubmissionTestMembers(
+    userId: string,
+    userRole: string,
+    type: string,
+    entityId: string,
+    query: QuerySubmissionTestMembersDto,
+  ) {
+    const normalizedType = type.toUpperCase();
+    if (normalizedType !== 'PROBLEM' && normalizedType !== 'EXAM') {
+      throw new BadRequestException('Type must be PROBLEM or EXAM');
+    }
+
+    const { page, limit, sortOrder } = query;
+
+    if (normalizedType === 'PROBLEM') {
+      const where: Prisma.SubmissionWhereInput = {
+        problemId: entityId,
+        ...(userRole === 'STUDENT' ? { userId } : {}),
+      };
+
+      const [rows, total] = await Promise.all([
+        this.prisma.submission.findMany({
+          where,
+          orderBy: { createdAt: sortOrder },
+          skip: (page - 1) * limit,
+          take: limit,
+          select: {
+            id: true,
+            userId: true,
+            status: true,
+            language: true,
+            passedTestCases: true,
+            totalTestCases: true,
+            createdAt: true,
+            user: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+                studentCode: true,
+              },
+            },
+            problem: {
+              select: {
+                id: true,
+                title: true,
+                slug: true,
+                difficulty: true,
+              },
+            },
+          },
+        }),
+        this.prisma.submission.count({ where }),
+      ]);
+
+      const testMeta = rows[0]?.problem;
+
+      return {
+        test: {
+          type: 'PROBLEM' as const,
+          entityId,
+          title: testMeta?.title || 'Unknown Problem',
+          slug: testMeta?.slug || null,
+          difficulty: testMeta?.difficulty || null,
+          questionCount: null,
+          problemCount: null,
+        },
+        data: rows.map((row) => ({
+          id: row.id,
+          userId: row.userId,
+          userName: row.user?.name || null,
+          userEmail: row.user?.email || null,
+          studentCode: row.user?.studentCode || null,
+          status: row.status,
+          language: row.language,
+          passed: row.status === 'PENDING' ? null : row.status === 'ACCEPTED',
+          passedTestCases: row.passedTestCases,
+          totalTestCases: row.totalTestCases,
+          score: null,
+          maxScore: null,
+          submittedAt: row.createdAt,
+        })),
+        total,
+        page,
+        limit,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
+      };
+    }
+
+    const examWhere: Prisma.ExamSessionWhereInput = {
+      examId: entityId,
+      ...(userRole === 'STUDENT' ? { userId } : {}),
+    };
+
+    const [rows, total] = await Promise.all([
+      this.prisma.examSession.findMany({
+        where: examWhere,
+        orderBy: { startedAt: sortOrder },
+        skip: (page - 1) * limit,
+        take: limit,
+        select: {
+          id: true,
+          userId: true,
+          status: true,
+          passed: true,
+          score: true,
+          maxScore: true,
+          startedAt: true,
+          finishedAt: true,
+          exam: {
+            select: {
+              id: true,
+              title: true,
+              questionCount: true,
+              problemCount: true,
+            },
+          },
+          user: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              studentCode: true,
+            },
+          },
+        },
+      }),
+      this.prisma.examSession.count({ where: examWhere }),
+    ]);
+
+    const testMeta = rows[0]?.exam;
+
+    return {
+      test: {
+        type: 'EXAM' as const,
+        entityId,
+        title: testMeta?.title || 'Unknown Exam',
+        slug: null,
+        difficulty: null,
+        questionCount: testMeta?.questionCount ?? null,
+        problemCount: testMeta?.problemCount ?? null,
+      },
+      data: rows.map((row) => ({
+        id: row.id,
+        userId: row.userId,
+        userName: row.user?.name || null,
+        userEmail: row.user?.email || null,
+        studentCode: row.user?.studentCode || null,
+        status: row.status,
+        language: null,
+        passed: row.passed,
+        passedTestCases: null,
+        totalTestCases: null,
+        score: row.score,
+        maxScore: row.maxScore,
+        submittedAt: row.finishedAt || row.startedAt,
+      })),
+      total,
+      page,
+      limit,
+      totalPages: Math.max(1, Math.ceil(total / limit)),
+    };
   }
 
   /**

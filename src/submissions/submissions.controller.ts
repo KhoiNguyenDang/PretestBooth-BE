@@ -17,6 +17,14 @@ import { CreateSubmissionSchema, QuerySubmissionsSchema } from './dto/submission
 import type { CreateSubmissionDto, QuerySubmissionsDto } from './dto/submission.dto';
 import { QueryUnifiedSubmissionsSchema } from './dto/unified-submission.dto';
 import type { QueryUnifiedSubmissionsDto } from './dto/unified-submission.dto';
+import {
+  QuerySubmissionTestGroupsSchema,
+  QuerySubmissionTestMembersSchema,
+} from './dto/test-submission.dto';
+import type {
+  QuerySubmissionTestGroupsDto,
+  QuerySubmissionTestMembersDto,
+} from './dto/test-submission.dto';
 
 @Controller('submissions')
 @UseGuards(AuthGuard('jwt'))
@@ -60,6 +68,36 @@ export class SubmissionsController {
     const userId = req.user['sub'];
     const userRole = req.user['role'];
     return this.submissionsService.findAllUnified(userId, userRole, query);
+  }
+
+  /**
+   * Get grouped tests (problem/exam) and aggregate submission counters
+   */
+  @Get('tests')
+  async findSubmissionTestGroups(
+    @Query(new ZodValidationPipe(QuerySubmissionTestGroupsSchema))
+    query: QuerySubmissionTestGroupsDto,
+    @Req() req,
+  ) {
+    const userId = req.user['sub'];
+    const userRole = req.user['role'];
+    return this.submissionsService.findSubmissionTestGroups(userId, userRole, query);
+  }
+
+  /**
+   * Get submitters and results for a specific test (problem or exam)
+   */
+  @Get('tests/:type/:entityId/submissions')
+  async findSubmissionTestMembers(
+    @Param('type') type: string,
+    @Param('entityId') entityId: string,
+    @Query(new ZodValidationPipe(QuerySubmissionTestMembersSchema))
+    query: QuerySubmissionTestMembersDto,
+    @Req() req,
+  ) {
+    const userId = req.user['sub'];
+    const userRole = req.user['role'];
+    return this.submissionsService.findSubmissionTestMembers(userId, userRole, type, entityId, query);
   }
 
   /**
