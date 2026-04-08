@@ -3,6 +3,8 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { BookingsService } from '../bookings/bookings.service';
 import { QuestionReviewService } from '../questions/question-review.service';
+import { ExamsService } from '../exams/exams.service';
+import { PracticeService } from '../practice/practice.service';
 
 @Injectable()
 export class TasksService {
@@ -12,6 +14,8 @@ export class TasksService {
     private readonly prisma: PrismaService,
     private readonly bookingsService: BookingsService,
     private readonly questionReviewService: QuestionReviewService,
+    private readonly examsService: ExamsService,
+    private readonly practiceService: PracticeService,
   ) {}
 
   /**
@@ -64,6 +68,16 @@ export class TasksService {
    */
   @Cron(CronExpression.EVERY_MINUTE)
   async handleBookingAutoCheckout() {
+    const autoSubmittedExams = await this.examsService.autoSubmitExpiredSessions();
+    if (autoSubmittedExams > 0) {
+      this.logger.log(`Auto submitted ${autoSubmittedExams} expired exam session(s).`);
+    }
+
+    const autoCompletedPractices = await this.practiceService.autoCompleteExpiredSessions();
+    if (autoCompletedPractices > 0) {
+      this.logger.log(`Auto completed ${autoCompletedPractices} expired practice session(s).`);
+    }
+
     const checkedOutCount = await this.bookingsService.autoCheckOutExpiredBookings();
     if (checkedOutCount > 0) {
       this.logger.log(`Auto checked out ${checkedOutCount} expired booking(s).`);

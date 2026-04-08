@@ -5,9 +5,10 @@ import { PrismaModule } from '../prisma/prisma.module';
 import { QuestionReviewService } from './question-review.service';
 import { QuestionReviewController } from './question-review.controller';
 import { AuthorizationModule } from '../common/authorization/authorization.module';
+import { CloudinaryModule } from '../common/cloudinary/cloudinary.module';
 
 @Module({
-  imports: [PrismaModule, AuthorizationModule],
+  imports: [PrismaModule, AuthorizationModule, CloudinaryModule],
   controllers: [QuestionsController, QuestionReviewController],
   providers: [QuestionsService, QuestionReviewService],
   exports: [QuestionsService, QuestionReviewService],

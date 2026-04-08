@@ -147,6 +147,42 @@ export class ExamsService {
     return now > deadline;
   }
 
+  async autoSubmitExpiredSessions(): Promise<number> {
+    const inProgressSessions = await this.prisma.examSession.findMany({
+      where: { status: 'IN_PROGRESS' },
+      select: {
+        id: true,
+        userId: true,
+        startedAt: true,
+        expiresAt: true,
+        exam: {
+          select: {
+            duration: true,
+          },
+        },
+      },
+    });
+
+    let submittedCount = 0;
+
+    for (const session of inProgressSessions) {
+      if (!this.isSessionExpired(session, session.exam.duration)) {
+        continue;
+      }
+
+      try {
+        await this.submitSession(session.id, session.userId);
+        submittedCount += 1;
+      } catch (error) {
+        this.logger.warn(
+          `Failed to auto-submit expired exam session ${session.id}: ${(error as Error)?.message ?? 'unknown error'}`,
+        );
+      }
+    }
+
+    return submittedCount;
+  }
+
   private getVietnamDayRange(reference = new Date()): { start: Date; end: Date } {
     const dateParts = new Intl.DateTimeFormat('en-CA', {
       timeZone: 'Asia/Ho_Chi_Minh',
@@ -1156,7 +1192,7 @@ export class ExamsService {
     // Students only see published exams
     if (userRole === 'STUDENT') {
       where.AND = [
-        { type: 'EXAM' },
+        { type: { in: ['EXAM', 'PRACTICE'] } },
         { visibility: 'PUBLIC' },
         {
           OR: [{ publishAt: null }, { publishAt: { lte: new Date() } }],

@@ -51,6 +51,39 @@ export class PracticeService {
     return Math.max(2, Math.min(10, computed));
   }
 
+  async autoCompleteExpiredSessions(): Promise<number> {
+    const now = new Date();
+    const inProgressSessions = await this.prisma.practiceSession.findMany({
+      where: { status: 'IN_PROGRESS' },
+      select: {
+        id: true,
+        userId: true,
+        startedAt: true,
+        duration: true,
+      },
+    });
+
+    let completedCount = 0;
+
+    for (const session of inProgressSessions) {
+      const deadline = new Date(session.startedAt);
+      deadline.setMinutes(deadline.getMinutes() + session.duration + 1);
+
+      if (now <= deadline) {
+        continue;
+      }
+
+      try {
+        await this.completeSession(session.id, session.userId);
+        completedCount += 1;
+      } catch {
+        // Continue processing other sessions; individual failures should not stop the cron batch.
+      }
+    }
+
+    return completedCount;
+  }
+
   /**
    * Auto-generate a new practice session based on student config
    */

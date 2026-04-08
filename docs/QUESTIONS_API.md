@@ -358,6 +358,53 @@ Toggles `isPublished` between `true` and `false`.
 
 ---
 
+### Import Questions From Excel/CSV + Image Files
+
+**POST** `/api/questions/import`
+
+**Auth:** JWT (LECTURER, ADMIN)
+
+**Content-Type:** `multipart/form-data`
+
+**Form Data:**
+
+- `file`: file Excel/CSV chứa danh sách câu hỏi (bắt buộc)
+- `images`: danh sách file ảnh thực tế (không bắt buộc nếu không có câu nào cần ảnh)
+
+Trong file import, dùng cột `image` (hoặc `imageFile`/`imageName`) để điền **tên file ảnh** tương ứng (ví dụ `question-1.png`).
+
+> Lưu ý:
+>
+> - Không hỗ trợ URL ảnh trong import. Nếu cột ảnh chứa URL (`http://` hoặc `https://`) hệ thống sẽ báo lỗi dòng đó.
+> - Ảnh sẽ được upload lên Cloudinary, sau đó lưu `imageUrl` tự động vào câu hỏi.
+
+**Cloudinary ENV bắt buộc khi import ảnh:**
+
+- `CLOUDINARY_CLOUD_NAME`
+- `CLOUDINARY_API_KEY`
+- `CLOUDINARY_API_SECRET`
+- `CLOUDINARY_QUESTION_IMAGE_FOLDER` (optional, default: `pretestbooth/questions`)
+
+**Response (200):**
+
+```json
+{
+  "statusCode": 200,
+  "message": "",
+  "data": {
+    "message": "Đã import thành công 18/20 câu hỏi!",
+    "total": 20,
+    "success": 18,
+    "failed": 2,
+    "errors": [
+      "Dòng 4: Không tìm thấy file ảnh 'q4.png'. Hãy gửi ảnh trong field images[]"
+    ]
+  }
+}
+```
+
+---
+
 ## Error Responses
 
 All errors follow the standard format:
