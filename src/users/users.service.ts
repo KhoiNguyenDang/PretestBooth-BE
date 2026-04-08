@@ -16,6 +16,10 @@ import type {
   UpdateUserDto,
   QueryLecturerDto,
   UpdateLecturerPermissionsDto,
+  QueryLecturerRoleDto,
+  CreateLecturerRoleDto,
+  UpdateLecturerRoleDto,
+  AssignLecturerRoleDto,
 } from './dto/user.dto';
 import type { Prisma, Role } from '@prisma/client';
 import { AuthorizationService } from '../common/authorization/authorization.service';
@@ -69,6 +73,58 @@ export class UsersService {
     return requesterPermissions;
   }
 
+  private assertLecturerRoleCatalogManagementAccess(requesterRole: string) {
+    if (requesterRole !== 'ADMIN') {
+      throw new ForbiddenException('Chỉ ADMIN mới có quyền quản lý danh mục vai trò giảng viên');
+    }
+  }
+
+  private mergePermissions(
+    ...permissionSources: LecturerPermissionKey[][]
+  ): LecturerPermissionKey[] {
+    const merged = new Set<LecturerPermissionKey>();
+
+    permissionSources.forEach((source) => {
+      source.forEach((permission) => merged.add(permission));
+    });
+
+    return this.authorizationService
+      .getAllLecturerPermissions()
+      .filter((permission) => merged.has(permission));
+  }
+
+  private mapLecturerRole(record: {
+    id: string;
+    code: string;
+    name: string;
+    description: string | null;
+    priority: number;
+    isActive: boolean;
+    createdAt: Date;
+    updatedAt: Date;
+    _count?: {
+      users?: number;
+    };
+    permissions?: { permission: LecturerPermissionKey }[];
+  }) {
+    const permissions = (record.permissions || []).map(
+      (item) => item.permission as LecturerPermissionKey,
+    );
+
+    return {
+      id: record.id,
+      code: record.code,
+      name: record.name,
+      description: record.description,
+      priority: record.priority,
+      isActive: record.isActive,
+      createdAt: record.createdAt,
+      updatedAt: record.updatedAt,
+      permissions,
+      memberCount: record._count?.users ?? 0,
+    };
+  }
+
   private mapLecturerWithPermissions(record: {
     id: string;
     email: string;
@@ -76,10 +132,24 @@ export class UsersService {
     isLocked: boolean;
     createdAt: Date;
     lecturerPermissions: { permission: LecturerPermissionKey }[];
+    lecturerRole: {
+      id: string;
+      code: string;
+      name: string;
+      priority: number;
+      isActive: boolean;
+      permissions: { permission: LecturerPermissionKey }[];
+    } | null;
   }) {
-    const permissions = record.lecturerPermissions.map(
+    const individualPermissions = record.lecturerPermissions.map(
       (item) => item.permission as LecturerPermissionKey,
     );
+    const rolePermissions = record.lecturerRole
+      ? record.lecturerRole.permissions.map(
+          (item) => item.permission as LecturerPermissionKey,
+        )
+      : [];
+    const permissions = this.mergePermissions(individualPermissions, rolePermissions);
 
     return {
       id: record.id,
@@ -89,8 +159,97 @@ export class UsersService {
       isLocked: record.isLocked,
       createdAt: record.createdAt,
       permissions,
+      individualPermissions,
+      rolePermissions,
+      lecturerRole: record.lecturerRole
+        ? {
+            id: record.lecturerRole.id,
+            code: record.lecturerRole.code,
+            name: record.lecturerRole.name,
+            priority: record.lecturerRole.priority,
+            isActive: record.lecturerRole.isActive,
+          }
+        : null,
       isLecturerAdmin: permissions.includes(LECTURER_ADMIN_PERMISSION),
     };
+  }
+
+  private async getTopActiveLecturerRolePriority() {
+    const topRole = await this.prisma.lecturerRole.findFirst({
+      where: { isActive: true },
+      orderBy: { priority: 'asc' },
+      select: { priority: true },
+    });
+
+    return topRole?.priority ?? null;
+  }
+
+  private async getAssignableLecturerRoles(
+    requesterId: string,
+    requesterRole: string,
+    requesterPermissions: LecturerPermissionKey[],
+  ) {
+    if (requesterRole === 'ADMIN') {
+      const roles = await this.prisma.lecturerRole.findMany({
+        where: { isActive: true },
+        orderBy: [{ priority: 'asc' }, { code: 'asc' }],
+        include: {
+          permissions: {
+            select: { permission: true },
+            orderBy: { permission: 'asc' },
+          },
+          _count: { select: { users: true } },
+        },
+      });
+
+      return roles.map((role) => this.mapLecturerRole(role));
+    }
+
+    if (
+      requesterRole !== 'LECTURER' ||
+      !requesterPermissions.includes(LECTURER_ADMIN_PERMISSION)
+    ) {
+      return [];
+    }
+
+    const requester = await this.prisma.user.findUnique({
+      where: { id: requesterId },
+      select: {
+        lecturerRole: {
+          select: {
+            id: true,
+            priority: true,
+          },
+        },
+      },
+    });
+
+    const where: Prisma.LecturerRoleWhereInput = {
+      isActive: true,
+    };
+
+    if (requester?.lecturerRole) {
+      where.priority = { gt: requester.lecturerRole.priority };
+    } else {
+      const topRolePriority = await this.getTopActiveLecturerRolePriority();
+      if (topRolePriority !== null) {
+        where.priority = { gt: topRolePriority };
+      }
+    }
+
+    const roles = await this.prisma.lecturerRole.findMany({
+      where,
+      orderBy: [{ priority: 'asc' }, { code: 'asc' }],
+      include: {
+        permissions: {
+          select: { permission: true },
+          orderBy: { permission: 'asc' },
+        },
+        _count: { select: { users: true } },
+      },
+    });
+
+    return roles.map((role) => this.mapLecturerRole(role));
   }
 
   private getStudentCodePrefixForCohort(cohort: number) {
@@ -477,10 +636,29 @@ export class UsersService {
             select: { permission: true },
             orderBy: { permission: 'asc' },
           },
+          lecturerRole: {
+            select: {
+              id: true,
+              code: true,
+              name: true,
+              priority: true,
+              isActive: true,
+              permissions: {
+                select: { permission: true },
+                orderBy: { permission: 'asc' },
+              },
+            },
+          },
         },
       }),
       this.prisma.user.count({ where }),
     ]);
+
+    const assignableRoles = await this.getAssignableLecturerRoles(
+      requesterId,
+      requesterRole,
+      requesterPermissions,
+    );
 
     return {
       data: rows.map((row) => this.mapLecturerWithPermissions(row)),
@@ -493,6 +671,7 @@ export class UsersService {
         requesterRole === 'ADMIN'
           ? this.authorizationService.getAllLecturerPermissions()
           : this.authorizationService.getLowerLecturerPermissions(),
+      assignableRoles,
       canGrantAdminPackage: requesterRole === 'ADMIN',
     };
   }
@@ -522,6 +701,19 @@ export class UsersService {
           },
           orderBy: { permission: 'asc' },
         },
+        lecturerRole: {
+          select: {
+            id: true,
+            code: true,
+            name: true,
+            priority: true,
+            isActive: true,
+            permissions: {
+              select: { permission: true },
+              orderBy: { permission: 'asc' },
+            },
+          },
+        },
       },
     });
 
@@ -529,7 +721,21 @@ export class UsersService {
       throw new NotFoundException('Giảng viên không tồn tại');
     }
 
-    const permissions = lecturer.lecturerPermissions.map((item) => item.permission);
+    const individualPermissions = lecturer.lecturerPermissions.map(
+      (item) => item.permission as LecturerPermissionKey,
+    );
+    const rolePermissions = lecturer.lecturerRole
+      ? lecturer.lecturerRole.permissions.map(
+          (item) => item.permission as LecturerPermissionKey,
+        )
+      : [];
+    const permissions = this.mergePermissions(individualPermissions, rolePermissions);
+
+    const assignableRoles = await this.getAssignableLecturerRoles(
+      requesterId,
+      requesterRole,
+      requesterPermissions,
+    );
 
     return {
       id: lecturer.id,
@@ -539,6 +745,17 @@ export class UsersService {
       isLocked: lecturer.isLocked,
       createdAt: lecturer.createdAt,
       permissions,
+      individualPermissions,
+      rolePermissions,
+      lecturerRole: lecturer.lecturerRole
+        ? {
+            id: lecturer.lecturerRole.id,
+            code: lecturer.lecturerRole.code,
+            name: lecturer.lecturerRole.name,
+            priority: lecturer.lecturerRole.priority,
+            isActive: lecturer.lecturerRole.isActive,
+          }
+        : null,
       isLecturerAdmin: permissions.includes(LECTURER_ADMIN_PERMISSION),
       assignments: lecturer.lecturerPermissions,
       requesterPermissions,
@@ -546,6 +763,7 @@ export class UsersService {
         requesterRole === 'ADMIN'
           ? this.authorizationService.getAllLecturerPermissions()
           : this.authorizationService.getLowerLecturerPermissions(),
+      assignableRoles,
       canGrantAdminPackage: requesterRole === 'ADMIN',
     };
   }
@@ -566,9 +784,6 @@ export class UsersService {
       select: {
         id: true,
         role: true,
-        lecturerPermissions: {
-          select: { permission: true },
-        },
       },
     });
 
@@ -577,9 +792,10 @@ export class UsersService {
     }
 
     const requestedPermissions = [...new Set(dto.permissions)] as LecturerPermissionKey[];
-    const currentPermissions = lecturer.lecturerPermissions.map(
-      (item) => item.permission as LecturerPermissionKey,
+    const currentSnapshot = await this.authorizationService.getPermissionSnapshotForLecturer(
+      lecturerId,
     );
+    const currentPermissions = currentSnapshot.permissions;
 
     if (
       requesterRole !== 'ADMIN' &&
@@ -615,13 +831,420 @@ export class UsersService {
     });
 
     const refreshedPermissions = await this.authorizationService.getPermissionsForLecturer(lecturerId);
+    const refreshedSnapshot = await this.authorizationService.getPermissionSnapshotForLecturer(
+      lecturerId,
+    );
 
     return {
       lecturerId,
       permissions: refreshedPermissions,
+      individualPermissions: refreshedSnapshot.individualPermissions,
+      rolePermissions: refreshedSnapshot.rolePermissions,
+      lecturerRole: refreshedSnapshot.lecturerRole,
       isLecturerAdmin: refreshedPermissions.includes(LECTURER_ADMIN_PERMISSION),
       updatedBy: requesterId,
       canGrantAdminPackage: requesterRole === 'ADMIN',
+    };
+  }
+
+  async findLecturerRoles(
+    query: QueryLecturerRoleDto,
+    requesterId: string,
+    requesterRole: string,
+  ) {
+    const requesterPermissions =
+      requesterRole === 'ADMIN'
+        ? this.authorizationService.getAllLecturerPermissions()
+        : await this.assertLecturerPermissionManagementAccess(requesterId, requesterRole);
+
+    const { page, limit, search, isActive, sortOrder } = query;
+    const skip = (page - 1) * limit;
+
+    const where: Prisma.LecturerRoleWhereInput = {
+      ...(search
+        ? {
+            OR: [
+              { name: { contains: search, mode: 'insensitive' } },
+              { code: { contains: search, mode: 'insensitive' } },
+            ],
+          }
+        : {}),
+      ...(isActive !== undefined
+        ? { isActive }
+        : requesterRole === 'LECTURER'
+          ? { isActive: true }
+          : {}),
+    };
+
+    if (requesterRole === 'LECTURER') {
+      const requester = await this.prisma.user.findUnique({
+        where: { id: requesterId },
+        select: {
+          lecturerRole: {
+            select: {
+              priority: true,
+            },
+          },
+        },
+      });
+
+      if (requester?.lecturerRole) {
+        where.priority = { gt: requester.lecturerRole.priority };
+      } else {
+        const topRolePriority = await this.getTopActiveLecturerRolePriority();
+        if (topRolePriority !== null) {
+          where.priority = { gt: topRolePriority };
+        }
+      }
+    }
+
+    const [rows, total] = await Promise.all([
+      this.prisma.lecturerRole.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: [{ priority: sortOrder }, { code: 'asc' }],
+        include: {
+          permissions: {
+            select: { permission: true },
+            orderBy: { permission: 'asc' },
+          },
+          _count: { select: { users: true } },
+        },
+      }),
+      this.prisma.lecturerRole.count({ where }),
+    ]);
+
+    return {
+      data: rows.map((row) => this.mapLecturerRole(row)),
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+      requesterPermissions,
+      canManageRoleCatalog: requesterRole === 'ADMIN',
+    };
+  }
+
+  async getLecturerRole(id: string, requesterId: string, requesterRole: string) {
+    const requesterPermissions =
+      requesterRole === 'ADMIN'
+        ? this.authorizationService.getAllLecturerPermissions()
+        : await this.assertLecturerPermissionManagementAccess(requesterId, requesterRole);
+
+    const role = await this.prisma.lecturerRole.findUnique({
+      where: { id },
+      include: {
+        permissions: {
+          select: { permission: true },
+          orderBy: { permission: 'asc' },
+        },
+        _count: { select: { users: true } },
+      },
+    });
+
+    if (!role) {
+      throw new NotFoundException('Vai trò giảng viên không tồn tại');
+    }
+
+    if (requesterRole === 'LECTURER') {
+      const assignableRoles = await this.getAssignableLecturerRoles(
+        requesterId,
+        requesterRole,
+        requesterPermissions,
+      );
+
+      if (!assignableRoles.some((item) => item.id === id)) {
+        throw new ForbiddenException('Bạn không có quyền truy cập vai trò này');
+      }
+    }
+
+    return {
+      ...this.mapLecturerRole(role),
+      requesterPermissions,
+      canManageRoleCatalog: requesterRole === 'ADMIN',
+    };
+  }
+
+  async createLecturerRole(
+    dto: CreateLecturerRoleDto,
+    requesterId: string,
+    requesterRole: string,
+  ) {
+    this.assertLecturerRoleCatalogManagementAccess(requesterRole);
+
+    const normalizedCode = dto.code.trim().toUpperCase();
+    const permissions = [...new Set(dto.permissions)] as LecturerPermissionKey[];
+
+    try {
+      const role = await this.prisma.lecturerRole.create({
+        data: {
+          code: normalizedCode,
+          name: dto.name.trim(),
+          description: dto.description?.trim() || null,
+          priority: dto.priority,
+          isActive: dto.isActive ?? true,
+          createdByUserId: requesterId,
+          permissions: {
+            createMany: {
+              data: permissions.map((permission) => ({ permission })),
+            },
+          },
+        },
+        include: {
+          permissions: {
+            select: { permission: true },
+            orderBy: { permission: 'asc' },
+          },
+          _count: { select: { users: true } },
+        },
+      });
+
+      return {
+        ...this.mapLecturerRole(role),
+        message: 'Tạo vai trò giảng viên thành công',
+      };
+    } catch (error: any) {
+      if (error?.code === 'P2002') {
+        throw new ConflictException('Mã vai trò hoặc độ ưu tiên đã tồn tại');
+      }
+      throw error;
+    }
+  }
+
+  async updateLecturerRole(
+    roleId: string,
+    dto: UpdateLecturerRoleDto,
+    _requesterId: string,
+    requesterRole: string,
+  ) {
+    this.assertLecturerRoleCatalogManagementAccess(requesterRole);
+
+    const existing = await this.prisma.lecturerRole.findUnique({
+      where: { id: roleId },
+      select: { id: true },
+    });
+
+    if (!existing) {
+      throw new NotFoundException('Vai trò giảng viên không tồn tại');
+    }
+
+    const normalizedCode = dto.code?.trim().toUpperCase();
+    const permissions = dto.permissions
+      ? ([...new Set(dto.permissions)] as LecturerPermissionKey[])
+      : undefined;
+
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.lecturerRole.update({
+          where: { id: roleId },
+          data: {
+            ...(normalizedCode !== undefined ? { code: normalizedCode } : {}),
+            ...(dto.name !== undefined ? { name: dto.name.trim() } : {}),
+            ...(dto.description !== undefined
+              ? { description: dto.description === null ? null : dto.description.trim() }
+              : {}),
+            ...(dto.priority !== undefined ? { priority: dto.priority } : {}),
+            ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
+          },
+        });
+
+        if (permissions) {
+          await tx.lecturerRolePermission.deleteMany({
+            where: { roleId },
+          });
+
+          await tx.lecturerRolePermission.createMany({
+            data: permissions.map((permission) => ({ roleId, permission })),
+          });
+        }
+      });
+    } catch (error: any) {
+      if (error?.code === 'P2002') {
+        throw new ConflictException('Mã vai trò hoặc độ ưu tiên đã tồn tại');
+      }
+      throw error;
+    }
+
+    const role = await this.prisma.lecturerRole.findUniqueOrThrow({
+      where: { id: roleId },
+      include: {
+        permissions: {
+          select: { permission: true },
+          orderBy: { permission: 'asc' },
+        },
+        _count: { select: { users: true } },
+      },
+    });
+
+    return {
+      ...this.mapLecturerRole(role),
+      message: 'Cập nhật vai trò giảng viên thành công',
+    };
+  }
+
+  async removeLecturerRole(roleId: string, _requesterId: string, requesterRole: string) {
+    this.assertLecturerRoleCatalogManagementAccess(requesterRole);
+
+    const role = await this.prisma.lecturerRole.findUnique({
+      where: { id: roleId },
+      include: {
+        _count: { select: { users: true } },
+      },
+    });
+
+    if (!role) {
+      throw new NotFoundException('Vai trò giảng viên không tồn tại');
+    }
+
+    if ((role._count?.users ?? 0) > 0) {
+      throw new BadRequestException(
+        'Không thể xóa vai trò vì vẫn còn giảng viên đang được gán vai trò này',
+      );
+    }
+
+    await this.prisma.lecturerRole.delete({ where: { id: roleId } });
+
+    return {
+      message: 'Xóa vai trò giảng viên thành công',
+      roleId,
+    };
+  }
+
+  async assignLecturerRole(
+    lecturerId: string,
+    dto: AssignLecturerRoleDto,
+    requesterId: string,
+    requesterRole: string,
+  ) {
+    const requesterPermissions = await this.assertLecturerPermissionManagementAccess(
+      requesterId,
+      requesterRole,
+    );
+
+    const lecturer = await this.prisma.user.findUnique({
+      where: { id: lecturerId },
+      select: {
+        id: true,
+        role: true,
+        lecturerRole: {
+          select: {
+            id: true,
+            code: true,
+            name: true,
+            priority: true,
+          },
+        },
+      },
+    });
+
+    if (!lecturer || lecturer.role !== 'LECTURER') {
+      throw new NotFoundException('Giảng viên không tồn tại');
+    }
+
+    const nextRole = dto.roleId
+      ? await this.prisma.lecturerRole.findUnique({
+          where: { id: dto.roleId },
+          select: {
+            id: true,
+            code: true,
+            name: true,
+            priority: true,
+            isActive: true,
+          },
+        })
+      : null;
+
+    if (dto.roleId && !nextRole) {
+      throw new NotFoundException('Vai trò giảng viên không tồn tại');
+    }
+
+    if (nextRole && !nextRole.isActive) {
+      throw new BadRequestException('Không thể gán vai trò đang bị vô hiệu hóa');
+    }
+
+    if (requesterRole === 'LECTURER') {
+      if (requesterId === lecturerId) {
+        throw new ForbiddenException('Giảng viên không thể tự gán vai trò cho chính mình');
+      }
+
+      const requester = await this.prisma.user.findUnique({
+        where: { id: requesterId },
+        select: {
+          lecturerRole: {
+            select: {
+              priority: true,
+            },
+          },
+        },
+      });
+
+      if (requester?.lecturerRole) {
+        const requesterPriority = requester.lecturerRole.priority;
+
+        if (lecturer.lecturerRole && lecturer.lecturerRole.priority <= requesterPriority) {
+          throw new ForbiddenException(
+            'Bạn chỉ có thể quản lý giảng viên có vai trò thấp hơn vai trò của bạn',
+          );
+        }
+
+        if (nextRole && nextRole.priority <= requesterPriority) {
+          throw new ForbiddenException(
+            'Bạn chỉ có thể gán vai trò có độ ưu tiên thấp hơn vai trò của bạn',
+          );
+        }
+      } else {
+        const topRolePriority = await this.getTopActiveLecturerRolePriority();
+
+        if (
+          topRolePriority !== null &&
+          lecturer.lecturerRole &&
+          lecturer.lecturerRole.priority <= topRolePriority
+        ) {
+          throw new ForbiddenException(
+            'Bạn không thể quản lý giảng viên đang có vai trò ưu tiên cao nhất',
+          );
+        }
+
+        if (topRolePriority !== null && nextRole && nextRole.priority <= topRolePriority) {
+          throw new ForbiddenException(
+            'Bạn không thể gán vai trò ưu tiên cao nhất. Vui lòng nhờ ADMIN thao tác.',
+          );
+        }
+      }
+
+      if (!requesterPermissions.includes(LECTURER_ADMIN_PERMISSION)) {
+        throw new ForbiddenException('Bạn chưa được cấp quyền quản trị giảng viên');
+      }
+    }
+
+    await this.prisma.user.update({
+      where: { id: lecturerId },
+      data: dto.roleId
+        ? {
+            lecturerRoleId: dto.roleId,
+            lecturerRoleAssignedAt: new Date(),
+            lecturerRoleAssignedByUserId: requesterId,
+          }
+        : {
+            lecturerRoleId: null,
+            lecturerRoleAssignedAt: null,
+            lecturerRoleAssignedByUserId: null,
+          },
+    });
+
+    const refreshedSnapshot = await this.authorizationService.getPermissionSnapshotForLecturer(
+      lecturerId,
+    );
+
+    return {
+      lecturerId,
+      lecturerRole: refreshedSnapshot.lecturerRole,
+      permissions: refreshedSnapshot.permissions,
+      individualPermissions: refreshedSnapshot.individualPermissions,
+      rolePermissions: refreshedSnapshot.rolePermissions,
+      isLecturerAdmin: refreshedSnapshot.permissions.includes(LECTURER_ADMIN_PERMISSION),
+      updatedBy: requesterId,
     };
   }
 

@@ -14,6 +14,10 @@ import {
   UpdateUserSchema,
   QueryLecturerSchema,
   UpdateLecturerPermissionsSchema,
+  QueryLecturerRoleSchema,
+  CreateLecturerRoleSchema,
+  UpdateLecturerRoleSchema,
+  AssignLecturerRoleSchema,
 } from './dto/user.dto';
 import type {
   QueryUserDto,
@@ -22,6 +26,10 @@ import type {
   UpdateUserDto,
   QueryLecturerDto,
   UpdateLecturerPermissionsDto,
+  QueryLecturerRoleDto,
+  CreateLecturerRoleDto,
+  UpdateLecturerRoleDto,
+  AssignLecturerRoleDto,
 } from './dto/user.dto';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -83,6 +91,56 @@ export class UsersController {
     @Req() req,
   ) {
     return this.usersService.updateLecturerPermissions(id, dto, req.user['sub'], req.user['role']);
+  }
+
+  @Put('lecturers/:id/role')
+  @Roles('ADMIN', 'LECTURER')
+  assignLecturerRole(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(AssignLecturerRoleSchema)) dto: AssignLecturerRoleDto,
+    @Req() req,
+  ) {
+    return this.usersService.assignLecturerRole(id, dto, req.user['sub'], req.user['role']);
+  }
+
+  @Get('lecturer-roles')
+  @Roles('ADMIN', 'LECTURER')
+  findLecturerRoles(
+    @Query(new ZodValidationPipe(QueryLecturerRoleSchema)) query: QueryLecturerRoleDto,
+    @Req() req,
+  ) {
+    return this.usersService.findLecturerRoles(query, req.user['sub'], req.user['role']);
+  }
+
+  @Get('lecturer-roles/:id')
+  @Roles('ADMIN', 'LECTURER')
+  getLecturerRole(@Param('id') id: string, @Req() req) {
+    return this.usersService.getLecturerRole(id, req.user['sub'], req.user['role']);
+  }
+
+  @Post('lecturer-roles')
+  @Roles('ADMIN')
+  createLecturerRole(
+    @Body(new ZodValidationPipe(CreateLecturerRoleSchema)) dto: CreateLecturerRoleDto,
+    @Req() req,
+  ) {
+    return this.usersService.createLecturerRole(dto, req.user['sub'], req.user['role']);
+  }
+
+  @Patch('lecturer-roles/:id')
+  @Roles('ADMIN')
+  updateLecturerRole(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(UpdateLecturerRoleSchema)) dto: UpdateLecturerRoleDto,
+    @Req() req,
+  ) {
+    return this.usersService.updateLecturerRole(id, dto, req.user['sub'], req.user['role']);
+  }
+
+  @Delete('lecturer-roles/:id')
+  @Roles('ADMIN')
+  removeLecturerRole(@Param('id') id: string, @Req() req) {
+    return this.usersService.removeLecturerRole(id, req.user['sub'], req.user['role']);
   }
 
   @Get(':id')

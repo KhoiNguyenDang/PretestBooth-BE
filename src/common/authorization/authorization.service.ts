@@ -7,9 +7,32 @@ import {
   type LecturerPermissionKey,
 } from './authorization.constants';
 
+export interface LecturerRoleSummary {
+  id: string;
+  code: string;
+  name: string;
+  priority: number;
+  isActive: boolean;
+}
+
+export interface LecturerPermissionSnapshot {
+  permissions: LecturerPermissionKey[];
+  individualPermissions: LecturerPermissionKey[];
+  rolePermissions: LecturerPermissionKey[];
+  lecturerRole: LecturerRoleSummary | null;
+}
+
 @Injectable()
 export class AuthorizationService {
   constructor(private readonly prisma: PrismaService) {}
+
+  private mergePermissions(
+    ...permissionGroups: LecturerPermissionKey[][]
+  ): LecturerPermissionKey[] {
+    return Array.from(new Set(permissionGroups.flat())).sort((a, b) =>
+      a.localeCompare(b),
+    );
+  }
 
   getAllLecturerPermissions(): LecturerPermissionKey[] {
     return [...LECTURER_PERMISSION_KEYS];
@@ -19,7 +42,10 @@ export class AuthorizationService {
     return [...LOWER_LECTURER_PERMISSIONS];
   }
 
-  async getPermissionsForUser(userId: string, role: string): Promise<LecturerPermissionKey[]> {
+  async getPermissionsForUser(
+    userId: string,
+    role: string,
+  ): Promise<LecturerPermissionKey[]> {
     if (role === 'ADMIN') {
       return this.getAllLecturerPermissions();
     }
@@ -31,15 +57,96 @@ export class AuthorizationService {
     return this.getPermissionsForLecturer(userId);
   }
 
-  async getPermissionsForLecturer(lecturerId: string): Promise<LecturerPermissionKey[]> {
-    const rows = await this.prisma.$queryRaw<Array<{ permission: string }>>`
-      SELECT "permission"::text AS permission
-      FROM "LecturerPermissionAssignment"
-      WHERE "lecturerId" = ${lecturerId}
-      ORDER BY "permission" ASC
-    `;
+  async getPermissionSnapshotForLecturer(
+    lecturerId: string,
+  ): Promise<LecturerPermissionSnapshot> {
+    const lecturer = await this.prisma.user.findUnique({
+      where: { id: lecturerId },
+      select: {
+        role: true,
+        lecturerRoleId: true,
+        lecturerPermissions: {
+          select: { permission: true },
+          orderBy: { permission: 'asc' },
+        },
+      },
+    });
 
-    return rows.map((row) => row.permission as LecturerPermissionKey);
+    if (!lecturer || lecturer.role !== 'LECTURER') {
+      return {
+        permissions: [],
+        individualPermissions: [],
+        rolePermissions: [],
+        lecturerRole: null,
+      };
+    }
+
+    const individualPermissions = lecturer.lecturerPermissions.map(
+      (item) => item.permission as LecturerPermissionKey,
+    );
+    let lecturerRole: LecturerRoleSummary | null = null;
+    let rolePermissions: LecturerPermissionKey[] = [];
+
+    if (lecturer.lecturerRoleId) {
+      const roleRows = await this.prisma.$queryRaw<
+        Array<{
+          id: string;
+          code: string;
+          name: string;
+          priority: number;
+          isActive: boolean;
+        }>
+      >`
+        SELECT
+          "id",
+          "code",
+          "name",
+          "priority",
+          "isActive"
+        FROM "LecturerRole"
+        WHERE "id" = ${lecturer.lecturerRoleId}
+        LIMIT 1
+      `;
+
+      const roleRecord = roleRows[0];
+
+      if (roleRecord) {
+        const rolePermissionRows = await this.prisma.$queryRaw<
+          Array<{ permission: string }>
+        >`
+          SELECT "permission"::text AS permission
+          FROM "LecturerRolePermission"
+          WHERE "roleId" = ${roleRecord.id}
+          ORDER BY "permission" ASC
+        `;
+
+        lecturerRole = {
+          id: roleRecord.id,
+          code: roleRecord.code,
+          name: roleRecord.name,
+          priority: roleRecord.priority,
+          isActive: roleRecord.isActive,
+        };
+
+        rolePermissions = rolePermissionRows.map(
+          (item) => item.permission as LecturerPermissionKey,
+        );
+      }
+    }
+
+    return {
+      permissions: this.mergePermissions(individualPermissions, rolePermissions),
+      individualPermissions,
+      rolePermissions,
+      lecturerRole,
+    };
+  }
+
+  async getPermissionsForLecturer(
+    lecturerId: string,
+  ): Promise<LecturerPermissionKey[]> {
+    const snapshot = await this.getPermissionSnapshotForLecturer(lecturerId);
+    return snapshot.permissions;
   }
 
   async hasPermission(
@@ -55,16 +162,8 @@ export class AuthorizationService {
       return false;
     }
 
-    const rows = await this.prisma.$queryRaw<Array<{ hasPermission: boolean }>>`
-      SELECT EXISTS (
-        SELECT 1
-        FROM "LecturerPermissionAssignment"
-        WHERE "lecturerId" = ${userId}
-          AND "permission" = ${permission}::"LecturerPermission"
-      ) AS "hasPermission"
-    `;
-
-    return Boolean(rows[0]?.hasPermission);
+    const permissions = await this.getPermissionsForLecturer(userId);
+    return permissions.includes(permission);
   }
 
   async assertPermission(
@@ -79,17 +178,24 @@ export class AuthorizationService {
     }
   }
 
-  canManageLecturerPermissions(requesterRole: string, requesterPermissions: LecturerPermissionKey[]) {
+  canManageLecturerPermissions(
+    requesterRole: string,
+    requesterPermissions: LecturerPermissionKey[],
+  ) {
     if (requesterRole === 'ADMIN') {
       return true;
     }
 
     return (
-      requesterRole === 'LECTURER' && requesterPermissions.includes(LECTURER_ADMIN_PERMISSION)
+      requesterRole === 'LECTURER' &&
+      requesterPermissions.includes(LECTURER_ADMIN_PERMISSION)
     );
   }
 
-  assertCanManageLecturerPermissions(requesterRole: string, requesterPermissions: LecturerPermissionKey[]) {
+  assertCanManageLecturerPermissions(
+    requesterRole: string,
+    requesterPermissions: LecturerPermissionKey[],
+  ) {
     if (!this.canManageLecturerPermissions(requesterRole, requesterPermissions)) {
       throw new ForbiddenException(
         'Bạn không có quyền phân quyền giảng viên. Chỉ ADMIN gốc hoặc giảng viên có quyền admin mới được thao tác.',

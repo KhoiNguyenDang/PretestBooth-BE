@@ -66,3 +66,63 @@ export const UpdateLecturerPermissionsSchema = z.object({
 });
 
 export type UpdateLecturerPermissionsDto = z.output<typeof UpdateLecturerPermissionsSchema>;
+
+export const QueryLecturerRoleSchema = z.object({
+  page: z.coerce.number().int().positive().default(1),
+  limit: z.coerce.number().int().positive().max(100).default(20),
+  search: z.string().optional(),
+  isActive: z
+    .preprocess(
+      (val) => (val === 'true' ? true : val === 'false' ? false : undefined),
+      z.boolean().optional(),
+    ),
+  sortOrder: z.enum(['asc', 'desc']).default('asc'),
+});
+
+export type QueryLecturerRoleDto = z.output<typeof QueryLecturerRoleSchema>;
+
+export const CreateLecturerRoleSchema = z.object({
+  code: z
+    .string()
+    .trim()
+    .min(2, 'Mã vai trò phải có ít nhất 2 ký tự')
+    .max(50, 'Mã vai trò tối đa 50 ký tự')
+    .regex(/^[A-Z][A-Z0-9_]*$/, 'Mã vai trò chỉ gồm A-Z, 0-9 và dấu gạch dưới'),
+  name: z.string().trim().min(2, 'Tên vai trò phải có ít nhất 2 ký tự').max(100),
+  description: z.string().trim().max(500).optional(),
+  priority: z.coerce.number().int().min(1).max(10000),
+  isActive: z.boolean().optional(),
+  permissions: z
+    .array(LecturerPermissionSchema)
+    .min(1, 'Vai trò phải có ít nhất 1 quyền')
+    .max(LECTURER_PERMISSION_KEYS.length),
+});
+
+export type CreateLecturerRoleDto = z.output<typeof CreateLecturerRoleSchema>;
+
+export const UpdateLecturerRoleSchema = z.object({
+  code: z
+    .string()
+    .trim()
+    .min(2, 'Mã vai trò phải có ít nhất 2 ký tự')
+    .max(50, 'Mã vai trò tối đa 50 ký tự')
+    .regex(/^[A-Z][A-Z0-9_]*$/, 'Mã vai trò chỉ gồm A-Z, 0-9 và dấu gạch dưới')
+    .optional(),
+  name: z.string().trim().min(2, 'Tên vai trò phải có ít nhất 2 ký tự').max(100).optional(),
+  description: z.string().trim().max(500).nullable().optional(),
+  priority: z.coerce.number().int().min(1).max(10000).optional(),
+  isActive: z.boolean().optional(),
+  permissions: z
+    .array(LecturerPermissionSchema)
+    .min(1, 'Vai trò phải có ít nhất 1 quyền')
+    .max(LECTURER_PERMISSION_KEYS.length)
+    .optional(),
+});
+
+export type UpdateLecturerRoleDto = z.output<typeof UpdateLecturerRoleSchema>;
+
+export const AssignLecturerRoleSchema = z.object({
+  roleId: z.string().uuid('Role ID không hợp lệ').nullable(),
+});
+
+export type AssignLecturerRoleDto = z.output<typeof AssignLecturerRoleSchema>;

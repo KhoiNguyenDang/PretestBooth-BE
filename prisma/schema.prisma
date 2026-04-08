@@ -33,6 +33,9 @@ model User {
   kycLastAttemptAt        DateTime?
   kycConsentVersion       String?
   kycConsentedAt          DateTime?
+  lecturerRoleId          String?
+  lecturerRoleAssignedAt  DateTime?
+  lecturerRoleAssignedByUserId String?
   faceEmbedding           Json?
   faceEmbeddingModel      String?
   faceEmbeddingVersion    String?
@@ -51,6 +54,10 @@ model User {
   questionReviewActions    QuestionReviewAction[]  @relation("QuestionReviewActionReviewer")
   lecturerPermissions      LecturerPermissionAssignment[] @relation("LecturerPermissionOwner")
   grantedLecturerPermissions LecturerPermissionAssignment[] @relation("LecturerPermissionGrantor")
+  lecturerRole            LecturerRole?      @relation("LecturerRoleMembers", fields: [lecturerRoleId], references: [id], onDelete: SetNull)
+  lecturerRoleAssignedByUser User?           @relation("LecturerRoleAssigner", fields: [lecturerRoleAssignedByUserId], references: [id], onDelete: SetNull)
+  assignedLecturerRoles   User[]             @relation("LecturerRoleAssigner")
+  createdLecturerRoles    LecturerRole[]     @relation("LecturerRoleCreator")
   proctoringEvents        ProctoringEvent[]
   submissions             Submission[]
 
@@ -60,6 +67,8 @@ model User {
   @@index([isEmailVerified])
   @@index([isLocked])
   @@index([kycStatus])
+  @@index([lecturerRoleId])
+  @@index([lecturerRoleAssignedByUserId])
 }
 
 model LecturerPermissionAssignment {
@@ -76,6 +85,38 @@ model LecturerPermissionAssignment {
   @@index([lecturerId])
   @@index([permission])
   @@index([grantedByUserId])
+}
+
+model LecturerRole {
+  id              String                 @id @default(uuid())
+  code            String                 @unique
+  name            String
+  description     String?
+  priority        Int                    @unique
+  isActive        Boolean                @default(true)
+  createdByUserId String?
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+  createdByUser   User?                  @relation("LecturerRoleCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  users           User[]                 @relation("LecturerRoleMembers")
+  permissions     LecturerRolePermission[]
+
+  @@index([priority])
+  @@index([isActive])
+  @@index([createdByUserId])
+}
+
+model LecturerRolePermission {
+  id         String             @id @default(uuid())
+  roleId     String
+  permission LecturerPermission
+  createdAt  DateTime           @default(now())
+  updatedAt  DateTime           @updatedAt
+  role       LecturerRole       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permission])
+  @@index([roleId])
+  @@index([permission])
 }
 
 model Problem {
