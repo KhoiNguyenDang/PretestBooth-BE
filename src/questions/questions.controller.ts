@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Controller,
   Get,
   Post,
@@ -14,11 +15,13 @@ import {
   HttpStatus,
   UseInterceptors,
   UploadedFile,
+  UploadedFiles,
   ParseFilePipe,
   MaxFileSizeValidator,
+  FileTypeValidator,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { FileFieldsInterceptor, FileInterceptor } from '@nestjs/platform-express';
 import { QuestionsService } from './questions.service';
 import { ZodValidationPipe } from '../common/zod/zod-validation.pipe';
 import { CreateSubjectSchema, UpdateSubjectSchema } from './dto/create-subject.dto';
@@ -122,6 +125,25 @@ export class QuestionsController {
     return this.questionsService.create(userId, userRole, dto);
   }
 
+  @Post('upload-image')
+  @UseInterceptors(FileInterceptor('file'))
+  uploadQuestionImage(
+    @UploadedFile(
+      new ParseFilePipe({
+        validators: [
+          new MaxFileSizeValidator({ maxSize: 5 * 1024 * 1024 }),
+          new FileTypeValidator({ fileType: /^image\/(png|jpe?g|webp|gif)$/i }),
+        ],
+      }),
+    )
+    file: Express.Multer.File,
+    @Req() req,
+  ) {
+    const userId = req.user['sub'];
+    const userRole = req.user['role'];
+    return this.questionsService.uploadQuestionImage(file, userId, userRole);
+  }
+
   @Get()
   findAllQuestions(
     @Query(new ZodValidationPipe(QueryQuestionSchema)) query: QueryQuestionDto,
@@ -166,18 +188,31 @@ export class QuestionsController {
   }
 
   @Post('import')
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(
+    FileFieldsInterceptor([
+      { name: 'file', maxCount: 1 },
+      { name: 'images', maxCount: 300 },
+    ]),
+  )
   importQuestions(
-    @UploadedFile(
-      new ParseFilePipe({
-        validators: [new MaxFileSizeValidator({ maxSize: 5 * 1024 * 1024 })],
-      }),
-    )
-    file: Express.Multer.File,
+    @UploadedFiles()
+    files: {
+      file?: Express.Multer.File[];
+      images?: Express.Multer.File[];
+    },
     @Req() req,
   ) {
+    const file = files?.file?.[0];
+    if (!file) {
+      throw new BadRequestException('Vui lòng upload file Excel/CSV/ZIP ở field file');
+    }
+
+    if (file.size > 30 * 1024 * 1024) {
+      throw new BadRequestException('File import vượt quá 30MB');
+    }
+
     const userId = req.user['sub'];
     const userRole = req.user['role'];
-    return this.questionsService.importQuestions(file, userId, userRole);
+    return this.questionsService.importQuestions(file, userId, userRole, files?.images || []);
   }
 }

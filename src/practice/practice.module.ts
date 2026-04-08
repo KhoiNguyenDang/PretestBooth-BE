@@ -11,5 +11,6 @@ import { RealtimeModule } from '../realtime/realtime.module';
   imports: [PrismaModule, BookingsModule, PointsModule, AuthorizationModule, RealtimeModule],
   controllers: [PracticeController],
   providers: [PracticeService],
+  exports: [PracticeService],
 })
 export class PracticeModule {}

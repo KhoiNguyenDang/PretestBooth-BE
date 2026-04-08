@@ -21,6 +21,10 @@ import {
 } from './dto/question-response.dto';
 import { Prisma } from '@prisma/client';
 import { AuthorizationService } from '../common/authorization/authorization.service';
+import { CloudinaryService } from '../common/cloudinary/cloudinary.service';
+import * as path from 'path';
+import * as ExcelJS from 'exceljs';
+import AdmZip = require('adm-zip');
 
 import * as xlsx from 'xlsx';
 import * as iconv from 'iconv-lite';
@@ -28,13 +32,150 @@ import * as iconv from 'iconv-lite';
 type QuestionType = 'SINGLE_CHOICE' | 'MULTIPLE_CHOICE' | 'SHORT_ANSWER';
 type QuestionClassification = 'PRACTICE' | 'EXAM';
 type Difficulty = 'EASY' | 'MEDIUM' | 'HARD';
+type ImportedFile = {
+  originalname: string;
+  mimetype: string;
+  buffer: Buffer;
+};
 
 @Injectable()
 export class QuestionsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly authorizationService: AuthorizationService,
+    private readonly cloudinaryService: CloudinaryService,
   ) {}
+
+  private looksLikeUrl(value: string): boolean {
+    return /^https?:\/\//i.test(value);
+  }
+
+  private normalizeImageReferenceKey(rawValue: string): string {
+    return path.basename(rawValue).trim().toLowerCase();
+  }
+
+  private normalizeImageStemKey(rawValue: string): string {
+    const basename = path.basename(rawValue).trim().toLowerCase();
+    return basename.replace(/\.[a-z0-9]+$/i, '').trim();
+  }
+
+  private getImageMimeType(extension: string): string {
+    if (extension === 'png') return 'image/png';
+    if (extension === 'gif') return 'image/gif';
+    if (extension === 'webp') return 'image/webp';
+    return 'image/jpeg';
+  }
+
+  private isSupportedSpreadsheetExt(ext: string): boolean {
+    return ['csv', 'xlsx', 'xls'].includes(ext);
+  }
+
+  private isSupportedImageExt(ext: string): boolean {
+    return ['png', 'jpg', 'jpeg', 'webp', 'gif'].includes(ext);
+  }
+
+  private unpackImportPackage(file: ImportedFile): { spreadsheetFile: ImportedFile; imageFiles: ImportedFile[] } {
+    const ext = file.originalname.split('.').pop()?.toLowerCase() || '';
+    if (ext !== 'zip') {
+      return { spreadsheetFile: file, imageFiles: [] };
+    }
+
+    const zip = new AdmZip(file.buffer);
+    const entries = zip.getEntries().filter((entry) => !entry.isDirectory);
+
+    let spreadsheetFile: ImportedFile | null = null;
+    const imageFiles: ImportedFile[] = [];
+
+    for (const entry of entries) {
+      const basename = path.basename(entry.entryName);
+      const entryExt = basename.split('.').pop()?.toLowerCase() || '';
+      const entryBuffer = entry.getData();
+
+      if (!spreadsheetFile && this.isSupportedSpreadsheetExt(entryExt)) {
+        spreadsheetFile = {
+          originalname: basename,
+          mimetype: entryExt === 'csv' ? 'text/csv' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          buffer: entryBuffer,
+        };
+        continue;
+      }
+
+      if (this.isSupportedImageExt(entryExt)) {
+        imageFiles.push({
+          originalname: basename,
+          mimetype: this.getImageMimeType(entryExt),
+          buffer: entryBuffer,
+        });
+      }
+    }
+
+    if (!spreadsheetFile) {
+      throw new BadRequestException(
+        'File ZIP phải chứa ít nhất 1 file bảng câu hỏi (.csv/.xlsx/.xls)',
+      );
+    }
+
+    return { spreadsheetFile, imageFiles };
+  }
+
+  private isLikelyExcelPicturePlaceholder(value: string): boolean {
+    return /^picture(\s*\d+)?$/i.test(value.trim());
+  }
+
+  private async extractEmbeddedImagesByRow(file: ImportedFile): Promise<Map<number, ImportedFile>> {
+    const embeddedImagesByRow = new Map<number, ImportedFile>();
+    const extension = file.originalname.split('.').pop()?.toLowerCase();
+
+    if (extension !== 'xlsx') {
+      return embeddedImagesByRow;
+    }
+
+    try {
+      const workbook = new ExcelJS.Workbook();
+      await workbook.xlsx.load(file.buffer as unknown as any);
+      const worksheet = workbook.worksheets[0];
+      if (!worksheet) return embeddedImagesByRow;
+
+      const worksheetImages = worksheet.getImages();
+      for (const worksheetImage of worksheetImages) {
+        const imageId = Number(worksheetImage.imageId);
+        if (!Number.isFinite(imageId)) continue;
+
+        const image = workbook.getImage(imageId);
+        if (!image) continue;
+
+        const imageBuffer = image.buffer
+          ? Buffer.from(image.buffer)
+          : image.base64
+            ? Buffer.from(image.base64, 'base64')
+            : null;
+        if (!imageBuffer) continue;
+
+        const nativeRow = worksheetImage.range?.tl?.nativeRow;
+        if (typeof nativeRow !== 'number') continue;
+
+        // Different Excel producers can report anchor rows with different bases.
+        // Store both candidates to avoid off-by-one mismatches during import mapping.
+        const candidateRows = [nativeRow, nativeRow + 1].filter((row) => Number.isInteger(row) && row > 0);
+        if (candidateRows.length === 0) continue;
+
+        const imageExtension = (image.extension || 'png').toLowerCase();
+        for (const rowNumber of candidateRows) {
+          if (!embeddedImagesByRow.has(rowNumber)) {
+            embeddedImagesByRow.set(rowNumber, {
+              originalname: `embedded-row-${rowNumber}.${imageExtension}`,
+              mimetype: this.getImageMimeType(imageExtension),
+              buffer: imageBuffer,
+            });
+          }
+        }
+      }
+    } catch {
+      return embeddedImagesByRow;
+    }
+
+    return embeddedImagesByRow;
+  }
 
   private normalizeClassification(rawValue: unknown): QuestionClassification | undefined {
     if (!rawValue) return undefined;
@@ -108,20 +249,71 @@ export class QuestionsService {
     );
   }
   // ========== IMPORT QUESTIONS FROM FILE ==========
-  async importQuestions(file: Express.Multer.File, userId: string, userRole: string) {
+  async importQuestions(
+    file: ImportedFile,
+    userId: string,
+    userRole: string,
+    imageFiles: ImportedFile[] = [],
+  ) {
     if (!file) throw new BadRequestException('Vui lòng upload file Excel/CSV');
     await this.assertQuestionBankPermission(userId, userRole, 'import câu hỏi');
+
+    const { spreadsheetFile, imageFiles: zipImageFiles } = this.unpackImportPackage(file);
+    const allImageFiles = [...imageFiles, ...zipImageFiles];
+
+    const imageFilesMap = new Map<string, ImportedFile>();
+    const imageFilesStemMap = new Map<string, ImportedFile | null>();
+    for (const imageFile of allImageFiles) {
+      if (!imageFile?.originalname) continue;
+      const key = this.normalizeImageReferenceKey(imageFile.originalname);
+      if (!key) continue;
+      imageFilesMap.set(key, imageFile);
+
+      const stemKey = this.normalizeImageStemKey(imageFile.originalname);
+      if (!stemKey) continue;
+      if (!imageFilesStemMap.has(stemKey)) {
+        imageFilesStemMap.set(stemKey, imageFile);
+      } else {
+        // Ambiguous stem (e.g., same name with multiple extensions).
+        imageFilesStemMap.set(stemKey, null);
+      }
+    }
+    const embeddedImagesByRow = await this.extractEmbeddedImagesByRow(spreadsheetFile);
+
+    const uploadedImageUrlCache = new Map<string, string>();
+    const consumedEmbeddedRows = new Set<number>();
+    const embeddedImageEntries = Array.from(embeddedImagesByRow.entries()).sort((a, b) => a[0] - b[0]);
+
+    const tryTakeEmbeddedImage = (preferredRow?: number): ImportedFile | null => {
+      if (typeof preferredRow === 'number') {
+        const preferred = embeddedImagesByRow.get(preferredRow);
+        if (preferred && !consumedEmbeddedRows.has(preferredRow)) {
+          consumedEmbeddedRows.add(preferredRow);
+          return preferred;
+        }
+      }
+
+      for (const [row, imageFile] of embeddedImageEntries) {
+        if (!consumedEmbeddedRows.has(row)) {
+          consumedEmbeddedRows.add(row);
+          return imageFile;
+        }
+      }
+
+      return null;
+    };
+
     let data = [];
-    const ext = file.originalname.split('.').pop()?.toLowerCase();
+    const ext = spreadsheetFile.originalname.split('.').pop()?.toLowerCase();
     if (ext === 'csv') {
       // Đọc CSV chuẩn UTF-8
-      const content = iconv.decode(file.buffer, 'utf-8');
+      const content = iconv.decode(spreadsheetFile.buffer, 'utf-8');
       const workbook = xlsx.read(content, { type: 'string' });
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
       data = xlsx.utils.sheet_to_json(sheet, { raw: false });
     } else {
       // Excel
-      const workbook = xlsx.read(file.buffer, { type: 'buffer' });
+      const workbook = xlsx.read(spreadsheetFile.buffer, { type: 'buffer' });
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
       data = xlsx.utils.sheet_to_json(sheet, { raw: false });
     }
@@ -237,7 +429,7 @@ export class QuestionsService {
 
         const dto: any = {
           content: row['content'] || row['Câu hỏi'],
-          imageUrl: row['imageUrl'] || row['image'] || row['Hình ảnh'] || row['Anh'] || null,
+          imageUrl: null,
           questionType: row['questionType'] || row['Loại'],
           classification:
             this.normalizeClassification(
@@ -255,6 +447,72 @@ export class QuestionsService {
           topicId,
           isPublished: this.parseBoolean(row['isPublished'] || row['Công khai']),
         };
+
+        const imageReferenceRaw =
+          row['image'] ||
+          row['imageFile'] ||
+          row['imageName'] ||
+          row['imageUrl'] ||
+          row['Hình ảnh'] ||
+          row['Anh'];
+
+        if (imageReferenceRaw) {
+          const imageReference = String(imageReferenceRaw).trim();
+
+          if (this.looksLikeUrl(imageReference)) {
+            failed++;
+            errors.push(
+              `Dòng ${rowNumber}: Không hỗ trợ dùng URL ảnh khi import. Hãy gửi file ảnh ở field images và điền tên file vào cột image`,
+            );
+            continue;
+          }
+
+          const imageReferenceKey = this.normalizeImageReferenceKey(imageReference);
+          const cachedUploadedUrl = uploadedImageUrlCache.get(imageReferenceKey);
+          if (cachedUploadedUrl) {
+            dto.imageUrl = cachedUploadedUrl;
+          } else {
+            let imageFile = imageFilesMap.get(imageReferenceKey) || null;
+            if (!imageFile) {
+              const imageReferenceStemKey = this.normalizeImageStemKey(imageReference);
+              const stemMatchedImage = imageFilesStemMap.get(imageReferenceStemKey);
+              if (stemMatchedImage) {
+                imageFile = stemMatchedImage;
+              }
+            }
+            if (!imageFile) {
+              imageFile = tryTakeEmbeddedImage(rowNumber);
+            }
+            if (!imageFile && this.isLikelyExcelPicturePlaceholder(imageReference)) {
+              imageFile = tryTakeEmbeddedImage();
+            }
+            if (!imageFile) {
+              failed++;
+              errors.push(
+                `Dòng ${rowNumber}: Không tìm thấy file ảnh '${imageReference}'. Hãy gửi ảnh trong field images[] hoặc nhúng ảnh trực tiếp trong file Excel`,
+              );
+              continue;
+            }
+
+            const uploadedImageUrl = await this.cloudinaryService.uploadQuestionImage(imageFile);
+            uploadedImageUrlCache.set(imageReferenceKey, uploadedImageUrl);
+            dto.imageUrl = uploadedImageUrl;
+          }
+        } else {
+          const embeddedImageFile = tryTakeEmbeddedImage(rowNumber);
+          if (embeddedImageFile) {
+            const embeddedCacheKey = `embedded-row-${rowNumber}`;
+            const cachedUploadedUrl = uploadedImageUrlCache.get(embeddedCacheKey);
+            if (cachedUploadedUrl) {
+              dto.imageUrl = cachedUploadedUrl;
+            } else {
+              const uploadedImageUrl = await this.cloudinaryService.uploadQuestionImage(embeddedImageFile);
+              uploadedImageUrlCache.set(embeddedCacheKey, uploadedImageUrl);
+              dto.imageUrl = uploadedImageUrl;
+            }
+          }
+        }
+
         if (
           row['A'] ||
           row['B'] ||
@@ -308,6 +566,16 @@ export class QuestionsService {
       failed,
       errors: errors.slice(0, 50),
     };
+  }
+
+  async uploadQuestionImage(
+    file: { mimetype: string; buffer: Buffer },
+    userId: string,
+    userRole: string,
+  ) {
+    await this.assertQuestionBankPermission(userId, userRole, 'upload ảnh câu hỏi');
+    const imageUrl = await this.cloudinaryService.uploadQuestionImage(file);
+    return { imageUrl };
   }
 
   // ==================== SUBJECT CRUD ====================

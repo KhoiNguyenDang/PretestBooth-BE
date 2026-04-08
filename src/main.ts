@@ -13,7 +13,7 @@ async function bootstrap() {
     origin: ['http://localhost:3001', 'http://localhost:3000'],
     credentials: true,
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
-    allowedHeaders: ['Content-Type', 'Authorization', 'x-booth-client-id'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
   });
 
   app.useGlobalInterceptors(new TransformInterceptor(new Reflector()));
