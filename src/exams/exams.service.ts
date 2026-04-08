@@ -16,6 +16,7 @@ import * as crypto from 'crypto';
 import { shuffleWithSeed } from './utils/shuffle';
 import { AuthorizationService } from '../common/authorization/authorization.service';
 import { RealtimeService } from '../realtime/realtime.service';
+import { GeminiShortAnswerGraderService } from '../common/ai/gemini-short-answer-grader.service';
 
 import type { CreateExamDto } from './dto/create-exam.dto';
 import type { UpdateExamDto } from './dto/update-exam.dto';
@@ -94,6 +95,7 @@ export class ExamsService {
     private readonly pointsService: PointsService,
     private readonly authorizationService: AuthorizationService,
     private readonly realtimeService: RealtimeService,
+    private readonly geminiShortAnswerGrader: GeminiShortAnswerGraderService,
   ) {}
 
   private async assertExamManagementPermission(userId: string, userRole: string, actionLabel: string) {
@@ -1734,8 +1736,48 @@ export class ExamsService {
           totalScore += itemScore;
 
           answerUpdates.push({ id: answer.id, isCorrect, score: itemScore });
+        } else if (question.questionType === 'SHORT_ANSWER') {
+          const expected = question.correctAnswer?.trim() || '';
+          const actual = answer.textAnswer?.trim() || '';
+
+          if (!actual) {
+            answerUpdates.push({ id: answer.id, isCorrect: false, score: 0 });
+            continue;
+          }
+
+          if (!expected) {
+            this.logger.warn(
+              `SHORT_ANSWER question ${question.id} has no reference answer; leaving answer ${answer.id} for manual grading`,
+            );
+            continue;
+          }
+
+          const aiGrade = await this.geminiShortAnswerGrader.grade({
+            question: question.content,
+            referenceAnswer: expected,
+            studentAnswer: actual,
+            maxScore: item.points,
+            explanation: question.explanation,
+          });
+
+          if (aiGrade) {
+            totalScore += aiGrade.score;
+            answerUpdates.push({
+              id: answer.id,
+              isCorrect: aiGrade.isCorrect,
+              score: aiGrade.score,
+            });
+            continue;
+          }
+
+          const expectedNormalized = expected.toLowerCase();
+          const actualNormalized = actual.toLowerCase();
+          const isCorrect = expectedNormalized === actualNormalized;
+          const itemScore = isCorrect ? item.points : 0;
+
+          totalScore += itemScore;
+          answerUpdates.push({ id: answer.id, isCorrect, score: itemScore });
         }
-        // SHORT_ANSWER left as null (pending manual grading)
       }
 
       // Auto-grade PROBLEM items with source code

@@ -4,6 +4,7 @@ import {
   BadRequestException,
   ForbiddenException,
   ConflictException,
+  Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { BookingsService } from '../bookings/bookings.service';
@@ -12,15 +13,19 @@ import type { Prisma } from '@prisma/client';
 import type { CreatePracticeSessionDto, SubmitPracticeAnswerDto } from './dto/practice.dto';
 import { AuthorizationService } from '../common/authorization/authorization.service';
 import { RealtimeService } from '../realtime/realtime.service';
+import { GeminiShortAnswerGraderService } from '../common/ai/gemini-short-answer-grader.service';
 
 @Injectable()
 export class PracticeService {
+  private readonly logger = new Logger(PracticeService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly bookingsService: BookingsService,
     private readonly pointsService: PointsService,
     private readonly authorizationService: AuthorizationService,
     private readonly realtimeService: RealtimeService,
+    private readonly geminiShortAnswerGrader: GeminiShortAnswerGraderService,
   ) {}
 
   private async assertMonitoringPermission(userId: string, userRole: string, actionLabel: string) {
@@ -327,6 +332,7 @@ export class PracticeService {
 
       if (item.questionId && item.question) {
         let isCorrect = false;
+        let score = 0;
 
         if (item.question.questionType === 'SINGLE_CHOICE' || item.question.questionType === 'MULTIPLE_CHOICE') {
           const correctChoiceIds = item.question.choices.filter(c => c.isCorrect).map(c => c.id);
@@ -336,14 +342,42 @@ export class PracticeService {
             correctChoiceIds.length > 0 && 
             correctChoiceIds.length === selectedChoiceIds.length &&
             correctChoiceIds.every(id => selectedChoiceIds.includes(id));
+          score = isCorrect ? item.points : 0;
         } else if (item.question.questionType === 'SHORT_ANSWER') {
-          // Case-insensitive exact match
-          const expected = item.question.correctAnswer?.trim().toLowerCase() || '';
-          const actual = answer.textAnswer?.trim().toLowerCase() || '';
-          isCorrect = expected === actual && expected !== '';
-        }
+          const expected = item.question.correctAnswer?.trim() || '';
+          const actual = answer.textAnswer?.trim() || '';
 
-        const score = isCorrect ? item.points : 0;
+          if (expected && actual) {
+            const aiGrade = await this.geminiShortAnswerGrader.grade({
+              question: item.question.content,
+              referenceAnswer: expected,
+              studentAnswer: actual,
+              maxScore: item.points,
+              explanation: item.question.explanation,
+            });
+
+            if (aiGrade) {
+              isCorrect = aiGrade.isCorrect;
+              score = aiGrade.score;
+            } else {
+              const expectedNormalized = expected.toLowerCase();
+              const actualNormalized = actual.toLowerCase();
+              isCorrect = expectedNormalized === actualNormalized;
+              score = isCorrect ? item.points : 0;
+            }
+          } else {
+            const expectedNormalized = expected.toLowerCase();
+            const actualNormalized = actual.toLowerCase();
+            isCorrect = expectedNormalized === actualNormalized && expectedNormalized !== '';
+            score = isCorrect ? item.points : 0;
+          }
+
+          if (!expected) {
+            this.logger.warn(
+              `SHORT_ANSWER question ${item.question.id} has no reference answer; fallback scoring applied`,
+            );
+          }
+        }
         totalScore += score;
 
         await this.prisma.practiceSessionAnswer.update({

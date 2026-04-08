@@ -110,6 +110,11 @@ Use `.env.example` as reference and ensure these keys are set in `.env`:
 - `FACE_EMBEDDING_USE_MOCK=false`
 - `FACE_EMBEDDING_DIM=512`
 
+Optional (auto-grade SHORT_ANSWER with Gemini):
+
+- `GEMINI_API_KEY=your-gemini-api-key`
+- `GEMINI_MODEL=gemini-1.5-flash` (or `gemini-1.5-pro`)
+
 ### 2) Start embedding service (Docker)
 
 ```bash

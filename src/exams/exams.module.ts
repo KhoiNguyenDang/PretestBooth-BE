@@ -8,6 +8,7 @@ import { BookingsModule } from '../bookings/bookings.module';
 import { PointsModule } from '../points/points.module';
 import { AuthorizationModule } from '../common/authorization/authorization.module';
 import { RealtimeModule } from '../realtime/realtime.module';
+import { GeminiShortAnswerGraderService } from '../common/ai/gemini-short-answer-grader.service';
 
 @Module({
   imports: [
@@ -20,7 +21,7 @@ import { RealtimeModule } from '../realtime/realtime.module';
     RealtimeModule,
   ],
   controllers: [ExamsController],
-  providers: [ExamsService],
+  providers: [ExamsService, GeminiShortAnswerGraderService],
   exports: [ExamsService],
 })
 export class ExamsModule {}
