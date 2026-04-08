@@ -1173,6 +1173,7 @@ export class ExamsService {
       limit,
       subjectId,
       topicId,
+      type,
       difficulty,
       visibility,
       search,
@@ -1204,6 +1205,7 @@ export class ExamsService {
 
     if (subjectId) where.subjectId = subjectId;
     if (topicId) where.topicId = topicId;
+    if (type) where.type = type as QuestionClassification;
     if (difficulty) where.difficulty = difficulty as Difficulty;
     if (visibility && userRole !== 'STUDENT') where.visibility = visibility;
     if (minDuration !== undefined || maxDuration !== undefined) {

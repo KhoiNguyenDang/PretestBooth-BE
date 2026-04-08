@@ -6,6 +6,7 @@ export const QueryExamSchema = z
     limit: z.coerce.number().int().positive().max(100).default(10),
     subjectId: z.string().uuid().optional(),
     topicId: z.string().uuid().optional(),
+    type: z.enum(['PRACTICE', 'EXAM']).optional(),
     difficulty: z.enum(['EASY', 'MEDIUM', 'HARD']).optional(),
     visibility: z.enum(['PRIVATE', 'PUBLIC']).optional(),
     search: z.string().optional(),
