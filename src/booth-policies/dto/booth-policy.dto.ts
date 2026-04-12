@@ -3,6 +3,7 @@ import { z } from 'zod';
 export const BoothPolicyInputSchema = z.object({
   bookingMinDaysInAdvance: z.coerce.number().int().min(0).max(120),
   bookingMaxDaysInAdvance: z.coerce.number().int().min(1).max(365),
+  bookingCancellationCutoffHours: z.coerce.number().int().min(0).max(720),
   walkInPracticeEnabled: z.boolean(),
   warnBeforeNextExamMinutes: z.coerce.number().int().min(1).max(240),
   forceLogoutBeforeNextExamMinutes: z.coerce.number().int().min(0).max(240),

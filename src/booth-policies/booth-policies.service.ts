@@ -15,6 +15,7 @@ const BOOTH_POLICY_SETTING_KEY = 'BOOTH_POLICY_CONFIG';
 const DEFAULT_BOOTH_POLICY_CONFIG: BoothPolicyConfigDto = {
   bookingMinDaysInAdvance: 7,
   bookingMaxDaysInAdvance: 30,
+  bookingCancellationCutoffHours: 12,
   walkInPracticeEnabled: true,
   warnBeforeNextExamMinutes: 15,
   forceLogoutBeforeNextExamMinutes: 5,
@@ -48,13 +49,12 @@ export class BoothPoliciesService {
 
     try {
       const parsed = JSON.parse(rawValue);
-      const validated = BoothPolicyInputSchema.safeParse(parsed);
+      const validated = BoothPolicyInputSchema.partial().safeParse(parsed);
       if (!validated.success) {
         return null;
       }
 
-      this.validatePolicyConsistency(validated.data);
-      return validated.data;
+      return this.mergeWithDefault(validated.data);
     } catch {
       return null;
     }

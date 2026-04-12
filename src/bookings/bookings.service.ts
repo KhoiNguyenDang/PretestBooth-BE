@@ -799,6 +799,21 @@ export class BookingsService {
       throw new BadRequestException('Không thể hủy booking ở trạng thái này');
     }
 
+    if (userRole === 'STUDENT') {
+      const policy = await this.boothPoliciesService.getConfig();
+      const cutoffHours = policy.bookingCancellationCutoffHours;
+      const now = this.getNowInVietnamConvention();
+      const cancellationDeadline = new Date(
+        booking.startTime.getTime() - cutoffHours * 60 * 60 * 1000,
+      );
+
+      if (now > cancellationDeadline) {
+        throw new BadRequestException(
+          `Bạn chỉ có thể hủy lịch trước ${cutoffHours} giờ so với thời điểm bắt đầu`,
+        );
+      }
+    }
+
     return this.prisma.booking.update({
       where: { id: bookingId },
       data: { status: 'CANCELLED' },
