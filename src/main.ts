@@ -13,7 +13,7 @@ async function bootstrap() {
     origin: ['http://localhost:3001', 'http://localhost:3000', 'https://app.nguyen2207.io.vn', 'http://app.nguyen2207.io.vn'],
     credentials: true,
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-booth-client-id'],
   });
 
   app.useGlobalInterceptors(new TransformInterceptor(new Reflector()));
