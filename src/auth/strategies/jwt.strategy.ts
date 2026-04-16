@@ -1,10 +1,11 @@
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { PassportStrategy } from '@nestjs/passport';
-import { Injectable } from '@nestjs/common';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { PrismaService } from '../../prisma/prisma.service';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
-  constructor() {
+  constructor(private readonly prisma: PrismaService) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
@@ -13,12 +14,34 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   }
 
   async validate(payload: any) {
+    const isActivatedBoothContext = Boolean(payload?.isActivatedBoothContext);
+    const boothId = payload?.boothId || null;
+
+    if (isActivatedBoothContext) {
+      if (!boothId) {
+        throw new UnauthorizedException('Phiên kiosk không hợp lệ');
+      }
+
+      const booth = await this.prisma.booth.findUnique({
+        where: { id: boothId },
+        select: {
+          id: true,
+          status: true,
+          sessionTokenHash: true,
+        },
+      });
+
+      if (!booth || booth.status !== 'ACTIVE' || !booth.sessionTokenHash) {
+        throw new UnauthorizedException('Phiên kiosk đã hết hiệu lực');
+      }
+    }
+
     return {
       sub: payload.sub,
       role: payload.role,
-      isActivatedBoothContext: Boolean(payload?.isActivatedBoothContext),
+      isActivatedBoothContext,
       boothAccessMode: payload?.boothAccessMode || null,
-      boothId: payload?.boothId || null,
+      boothId,
     };
   }
 }
