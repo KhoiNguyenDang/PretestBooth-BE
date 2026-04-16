@@ -475,17 +475,33 @@ export class BoothsService {
         secret: this.getBoothSessionSecret(),
       },
     );
+    const sessionTokenHash = await bcrypt.hash(boothSessionToken, 10);
 
     await this.prisma.$transaction(async (tx) => {
-      await tx.booth.update({
-        where: { id: booth.id },
+      const claimed = await tx.booth.updateMany({
+        where: {
+          id: booth.id,
+          status: 'ACTIVE',
+          sessionTokenHash: null,
+          activationOtpUsedAt: null,
+          activationOtpHash: booth.activationOtpHash,
+          activationOtpExpiresAt: {
+            gte: activatedAt,
+          },
+        },
         data: {
           activationOtpUsedAt: activatedAt,
           activationOtpAttempts: 0,
-          sessionTokenHash: await bcrypt.hash(boothSessionToken, 10),
+          sessionTokenHash,
           sessionActivatedAt: activatedAt,
         },
       });
+
+      if (claimed.count === 0) {
+        throw new ConflictException(
+          'Booth đã được kích hoạt trên một thiết bị/trình duyệt khác. Vui lòng đăng xuất booth hiện tại trước khi kích hoạt lại',
+        );
+      }
 
       await this.appendBoothActivityLog(
         booth.id,
