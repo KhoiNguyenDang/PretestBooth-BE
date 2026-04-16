@@ -14,6 +14,7 @@ import type { CreatePracticeSessionDto, SubmitPracticeAnswerDto } from './dto/pr
 import { AuthorizationService } from '../common/authorization/authorization.service';
 import { RealtimeService } from '../realtime/realtime.service';
 import { GeminiShortAnswerGraderService } from '../common/ai/gemini-short-answer-grader.service';
+import { SubmissionsService } from '../submissions/submissions.service';
 
 @Injectable()
 export class PracticeService {
@@ -26,6 +27,7 @@ export class PracticeService {
     private readonly authorizationService: AuthorizationService,
     private readonly realtimeService: RealtimeService,
     private readonly geminiShortAnswerGrader: GeminiShortAnswerGraderService,
+    private readonly submissionsService: SubmissionsService,
   ) {}
 
   private async assertMonitoringPermission(userId: string, userRole: string, actionLabel: string) {
@@ -228,7 +230,21 @@ export class PracticeService {
             question: {
               include: { choices: { select: { id: true, content: true, order: true } } }, // Don't expose isCorrect
             },
-            problem: { select: { id: true, title: true, description: true, inputTypes: true, outputType: true, argNames: true, functionName: true, constraints: true, timeLimit: true, memoryLimit: true } },
+            problem: {
+              select: {
+                id: true,
+                title: true,
+                description: true,
+                inputTypes: true,
+                outputType: true,
+                argNames: true,
+                functionName: true,
+                constraints: true,
+                timeLimit: true,
+                memoryLimit: true,
+                starterCode: true,
+              },
+            },
             answers: true, // Previous answers if any
           },
         },
@@ -238,14 +254,65 @@ export class PracticeService {
     if (!session) throw new NotFoundException('Phiên luyện tập không tồn tại');
     if (session.userId !== userId) throw new ForbiddenException('Bạn không có quyền truy cập phiên này');
 
-    // Shuffle choices for MC questions deterministically or randomly (for practice let's just use random for now or keep original order)
-    (session as any).items.forEach(item => {
-      if (item.question && item.question.choices) {
-        item.question.choices.sort(() => 0.5 - Math.random());
-      }
+    const shouldShuffleChoices = session.status === 'IN_PROGRESS';
+
+    const submissionIds = session.items
+      .map((item) => item.answers?.submissionId)
+      .filter((id): id is string => Boolean(id));
+
+    const submissions =
+      submissionIds.length > 0
+        ? await this.prisma.submission.findMany({
+            where: { id: { in: submissionIds } },
+            select: {
+              id: true,
+              status: true,
+              passedTestCases: true,
+              failedTestCases: true,
+              totalTestCases: true,
+              executionTime: true,
+              compileOutput: true,
+              errorMessage: true,
+              testCaseResults: true,
+            },
+          })
+        : [];
+
+    const submissionMap = new Map(submissions.map((submission) => [submission.id, submission]));
+
+    const normalizedItems = session.items.map((item) => {
+      const normalizedQuestion = item.question
+        ? {
+            ...item.question,
+            choices: shouldShuffleChoices
+              ? [...item.question.choices].sort(() => 0.5 - Math.random())
+              : item.question.choices,
+          }
+        : null;
+
+      const answer = item.answers;
+      const answers = answer
+        ? [
+            {
+              ...answer,
+              submission: answer.submissionId
+                ? submissionMap.get(answer.submissionId) || null
+                : null,
+            },
+          ]
+        : [];
+
+      return {
+        ...item,
+        question: normalizedQuestion,
+        answers,
+      };
     });
 
-    return session;
+    return {
+      ...session,
+      items: normalizedItems,
+    };
   }
 
   /**
@@ -313,6 +380,12 @@ export class PracticeService {
         items: {
           include: {
             question: { include: { choices: true } },
+            problem: {
+              select: {
+                id: true,
+                title: true,
+              },
+            },
             answers: true,
           },
         },
@@ -325,7 +398,7 @@ export class PracticeService {
 
     let totalScore = 0;
 
-    // Grade MC and Short Answers (Problems require full execution, so they stay Ungraded for now)
+    // Auto-grade questions and programming problems.
     for (const item of session.items) {
       if (!item.answers) continue; // Unanswered
       const answer = item.answers;
@@ -389,6 +462,57 @@ export class PracticeService {
         await this.prisma.question.update({
           where: { id: item.questionId },
           data: { usageCount: { increment: 1 } }
+        });
+
+        continue;
+      }
+
+      if (item.problemId && item.problem) {
+        let isCorrect = false;
+        let score = 0;
+        let submissionId: string | null = null;
+
+        const sourceCode = answer.sourceCode?.trim();
+
+        if (sourceCode && answer.language) {
+          try {
+            const submission = await this.submissionsService.create(userId, {
+              language: answer.language,
+              version: answer.languageVersion || '*',
+              sourceCode,
+              problemId: item.problem.id,
+            });
+
+            const passRate =
+              submission.totalTestCases > 0
+                ? submission.passedTestCases / submission.totalTestCases
+                : 0;
+
+            score = Math.round(passRate * item.points * 100) / 100;
+            isCorrect = submission.status === 'ACCEPTED';
+            submissionId = submission.id;
+
+            this.logger.log(
+              `Auto-graded practice problem "${item.problem.title}" for session ${sessionId}, answer ${answer.id}: ${submission.status} (${submission.passedTestCases}/${submission.totalTestCases})`,
+            );
+          } catch (error) {
+            this.logger.error(
+              `Failed to auto-grade practice problem "${item.problem.title}" for session ${sessionId}, answer ${answer.id}: ${(error as Error).message}`,
+            );
+            isCorrect = false;
+            score = 0;
+          }
+        }
+
+        totalScore += score;
+
+        await this.prisma.practiceSessionAnswer.update({
+          where: { id: answer.id },
+          data: {
+            isCorrect,
+            score,
+            submissionId,
+          },
         });
       }
     }

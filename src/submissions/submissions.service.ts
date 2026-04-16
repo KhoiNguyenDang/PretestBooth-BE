@@ -50,11 +50,17 @@ export class SubmissionsService {
     });
 
     try {
+      const normalizedFunctionName =
+        typeof problem.functionName === 'string' && problem.functionName.trim().length > 0
+          ? problem.functionName.trim()
+          : 'solution';
+
       // Execute code against test cases
       const result = await this.executionService.executeWithTestCases({
         language: dto.language,
         version: dto.version,
         source: dto.sourceCode,
+        functionName: normalizedFunctionName,
         problemId: dto.problemId,
       });
 

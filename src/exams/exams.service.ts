@@ -1635,20 +1635,22 @@ export class ExamsService {
       create: {
         sessionId,
         examItemId: dto.examItemId,
-        selectedChoiceIds: dto.selectedChoiceIds || [],
-        textAnswer: dto.textAnswer || null,
-        submissionId: dto.submissionId || null,
-        sourceCode: dto.sourceCode || null,
-        language: dto.language || null,
-        languageVersion: dto.languageVersion || null,
+        selectedChoiceIds: dto.selectedChoiceIds ?? [],
+        textAnswer: dto.textAnswer ?? null,
+        submissionId: dto.submissionId ?? null,
+        sourceCode: dto.sourceCode ?? null,
+        language: dto.language ?? null,
+        languageVersion: dto.languageVersion ?? null,
       },
       update: {
-        selectedChoiceIds: dto.selectedChoiceIds || [],
-        textAnswer: dto.textAnswer || null,
-        submissionId: dto.submissionId || null,
-        sourceCode: dto.sourceCode || null,
-        language: dto.language || null,
-        languageVersion: dto.languageVersion || null,
+        ...(dto.selectedChoiceIds !== undefined ? { selectedChoiceIds: dto.selectedChoiceIds } : {}),
+        ...(dto.textAnswer !== undefined ? { textAnswer: dto.textAnswer } : {}),
+        ...(dto.submissionId !== undefined ? { submissionId: dto.submissionId } : {}),
+        ...(dto.sourceCode !== undefined ? { sourceCode: dto.sourceCode } : {}),
+        ...(dto.language !== undefined ? { language: dto.language } : {}),
+        ...(dto.languageVersion !== undefined
+          ? { languageVersion: dto.languageVersion }
+          : {}),
       },
     });
 
@@ -1673,10 +1675,10 @@ export class ExamsService {
     const session = await this.prisma.examSession.findUnique({
       where: { id: sessionId },
       include: {
-        exam: true,
-        answers: {
+        exam: {
           include: {
-            examItem: {
+            items: {
+              orderBy: { order: 'asc' },
               include: {
                 question: { include: { choices: true } },
                 problem: { include: { testCases: { orderBy: { order: 'asc' } } } },
@@ -1684,6 +1686,7 @@ export class ExamsService {
             },
           },
         },
+        answers: true,
       },
     });
 
@@ -1702,15 +1705,32 @@ export class ExamsService {
     // Auto-score MC questions + auto-grade coding problems
     let totalScore = 0;
     const failedAutoGradeItemIds = new Set<string>();
+    const answerByExamItemId = new Map(session.answers.map((answer) => [answer.examItemId, answer]));
+
     const answerUpdates: {
-      id: string;
-      isCorrect: boolean;
-      score: number;
-      submissionId?: string;
+      examItemId: string;
+      selectedChoiceIds: string[];
+      textAnswer: string | null;
+      sourceCode: string | null;
+      language: string | null;
+      languageVersion: string | null;
+      isCorrect: boolean | null;
+      score: number | null;
+      submissionId: string | null;
     }[] = [];
 
-    for (const answer of session.answers) {
-      const item = answer.examItem;
+    for (const item of session.exam.items) {
+      const answer = answerByExamItemId.get(item.id);
+      const selectedChoiceIds = answer?.selectedChoiceIds ?? [];
+      const textAnswer = answer?.textAnswer ?? null;
+      const sourceCode = answer?.sourceCode ?? null;
+      const language = answer?.language ?? null;
+      const languageVersion = answer?.languageVersion ?? null;
+      let resolvedLanguage = language;
+      let resolvedLanguageVersion = languageVersion;
+      let isCorrect: boolean | null = null;
+      let score: number | null = null;
+      let submissionId: string | null = answer?.submissionId ?? null;
 
       if (item.section === 'QUESTION' && item.question) {
         const question = item.question;
@@ -1725,121 +1745,181 @@ export class ExamsService {
             .map((c) => c.id)
             .sort();
 
-          const selectedIds = [...answer.selectedChoiceIds].sort();
+          const selectedIds = [...selectedChoiceIds].sort();
 
           // Check if arrays match
-          const isCorrect =
+          isCorrect =
             correctChoiceIds.length === selectedIds.length &&
             correctChoiceIds.every((id, idx) => id === selectedIds[idx]);
 
-          const itemScore = isCorrect ? item.points : 0;
-          totalScore += itemScore;
-
-          answerUpdates.push({ id: answer.id, isCorrect, score: itemScore });
+          score = isCorrect ? item.points : 0;
         } else if (question.questionType === 'SHORT_ANSWER') {
           const expected = question.correctAnswer?.trim() || '';
-          const actual = answer.textAnswer?.trim() || '';
+          const actual = textAnswer?.trim() || '';
 
           if (!actual) {
-            answerUpdates.push({ id: answer.id, isCorrect: false, score: 0 });
-            continue;
-          }
-
-          if (!expected) {
+            isCorrect = false;
+            score = 0;
+          } else if (!expected) {
             this.logger.warn(
-              `SHORT_ANSWER question ${question.id} has no reference answer; leaving answer ${answer.id} for manual grading`,
+              `SHORT_ANSWER question ${question.id} has no reference answer; leaving exam item ${item.id} for manual grading`,
             );
-            continue;
-          }
-
-          const aiGrade = await this.geminiShortAnswerGrader.grade({
-            question: question.content,
-            referenceAnswer: expected,
-            studentAnswer: actual,
-            maxScore: item.points,
-            explanation: question.explanation,
-          });
-
-          if (aiGrade) {
-            totalScore += aiGrade.score;
-            answerUpdates.push({
-              id: answer.id,
-              isCorrect: aiGrade.isCorrect,
-              score: aiGrade.score,
+          } else {
+            const aiGrade = await this.geminiShortAnswerGrader.grade({
+              question: question.content,
+              referenceAnswer: expected,
+              studentAnswer: actual,
+              maxScore: item.points,
+              explanation: question.explanation,
             });
-            continue;
+
+            if (aiGrade) {
+              isCorrect = aiGrade.isCorrect;
+              score = aiGrade.score;
+            } else {
+              const expectedNormalized = expected.toLowerCase();
+              const actualNormalized = actual.toLowerCase();
+              isCorrect = expectedNormalized === actualNormalized;
+              score = isCorrect ? item.points : 0;
+            }
+          }
+        }
+      }
+
+      // Auto-grade PROBLEM items with source code; unanswered/invalid code is marked incorrect.
+      if (item.section === 'PROBLEM' && item.problem) {
+        const normalizedSourceCode = sourceCode?.trim();
+        const normalizedLanguage = language?.trim();
+
+        if (normalizedSourceCode) {
+          const fallbackLanguage =
+            normalizedLanguage || Object.keys(item.problem.starterCode || {})[0] || 'javascript';
+          resolvedLanguage = fallbackLanguage;
+          if (!resolvedLanguageVersion) {
+            resolvedLanguageVersion = '*';
           }
 
-          const expectedNormalized = expected.toLowerCase();
-          const actualNormalized = actual.toLowerCase();
-          const isCorrect = expectedNormalized === actualNormalized;
-          const itemScore = isCorrect ? item.points : 0;
+          try {
+            this.logger.log(
+              `Auto-grading problem "${item.problem.title}" for session ${sessionId}, exam item ${item.id}`,
+            );
 
-          totalScore += itemScore;
-          answerUpdates.push({ id: answer.id, isCorrect, score: itemScore });
+            const submission = await this.submissionsService.create(userId, {
+              language: fallbackLanguage,
+              version: resolvedLanguageVersion || '*',
+              sourceCode: normalizedSourceCode,
+              problemId: item.problem.id,
+            });
+
+            const passRate =
+              submission.totalTestCases > 0
+                ? submission.passedTestCases / submission.totalTestCases
+                : 0;
+
+            score = Math.round(passRate * item.points * 100) / 100;
+            isCorrect = submission.status === 'ACCEPTED';
+            submissionId = submission.id;
+
+            this.logger.log(
+              `Auto-graded exam item ${item.id} with submission ${submission.id}: ${submission.status} (${submission.passedTestCases}/${submission.totalTestCases})`,
+            );
+          } catch (error) {
+            failedAutoGradeItemIds.add(item.id);
+            this.logger.error(
+              `Failed to auto-grade problem "${item.problem.title}" for session ${sessionId}, exam item ${item.id}: ${(error as Error).message}`,
+            );
+
+            // SubmissionsService may have persisted a failed submission before throwing.
+            const fallbackSubmission = await this.prisma.submission.findFirst({
+              where: {
+                userId,
+                problemId: item.problem.id,
+                sourceCode: normalizedSourceCode,
+              },
+              orderBy: { createdAt: 'desc' },
+              select: {
+                id: true,
+                status: true,
+                passedTestCases: true,
+                totalTestCases: true,
+              },
+            });
+
+            if (fallbackSubmission) {
+              const fallbackPassRate =
+                fallbackSubmission.totalTestCases > 0
+                  ? fallbackSubmission.passedTestCases / fallbackSubmission.totalTestCases
+                  : 0;
+              score = Math.round(fallbackPassRate * item.points * 100) / 100;
+              isCorrect = fallbackSubmission.status === 'ACCEPTED';
+              submissionId = fallbackSubmission.id;
+            } else {
+              isCorrect = false;
+              score = 0;
+              submissionId = null;
+            }
+          }
+        } else {
+          isCorrect = false;
+          score = 0;
+          submissionId = null;
         }
       }
 
-      // Auto-grade PROBLEM items with source code
-      if (item.section === 'PROBLEM' && item.problem && answer.sourceCode && answer.language) {
-        try {
-          this.logger.log(
-            `Auto-grading problem "${item.problem.title}" for session ${sessionId}, answer ${answer.id}`,
-          );
-
-          // Create a Submission record via SubmissionsService (runs code execution)
-          const submission = await this.submissionsService.create(userId, {
-            language: answer.language,
-            version: answer.languageVersion || '*',
-            sourceCode: answer.sourceCode,
-            problemId: item.problem.id,
-          });
-
-          const isAccepted = submission.status === 'ACCEPTED';
-          const passRate =
-            submission.totalTestCases > 0
-              ? submission.passedTestCases / submission.totalTestCases
-              : 0;
-          // Proportional scoring: passedTestCases / totalTestCases × points
-          const itemScore = Math.round(passRate * item.points * 100) / 100;
-
-          totalScore += itemScore;
-
-          answerUpdates.push({
-            id: answer.id,
-            isCorrect: isAccepted,
-            score: itemScore,
-            submissionId: submission.id,
-          });
-
-          this.logger.log(
-            `Auto-graded answer ${answer.id} with submission ${submission.id}: ${submission.status} (${submission.passedTestCases}/${submission.totalTestCases})`,
-          );
-        } catch (error) {
-          failedAutoGradeItemIds.add(answer.id);
-          this.logger.error(
-            `Failed to auto-grade problem "${item.problem.title}" for session ${sessionId}, answer ${answer.id}: ${(error as Error).message}`,
-          );
-          // Leave as null (pending manual grading) if execution fails
-        }
+      if (score !== null) {
+        totalScore += score;
       }
+
+      answerUpdates.push({
+        examItemId: item.id,
+        selectedChoiceIds,
+        textAnswer,
+        sourceCode,
+        language: resolvedLanguage,
+        languageVersion: resolvedLanguageVersion,
+        isCorrect,
+        score,
+        submissionId,
+      });
     }
 
     if (failedAutoGradeItemIds.size > 0) {
       this.logger.warn(
-        `Session ${sessionId} has ${failedAutoGradeItemIds.size} coding answer(s) pending manual grading due to execution failures`,
+        `Session ${sessionId} has ${failedAutoGradeItemIds.size} coding answer(s) falling back to incorrect due to execution failures`,
       );
     }
 
     // Update all answers and session in a transaction
     await this.prisma.$transaction(async (tx) => {
       for (const update of answerUpdates) {
-        await tx.examSessionAnswer.update({
-          where: { id: update.id },
-          data: {
+        await tx.examSessionAnswer.upsert({
+          where: {
+            sessionId_examItemId: {
+              sessionId,
+              examItemId: update.examItemId,
+            },
+          },
+          create: {
+            sessionId,
+            examItemId: update.examItemId,
+            selectedChoiceIds: update.selectedChoiceIds,
+            textAnswer: update.textAnswer,
+            sourceCode: update.sourceCode,
+            language: update.language,
+            languageVersion: update.languageVersion,
             isCorrect: update.isCorrect,
             score: update.score,
-            ...(update.submissionId ? { submissionId: update.submissionId } : {}),
+            submissionId: update.submissionId,
+          },
+          update: {
+            selectedChoiceIds: update.selectedChoiceIds,
+            textAnswer: update.textAnswer,
+            sourceCode: update.sourceCode,
+            language: update.language,
+            languageVersion: update.languageVersion,
+            isCorrect: update.isCorrect,
+            score: update.score,
+            submissionId: update.submissionId,
           },
         });
       }
@@ -1913,7 +1993,23 @@ export class ExamsService {
     const session = await this.prisma.examSession.findUnique({
       where: { id: sessionId },
       include: {
-        exam: true,
+        exam: {
+          include: {
+            items: {
+              orderBy: { order: 'asc' },
+              include: {
+                question: {
+                  include: {
+                    choices: {
+                      orderBy: { order: 'asc' },
+                    },
+                  },
+                },
+                problem: true,
+              },
+            },
+          },
+        },
         answers: {
           include: {
             examItem: {
@@ -1938,7 +2034,20 @@ export class ExamsService {
     // Lecturers/admin can review all sessions. Students can review only their own
     // sessions and may receive summary-only data when exam review is disabled.
     const isOwner = session.userId === userId;
-    const role = userRole || (isOwner ? 'STUDENT' : undefined);
+    let role = typeof userRole === 'string' ? userRole.toUpperCase() : undefined;
+
+    if (role !== 'ADMIN' && role !== 'LECTURER' && role !== 'STUDENT') {
+      const viewer = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { role: true },
+      });
+      role = viewer?.role || undefined;
+    }
+
+    if (!role && isOwner) {
+      role = 'STUDENT';
+    }
+
     const canViewAsLecturer = role === 'ADMIN' || role === 'LECTURER';
 
     if (!canViewAsLecturer && !(role === 'STUDENT' && isOwner)) {
@@ -1951,8 +2060,37 @@ export class ExamsService {
       ? null
       : 'Đề thi này không cho phép sinh viên xem chi tiết từng câu.';
 
-    const correctItems = session.answers.filter((i) => i.isCorrect === true).length;
-    const pendingItems = session.answers.filter((i) => i.isCorrect === null).length;
+    const examItems = session.exam.items || [];
+    const answerByExamItemId = new Map(session.answers.map((answer) => [answer.examItemId, answer]));
+
+    const resolveItemOutcome = (
+      examItem: (typeof examItems)[number],
+      answer: (typeof session.answers)[number] | undefined,
+    ) => {
+      if (examItem.section === 'PROBLEM') {
+        if (!answer) {
+          return { isCorrect: false as boolean | null, score: 0 as number | null };
+        }
+
+        if (answer.isCorrect === null) {
+          return { isCorrect: false as boolean | null, score: answer.score ?? 0 };
+        }
+      }
+
+      return {
+        isCorrect: answer?.isCorrect ?? null,
+        score: answer?.score ?? null,
+      };
+    };
+
+    const correctItems = examItems.filter(
+      (examItem) =>
+        resolveItemOutcome(examItem, answerByExamItemId.get(examItem.id)).isCorrect === true,
+    ).length;
+    const pendingItems = examItems.filter(
+      (examItem) =>
+        resolveItemOutcome(examItem, answerByExamItemId.get(examItem.id)).isCorrect === null,
+    ).length;
 
     const items: SessionResultItemDto[] = [];
 
@@ -1989,6 +2127,38 @@ export class ExamsService {
         .map((answer) => answer.submissionId)
         .filter((id): id is string => Boolean(id));
 
+      const missingSubmissionLookups = examItems
+        .map((examItem) => {
+          const answer = answerByExamItemId.get(examItem.id);
+
+          if (
+            examItem.section !== 'PROBLEM' ||
+            !examItem.problem ||
+            !answer?.sourceCode ||
+            answer.submissionId
+          ) {
+            return null;
+          }
+
+          const normalizedSourceCode = answer.sourceCode.trim();
+          if (!normalizedSourceCode) {
+            return null;
+          }
+
+          return {
+            key: `${examItem.problem.id}::${normalizedSourceCode}`,
+            problemId: examItem.problem.id,
+            sourceCode: normalizedSourceCode,
+          };
+        })
+        .filter((entry): entry is { key: string; problemId: string; sourceCode: string } =>
+          Boolean(entry),
+        );
+
+      const uniqueMissingLookups = Array.from(
+        new Map(missingSubmissionLookups.map((entry) => [entry.key, entry])).values(),
+      );
+
       const submissions =
         submissionIds.length > 0
           ? await this.prisma.submission.findMany({
@@ -2007,23 +2177,70 @@ export class ExamsService {
             })
           : [];
 
+      const recoveredCandidates =
+        uniqueMissingLookups.length > 0
+          ? await this.prisma.submission.findMany({
+              where: {
+                userId: session.userId,
+                OR: uniqueMissingLookups.map((entry) => ({
+                  problemId: entry.problemId,
+                  sourceCode: entry.sourceCode,
+                })),
+              },
+              select: {
+                id: true,
+                status: true,
+                passedTestCases: true,
+                failedTestCases: true,
+                totalTestCases: true,
+                executionTime: true,
+                compileOutput: true,
+                errorMessage: true,
+                testCaseResults: true,
+                problemId: true,
+                sourceCode: true,
+                createdAt: true,
+              },
+            })
+          : [];
+
+      const recoveredSubmissionByKey = new Map<string, (typeof recoveredCandidates)[number]>();
+
+      for (const candidate of recoveredCandidates) {
+        const key = `${candidate.problemId}::${candidate.sourceCode}`;
+        const existing = recoveredSubmissionByKey.get(key);
+
+        if (!existing || candidate.createdAt > existing.createdAt) {
+          recoveredSubmissionByKey.set(key, candidate);
+        }
+      }
+
       const submissionMap = new Map(submissions.map((submission) => [submission.id, submission]));
 
-      for (const answer of session.answers) {
-        const section = answer.examItem.section as 'QUESTION' | 'PROBLEM';
-        const selectedChoiceIds = answer.selectedChoiceIds ?? [];
-        const question = answer.examItem.question;
+      for (const recovered of recoveredSubmissionByKey.values()) {
+        submissionMap.set(recovered.id, recovered);
+      }
+
+      for (const examItem of examItems) {
+        const answer = answerByExamItemId.get(examItem.id);
+        const outcome = resolveItemOutcome(examItem, answer);
+        const section = examItem.section as 'QUESTION' | 'PROBLEM';
+        const selectedChoiceIds = answer?.selectedChoiceIds ?? [];
+        const question = examItem.question;
 
         const item = new SessionResultItemDto({
-          examItemId: answer.examItemId,
+          examItemId: examItem.id,
           section,
-          points: answer.examItem.points,
-          isCorrect: answer.isCorrect,
-          score: answer.score,
+          points: examItem.points,
+          isCorrect: outcome.isCorrect,
+          score: outcome.score,
           questionContent: question?.content,
-          problemTitle: answer.examItem.problem?.title,
+          problemTitle: examItem.problem?.title,
           selectedChoiceIds,
-          textAnswer: answer.textAnswer,
+          textAnswer: answer?.textAnswer ?? null,
+          sourceCode: answer?.sourceCode ?? null,
+          language: answer?.language ?? null,
+          languageVersion: answer?.languageVersion ?? null,
         });
 
         if (section === 'QUESTION' && question) {
@@ -2043,8 +2260,25 @@ export class ExamsService {
           );
         }
 
-        if (section === 'PROBLEM' && answer.submissionId) {
-          const submission = submissionMap.get(answer.submissionId);
+        let resolvedSubmissionId = answer?.submissionId ?? null;
+
+        if (
+          section === 'PROBLEM' &&
+          !resolvedSubmissionId &&
+          answer?.sourceCode &&
+          examItem.problem
+        ) {
+          const normalizedSourceCode = answer.sourceCode.trim();
+
+          if (normalizedSourceCode) {
+            resolvedSubmissionId =
+              recoveredSubmissionByKey.get(`${examItem.problem.id}::${normalizedSourceCode}`)
+                ?.id || null;
+          }
+        }
+
+        if (section === 'PROBLEM' && resolvedSubmissionId) {
+          const submission = submissionMap.get(resolvedSubmissionId);
 
           if (submission) {
             const rawTestCaseResults = submission.testCaseResults as unknown;
@@ -2106,7 +2340,7 @@ export class ExamsService {
       finishedAt: session.finishedAt,
       score: session.score,
       maxScore: session.maxScore,
-      totalItems: session.answers.length,
+      totalItems: examItems.length,
       correctItems,
       pendingItems,
       canViewItemDetails,

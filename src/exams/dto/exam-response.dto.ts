@@ -252,6 +252,9 @@ export class SessionResultItemDto {
   submission?: SessionResultSubmissionDto | null;
   selectedChoiceIds: string[];
   textAnswer: string | null;
+  sourceCode?: string | null;
+  language?: string | null;
+  languageVersion?: string | null;
 
   constructor(partial: Partial<SessionResultItemDto>) {
     Object.assign(this, partial);

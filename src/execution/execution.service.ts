@@ -323,7 +323,9 @@ export class ExecutionService implements OnModuleInit {
       inputTypes: dto.inputTypes,
     });
 
-    const actualOutput = result.stdout.trim();
+    const compileDetails = result.compileOutput?.trim() || '';
+    const stderrOutput = result.stderr?.trim() || compileDetails;
+    const actualOutput = (result.stdout?.trim() || compileDetails).trim();
     const expectedOutput = dto.expectedOutput.trim();
     const isCorrect = this.compareOutput(actualOutput, expectedOutput);
 
@@ -333,7 +335,7 @@ export class ExecutionService implements OnModuleInit {
       expectedOutput: expectedOutput,
       actualOutput: actualOutput,
       stdout: result.stdout,
-      stderr: result.stderr,
+      stderr: stderrOutput,
       isCorrect,
       isHidden: false,
       isSample: false,
