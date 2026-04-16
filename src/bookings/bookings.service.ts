@@ -63,10 +63,9 @@ export class BookingsService {
     return now >= earliestCheckIn && now <= latestCheckIn;
   }
 
-  // Project convention: booking/check-in timestamps are being stored/handled as Vietnam local wall-clock.
-  // Keep runtime "now" aligned with that convention to avoid -7h mismatches during comparisons.
+  // Use canonical server/database timeline (absolute timestamp).
   private getNowInVietnamConvention() {
-    return new Date(Date.now() + 7 * 60 * 60 * 1000);
+    return new Date();
   }
 
   private normalizeVietnamDayBoundary(input: Date) {
@@ -98,48 +97,26 @@ export class BookingsService {
     return date.toISOString().replace('T', ' ').slice(0, 19);
   }
 
-  private formatVnDateTime(date: Date) {
-    const parts = new Intl.DateTimeFormat('sv-SE', {
-      timeZone: 'Asia/Ho_Chi_Minh',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false,
-    }).formatToParts(date);
+  private formatServerLocalDateTime(date: Date) {
+    const pad = (value: number) => String(value).padStart(2, '0');
 
-    const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
-    return `${get('year')}-${get('month')}-${get('day')} ${get('hour')}:${get('minute')}:${get('second')}`;
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
   }
 
-  // Convert an absolute timestamp to a Date whose UTC clock matches Vietnam wall-clock.
-  // Example: 2026-04-10T00:00:00.000Z (07:00 VN) -> 2026-04-10T07:00:00.000Z
-  private toVietnamWallClockDate(input: Date) {
+  private getVietnamHourMinute(input: Date) {
     const parts = new Intl.DateTimeFormat('sv-SE', {
       timeZone: 'Asia/Ho_Chi_Minh',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
       hour: '2-digit',
       minute: '2-digit',
-      second: '2-digit',
       hour12: false,
     }).formatToParts(input);
 
     const getNumber = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? '0');
 
-    return new Date(
-      Date.UTC(
-        getNumber('year'),
-        getNumber('month') - 1,
-        getNumber('day'),
-        getNumber('hour'),
-        getNumber('minute'),
-        getNumber('second'),
-      ),
-    );
+    return {
+      hour: getNumber('hour'),
+      minute: getNumber('minute'),
+    };
   }
 
   /**
@@ -173,9 +150,13 @@ export class BookingsService {
     const policy = await this.boothPoliciesService.getConfig();
 
     const bookingDate = this.normalizeVietnamDayBoundary(new Date(dto.date));
-    const startTime = this.toVietnamWallClockDate(new Date(dto.startTime));
-    const endTime = this.toVietnamWallClockDate(new Date(dto.endTime));
+    const startTime = new Date(dto.startTime);
+    const endTime = new Date(dto.endTime);
     const now = this.normalizeVietnamDayBoundary(this.getNowInVietnamConvention());
+
+    if (Number.isNaN(bookingDate.getTime()) || Number.isNaN(startTime.getTime()) || Number.isNaN(endTime.getTime())) {
+      throw new BadRequestException('Thời gian booking không hợp lệ');
+    }
 
     // Rule 1: Booking date must be within policy range
     const minBookingDate = this.addDaysVietnam(now, policy.bookingMinDaysInAdvance);
@@ -193,10 +174,9 @@ export class BookingsService {
       );
     }
 
-    // Rule 2: Time slot must be within 7:00 - 17:00 (Vietnam wall-clock)
-    const startHour = startTime.getUTCHours();
-    const endHour = endTime.getUTCHours();
-    const endMinute = endTime.getUTCMinutes();
+    // Rule 2: Time slot must be within 7:00 - 17:00 in Vietnam local time.
+    const { hour: startHour } = this.getVietnamHourMinute(startTime);
+    const { hour: endHour, minute: endMinute } = this.getVietnamHourMinute(endTime);
 
     if (startHour < 7 || (endHour > 17 || (endHour === 17 && endMinute > 0))) {
       throw new BadRequestException('Khung giờ sử dụng booth: 7:00 - 17:00');
@@ -1114,17 +1094,16 @@ export class BookingsService {
           userId,
           boothId,
           type: { in: ['EXAM', 'PRACTICE'] },
-          status: { in: ['CONFIRMED', 'CHECKED_IN'] },
-          endTime: { gte: new Date(now.getTime() - 24 * 60 * 60 * 1000) },
+          status: 'CONFIRMED',
+          startTime: { gte: new Date(now.getTime() - earlyMs) },
+          endTime: { gte: now },
         },
         orderBy: { startTime: 'asc' },
       });
 
       if (upcomingSameBooth) {
-        const startLabel = this.formatUtcDateTime(upcomingSameBooth.startTime);
-        const endLabel = this.formatUtcDateTime(upcomingSameBooth.endTime);
-        const startLabelVn = this.formatVnDateTime(upcomingSameBooth.startTime);
-        const endLabelVn = this.formatVnDateTime(upcomingSameBooth.endTime);
+        const startLabel = this.formatServerLocalDateTime(upcomingSameBooth.startTime);
+        const endLabel = this.formatServerLocalDateTime(upcomingSameBooth.endTime);
         const earliestCheckIn = new Date(
           upcomingSameBooth.startTime.getTime() - this.getCheckInEarlyMinutes() * 60 * 1000,
         );
@@ -1134,18 +1113,18 @@ export class BookingsService {
 
         if (now < earliestCheckIn) {
           throw new ForbiddenException(
-            `Chưa đến giờ check-in. Mở check-in từ UTC ${this.formatUtcDateTime(earliestCheckIn)} (VN ${this.formatVnDateTime(earliestCheckIn)}). Lịch của bạn: UTC ${startLabel} - ${endLabel} (VN ${startLabelVn} - ${endLabelVn}). Hiện tại: UTC ${this.formatUtcDateTime(now)} (VN ${this.formatVnDateTime(now)}).`,
+            `Chưa đến giờ check-in. Mở check-in từ ${this.formatServerLocalDateTime(earliestCheckIn)}. Lịch của bạn: ${startLabel} - ${endLabel}. Hiện tại: ${this.formatServerLocalDateTime(now)}.`,
           );
         }
 
         if (now > latestCheckIn) {
           throw new ForbiddenException(
-            `Đã quá giờ check-in. Khung check-in kết thúc UTC ${this.formatUtcDateTime(latestCheckIn)} (VN ${this.formatVnDateTime(latestCheckIn)}). Lịch của bạn: UTC ${startLabel} - ${endLabel} (VN ${startLabelVn} - ${endLabelVn}).`,
+            `Đã quá giờ check-in. Khung check-in kết thúc ${this.formatServerLocalDateTime(latestCheckIn)}. Lịch của bạn: ${startLabel} - ${endLabel}.`,
           );
         }
 
         throw new ForbiddenException(
-          `Không nằm trong khung giờ check-in. Lịch gần nhất của bạn: UTC ${startLabel} - ${endLabel} (VN ${startLabelVn} - ${endLabelVn}). Hiện tại: UTC ${this.formatUtcDateTime(now)} (VN ${this.formatVnDateTime(now)}).`,
+          `Không nằm trong khung giờ check-in. Lịch gần nhất của bạn: ${startLabel} - ${endLabel}. Hiện tại: ${this.formatServerLocalDateTime(now)}.`,
         );
       }
 
@@ -1178,16 +1157,7 @@ export class BookingsService {
       return booking;
     }
 
-    return this.prisma.booking.findFirst({
-      where: {
-        userId,
-        type,
-        status: 'CHECKED_IN',
-        checkedOutAt: null,
-        endTime: { gte: new Date(now.getTime() - 12 * 60 * 60 * 1000) },
-      },
-      orderBy: { checkedInAt: 'desc' },
-    });
+    return null;
   }
 
   /**
@@ -1215,7 +1185,8 @@ export class BookingsService {
           status: 'CHECKED_IN',
           checkedOutAt: null,
           type: { not: type },
-          endTime: { gte: new Date(now.getTime() - 12 * 60 * 60 * 1000) },
+          startTime: { lte: now },
+          endTime: { gte: now },
         },
         orderBy: { checkedInAt: 'desc' },
       });
@@ -1226,23 +1197,6 @@ export class BookingsService {
         throw new ForbiddenException(
           `Bạn đã check-in ca ${currentTypeLabel}. Vui lòng vào đúng module ${currentTypeLabel}, hoặc check-in lại lịch ${targetTypeLabel}.`,
         );
-      }
-
-      // Fallback: in case of mixed timezone conventions in legacy data,
-      // still allow a checked-in session if it has not been checked out and its endTime is near/future.
-      const checkedInFallback = await this.prisma.booking.findFirst({
-        where: {
-          userId,
-          type,
-          status: 'CHECKED_IN',
-          checkedOutAt: null,
-          endTime: { gte: new Date(now.getTime() - 12 * 60 * 60 * 1000) },
-        },
-        orderBy: { checkedInAt: 'desc' },
-      });
-
-      if (checkedInFallback) {
-        return checkedInFallback;
       }
 
       throw new ForbiddenException(

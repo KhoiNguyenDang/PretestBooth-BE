@@ -14,6 +14,8 @@ export class PrismaService
       ssl: {
         rejectUnauthorized: false,
       },
+      // Keep DB session in UTC so timestamptz values are parsed consistently.
+      options: '-c timezone=UTC',
     });
 
     super({

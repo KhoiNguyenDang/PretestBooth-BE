@@ -126,7 +126,7 @@ export class CheckinService {
   }
 
   private getNowInVietnamConvention() {
-    return new Date(Date.now() + 7 * 60 * 60 * 1000);
+    return new Date();
   }
 
   private isWithinCheckInWindow(startTime: Date, endTime: Date, now: Date) {

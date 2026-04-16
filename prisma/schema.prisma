@@ -397,13 +397,13 @@ model ExamSession {
   appliedPassingScoreAbsolute Float?
   passed          Boolean?
   seed            Int
-  startedAt       DateTime            @default(now())
-  finishedAt      DateTime?
+  startedAt       DateTime            @default(now()) @db.Timestamptz(3)
+  finishedAt      DateTime?           @db.Timestamptz(3)
   score           Float?
   maxScore        Float?
   status          ExamSessionStatus   @default(IN_PROGRESS)
-  createdAt       DateTime            @default(now())
-  expiresAt       DateTime            @default(now())
+  createdAt       DateTime            @default(now()) @db.Timestamptz(3)
+  expiresAt       DateTime            @default(now()) @db.Timestamptz(3)
   exam            Exam                @relation(fields: [examId], references: [id], onDelete: Cascade)
   user            User                @relation(fields: [userId], references: [id], onDelete: Cascade)
   booking         Booking?            @relation("ExamSessionBooking", fields: [bookingId], references: [id], onDelete: SetNull)
@@ -466,14 +466,14 @@ model Booth {
   description            String?
   status                 BoothStatus      @default(ACTIVE)
   location               String?
-  createdAt              DateTime         @default(now())
-  updatedAt              DateTime         @updatedAt
+  createdAt              DateTime         @default(now()) @db.Timestamptz(3)
+  updatedAt              DateTime         @updatedAt @db.Timestamptz(3)
   activationOtpAttempts  Int              @default(0)
-  activationOtpExpiresAt DateTime?
+  activationOtpExpiresAt DateTime?        @db.Timestamptz(3)
   activationOtpHash      String?
-  activationOtpUsedAt    DateTime?
+  activationOtpUsedAt    DateTime?        @db.Timestamptz(3)
   code                   String?          @unique
-  sessionActivatedAt     DateTime?
+  sessionActivatedAt     DateTime?        @db.Timestamptz(3)
   sessionTokenHash       String?
   bookings               Booking[]
   statusLogs             BoothStatusLog[]
@@ -488,7 +488,7 @@ model BoothStatusLog {
   toStatus        BoothStatus
   note            String
   changedByUserId String?
-  changedAt       DateTime    @default(now())
+  changedAt       DateTime    @default(now()) @db.Timestamptz(3)
   booth           Booth       @relation(fields: [boothId], references: [id], onDelete: Cascade)
   changedByUser   User?       @relation(fields: [changedByUserId], references: [id])
 
@@ -526,17 +526,17 @@ model Booking {
   boothId           String
   type              BookingType
   date              DateTime      @db.Date
-  startTime         DateTime
-  endTime           DateTime
+  startTime         DateTime      @db.Timestamptz(3)
+  endTime           DateTime      @db.Timestamptz(3)
   durationMinutes   Int
   bufferMinutes     Int           @default(15)
   status            BookingStatus @default(PENDING)
-  checkedInAt       DateTime?
-  checkedOutAt      DateTime?
+  checkedInAt       DateTime?     @db.Timestamptz(3)
+  checkedOutAt      DateTime?     @db.Timestamptz(3)
   checkinStatus         CheckinStatus @default(PENDING)
   checkinSimilarityScore Float?
   checkinThreshold      Float         @default(0.6)
-  checkinVerifiedAt     DateTime?
+  checkinVerifiedAt     DateTime? @db.Timestamptz(3)
   checkinAttemptCount   Int           @default(0)
   
   // Relations - exam/practice sessions that reference this booking
@@ -544,8 +544,8 @@ model Booking {
   practiceSessions  PracticeSession[]  @relation("PracticeSessionBooking")
   checkinAttempts   BookingCheckinAttempt[]
   
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
+  createdAt    DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime      @updatedAt @db.Timestamptz(3)
   
   booth   Booth @relation(fields: [boothId], references: [id])
   user    User  @relation(fields: [userId], references: [id])
@@ -568,7 +568,7 @@ model BookingCheckinAttempt {
   livenessPassed  Boolean  @default(true)
   failReason      String?
   verifierDeviceId String?
-  createdAt       DateTime @default(now())
+  createdAt       DateTime @default(now()) @db.Timestamptz(3)
   booking         Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
   user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -585,7 +585,7 @@ model PointTransaction {
   reason        String
   bookingId     String?
   examSessionId String?
-  createdAt     DateTime  @default(now())
+  createdAt     DateTime  @default(now()) @db.Timestamptz(3)
   user          User      @relation(fields: [userId], references: [id])
 
   @@index([userId])
@@ -610,7 +610,7 @@ model ProctoringEvent {
   warningLevel Int         @default(1)  // 1 = mild warning, 2 = severe, 3 = exam cancelled
   metadata     Json?       // Additional event data
   
-  timestamp    DateTime    @default(now())
+  timestamp    DateTime    @default(now()) @db.Timestamptz(3)
   
   @@index([examSessionId])
   @@index([practiceSessionId])
@@ -628,12 +628,12 @@ model PracticeSession {
   subjectId  String?
   topicId    String?
   categoryId String?
-  startedAt  DateTime              @default(now())
-  finishedAt DateTime?
+  startedAt  DateTime              @default(now()) @db.Timestamptz(3)
+  finishedAt DateTime?             @db.Timestamptz(3)
   score      Float?
   maxScore   Float?
   status     PracticeSessionStatus @default(IN_PROGRESS)
-  createdAt  DateTime              @default(now())
+  createdAt  DateTime              @default(now()) @db.Timestamptz(3)
   user       User                  @relation(fields: [userId], references: [id])
   booking    Booking?              @relation("PracticeSessionBooking", fields: [bookingId], references: [id], onDelete: SetNull)
   items      PracticeSessionItem[]
