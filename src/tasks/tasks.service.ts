@@ -86,7 +86,7 @@ export class TasksService {
     const noShowResult = await this.bookingsService.autoMarkNoShowAndApplyPenalty();
     if (noShowResult.markedCount > 0) {
       this.logger.log(
-        `Auto marked ${noShowResult.markedCount} booking(s) as NO_SHOW and applied ${noShowResult.penalizedCount} penalty transaction(s).`,
+        `Auto marked ${noShowResult.markedCount} booking(s) as ABSENT and applied ${noShowResult.penalizedCount} penalty transaction(s).`,
       );
     }
   }

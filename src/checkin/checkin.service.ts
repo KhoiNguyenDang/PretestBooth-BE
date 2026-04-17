@@ -165,7 +165,7 @@ export class CheckinService {
       throw new ForbiddenException('Bạn không có quyền xác thực check-in cho booking này');
     }
 
-    if (!['CONFIRMED', 'CHECKED_IN'].includes(booking.status)) {
+    if (!['CONFIRM', 'CHECKED_IN'].includes(booking.status)) {
       throw new BadRequestException('Booking không ở trạng thái cho phép check-in');
     }
 
@@ -225,7 +225,7 @@ export class CheckinService {
         checkinAttemptCount: { increment: 1 },
         ...(!matched && booking.status === 'CHECKED_IN'
           ? {
-              status: 'CONFIRMED',
+              status: 'CONFIRM',
               checkedInAt: null,
             }
           : {}),

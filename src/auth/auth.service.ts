@@ -189,7 +189,7 @@ export class AuthService {
       const bookingForFreshCheckin = await this.prisma.booking.update({
         where: { id: bookingForCheckin.id },
         data: {
-          status: 'CONFIRMED',
+          status: 'CONFIRM',
           checkedInAt: null,
           checkinStatus: 'PENDING',
           checkinSimilarityScore: null,

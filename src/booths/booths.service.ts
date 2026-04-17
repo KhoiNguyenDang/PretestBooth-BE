@@ -328,7 +328,7 @@ export class BoothsService {
     const busyBoothIds = await this.prisma.booking.findMany({
       where: {
         date,
-        status: { in: ['PENDING', 'CONFIRMED', 'CHECKED_IN'] },
+        status: { in: ['CONFIRM', 'CHECKED_IN'] },
         OR: [
           { startTime: { lt: endTime }, endTime: { gt: startTime } },
         ],

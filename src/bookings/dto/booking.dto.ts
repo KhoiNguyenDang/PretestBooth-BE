@@ -13,7 +13,7 @@ export type CreateBookingDto = z.output<typeof CreateBookingSchema>;
 export const QueryBookingSchema = z.object({
   page: z.coerce.number().int().positive().default(1),
   limit: z.coerce.number().int().positive().max(50).default(10),
-  status: z.enum(['PENDING', 'CONFIRMED', 'CHECKED_IN', 'COMPLETED', 'CANCELLED', 'NO_SHOW']).optional(),
+  status: z.enum(['CONFIRM', 'CHECKED_IN', 'COMPLETED', 'CANCEL', 'ABSENT']).optional(),
   type: z.enum(['PRACTICE', 'EXAM']).optional(),
   date: z.string().optional(),
   sortOrder: z.enum(['asc', 'desc']).default('desc'),

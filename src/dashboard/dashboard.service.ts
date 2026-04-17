@@ -19,7 +19,7 @@ export class DashboardService {
       this.prisma.examSession.count({ where: { userId, status: 'SUBMITTED' } }), // GRADED or SUBMITTED
       this.prisma.practiceSession.count({ where: { userId, status: 'COMPLETED' } }),
       this.prisma.booking.findMany({
-        where: { userId, date: { gte: new Date() }, status: { in: ['CONFIRMED', 'PENDING'] } },
+        where: { userId, date: { gte: new Date() }, status: 'CONFIRM' },
         orderBy: { startTime: 'asc' },
         take: 5,
         include: { booth: { select: { name: true } } },

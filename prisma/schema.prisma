@@ -530,7 +530,7 @@ model Booking {
   endTime           DateTime      @db.Timestamptz(3)
   durationMinutes   Int
   bufferMinutes     Int           @default(15)
-  status            BookingStatus @default(PENDING)
+  status            BookingStatus @default(CONFIRM)
   checkedInAt       DateTime?     @db.Timestamptz(3)
   checkedOutAt      DateTime?     @db.Timestamptz(3)
   checkinStatus         CheckinStatus @default(PENDING)
@@ -768,12 +768,11 @@ enum BookingType {
 }
 
 enum BookingStatus {
-  PENDING
-  CONFIRMED
+  CONFIRM
   CHECKED_IN
   COMPLETED
-  CANCELLED
-  NO_SHOW
+  CANCEL
+  ABSENT
 }
 
 enum KycStatus {
