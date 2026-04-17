@@ -86,7 +86,7 @@ export class BookingsService {
       where: {
         boothId,
         type: 'EXAM',
-        status: { in: ['CONFIRMED', 'CHECKED_IN'] },
+        status: { in: ['CONFIRM', 'CHECKED_IN'] },
         endTime: { gte: now },
       },
       orderBy: { startTime: 'asc' },
@@ -233,7 +233,7 @@ export class BookingsService {
       where: {
         userId,
         date: bookingDate,
-        status: { in: ['PENDING', 'CONFIRMED', 'CHECKED_IN'] },
+        status: { in: ['CONFIRM', 'CHECKED_IN'] },
         OR: [
           { startTime: { lt: gapCheckEnd }, endTime: { gt: gapCheckStart } },
         ],
@@ -258,7 +258,7 @@ export class BookingsService {
       where: {
         boothId: dto.boothId,
         date: bookingDate,
-        status: { in: ['PENDING', 'CONFIRMED', 'CHECKED_IN'] },
+        status: { in: ['CONFIRM', 'CHECKED_IN'] },
         startTime: { lt: endTime },
         endTime: { gt: startTime },
       },
@@ -273,7 +273,7 @@ export class BookingsService {
     const concurrentBookings = await this.prisma.booking.count({
       where: {
         date: bookingDate,
-        status: { in: ['PENDING', 'CONFIRMED', 'CHECKED_IN'] },
+        status: { in: ['CONFIRM', 'CHECKED_IN'] },
         startTime: { lt: endTime },
         endTime: { gt: startTime },
       },
@@ -296,7 +296,7 @@ export class BookingsService {
         endTime,
         durationMinutes: Math.round(durationMin),
         bufferMinutes: 15, // Fixed 15 min gap between consecutive sessions
-        status: 'CONFIRMED',
+        status: 'CONFIRM',
       },
       include: {
         booth: { select: { id: true, name: true, location: true } },
@@ -319,7 +319,15 @@ export class BookingsService {
 
     if (status) where.status = status as BookingStatus;
     if (type) where.type = type as BookingType;
-    if (date) where.date = new Date(date);
+    if (date) {
+      const dayStart = this.normalizeVietnamDayBoundary(new Date(date));
+      const dayEnd = this.addDaysVietnam(dayStart, 1);
+
+      where.AND = [
+        { startTime: { lt: dayEnd } },
+        { endTime: { gte: dayStart } },
+      ];
+    }
 
     const [bookings, total] = await Promise.all([
       this.prisma.booking.findMany({
@@ -720,6 +728,8 @@ export class BookingsService {
     }
 
     const normalizedDateStr = date.toISOString().slice(0, 10);
+    const dayStart = date;
+    const dayEnd = this.addDaysVietnam(date, 1);
     const activeBooths = await this.prisma.booth.findMany({
       where: { status: 'ACTIVE' },
     });
@@ -727,8 +737,9 @@ export class BookingsService {
     // Get all bookings for this date
     const bookings = await this.prisma.booking.findMany({
       where: {
-        date,
-        status: { in: ['PENDING', 'CONFIRMED', 'CHECKED_IN'] },
+        startTime: { lt: dayEnd },
+        endTime: { gte: dayStart },
+        status: { in: ['CONFIRM', 'CHECKED_IN'] },
       },
       include: {
         booth: { select: { id: true, name: true } },
@@ -775,7 +786,7 @@ export class BookingsService {
       throw new ForbiddenException('Bạn không có quyền hủy booking này');
     }
 
-    if (!['PENDING', 'CONFIRMED'].includes(booking.status)) {
+    if (booking.status !== 'CONFIRM') {
       throw new BadRequestException('Không thể hủy booking ở trạng thái này');
     }
 
@@ -796,7 +807,7 @@ export class BookingsService {
 
     return this.prisma.booking.update({
       where: { id: bookingId },
-      data: { status: 'CANCELLED' },
+      data: { status: 'CANCEL' },
     });
   }
 
@@ -898,7 +909,7 @@ export class BookingsService {
 
     let nextExamBooking = await this.findNextExamBookingForBooth(boothId, now);
 
-    if (nextExamBooking && nextExamBooking.status === 'CONFIRMED') {
+    if (nextExamBooking && nextExamBooking.status === 'CONFIRM') {
       const noShowGraceTime = new Date(
         nextExamBooking.startTime.getTime() + policy.noShowGraceMinutes * 60 * 1000,
       );
@@ -1037,7 +1048,7 @@ export class BookingsService {
         userId,
         boothId,
         type: { in: ['EXAM', 'PRACTICE'] },
-        status: { in: ['CONFIRMED', 'CHECKED_IN'] },
+        status: { in: ['CONFIRM', 'CHECKED_IN'] },
         startTime: { lte: new Date(now.getTime() + earlyMs) },
         endTime: { gte: new Date(now.getTime() - lateMs) },
       },
@@ -1057,7 +1068,7 @@ export class BookingsService {
         where: {
           userId,
           type: { in: ['EXAM', 'PRACTICE'] },
-          status: { in: ['CONFIRMED', 'CHECKED_IN'] },
+          status: { in: ['CONFIRM', 'CHECKED_IN'] },
           startTime: { lte: new Date(now.getTime() + earlyMs) },
           endTime: { gte: new Date(now.getTime() - lateMs) },
         },
@@ -1094,7 +1105,7 @@ export class BookingsService {
           userId,
           boothId,
           type: { in: ['EXAM', 'PRACTICE'] },
-          status: 'CONFIRMED',
+          status: 'CONFIRM',
           startTime: { gte: new Date(now.getTime() - earlyMs) },
           endTime: { gte: now },
         },
@@ -1261,7 +1272,7 @@ export class BookingsService {
   }
 
   /**
-   * Mark expired confirmed bookings as NO_SHOW and apply penalty points.
+   * Mark expired confirmed bookings as ABSENT and apply penalty points.
    */
   private async markBookingNoShowAndApplyPenalty(booking: {
     id: string;
@@ -1273,9 +1284,9 @@ export class BookingsService {
     const updateResult = await this.prisma.booking.updateMany({
       where: {
         id: booking.id,
-        status: 'CONFIRMED',
+        status: 'CONFIRM',
       },
-      data: { status: 'NO_SHOW' },
+      data: { status: 'ABSENT' },
     });
 
     if (updateResult.count === 0) {
@@ -1313,7 +1324,7 @@ export class BookingsService {
 
     const noShowCandidates = await this.prisma.booking.findMany({
       where: {
-        status: 'CONFIRMED',
+        status: 'CONFIRM',
         OR: [
           { endTime: { lt: now } },
           {
