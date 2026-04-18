@@ -1762,8 +1762,10 @@ export class ExamsService {
             score = 0;
           } else if (!expected) {
             this.logger.warn(
-              `SHORT_ANSWER question ${question.id} has no reference answer; leaving exam item ${item.id} for manual grading`,
+              `SHORT_ANSWER question ${question.id} has no reference answer; falling back to incorrect score for exam item ${item.id}`,
             );
+            isCorrect = false;
+            score = 0;
           } else {
             const aiGrade = await this.geminiShortAnswerGrader.grade({
               question: question.content,

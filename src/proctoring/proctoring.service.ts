@@ -57,9 +57,9 @@ export class ProctoringService {
       };
     }
 
-    // Special handling for TAB_SWITCH on EXAM sessions
+    // Special handling for TAB_SWITCH on EXAM sessions: warning only, no forced submit.
     if (isExamSession && dto.eventType === 'TAB_SWITCH') {
-      return await this.handleExamTabSwitch(examSession as any, userId);
+      return await this.handleExamTabSwitchWarning(examSession as any, userId);
     }
 
     // For other events, continue with normal proctoring logic
@@ -139,25 +139,15 @@ export class ProctoringService {
   }
 
   /**
-   * Handle TAB_SWITCH for EXAM sessions: Immediate termination
+   * Handle TAB_SWITCH for EXAM sessions: warning only.
    */
-  private async handleExamTabSwitch(examSession: any, userId: string) {
-    // Immediately terminate exam due to TAB_SWITCH violation
-    await this.prisma.examSession.update({
-      where: { id: examSession.id },
-      data: {
-        status: 'SUBMITTED',
-        finishedAt: new Date(),
-        score: 0, // Zero score for cheating
-      },
-    });
-
-    // Create violation event
+  private async handleExamTabSwitchWarning(examSession: any, userId: string) {
+    // Create warning event only. Do not terminate or deduct points.
     const examTabSwitchEventData: any = {
       userId,
       examSessionId: examSession.id,
       eventType: 'TAB_SWITCH',
-      warningLevel: 10, // Immediate termination
+      warningLevel: 1,
       metadata: { reason: 'Học sinh chuyển tab trong kỳ thi' } as Prisma.InputJsonValue,
     };
 
@@ -165,18 +155,15 @@ export class ProctoringService {
       data: examTabSwitchEventData,
     });
 
-    // Deduct points for exam violation
-    await this.pointsService.addTransaction(
-      userId,
-      'EXAM_CANCELLED_PENALTY',
-      -20,
-      'Bài thi bị hủy do chuyển tab/rời khỏi màn hình thi',
-      { examSessionId: examSession.id },
-    );
+    const totalSeverity = await this.prisma.proctoringEvent.aggregate({
+      where: { examSessionId: examSession.id },
+      _sum: { warningLevel: true },
+    });
 
     return {
       eventId: event.id,
-      actionTaken: 'EXAM_TERMINATED_TAB_SWITCH',
+      totalSeverity: totalSeverity._sum.warningLevel || 0,
+      actionTaken: 'LOGGED',
       sessionType: 'EXAM',
     };
   }

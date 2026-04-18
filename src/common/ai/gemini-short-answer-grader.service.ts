@@ -25,81 +25,113 @@ export interface ShortAnswerGradeResult {
 @Injectable()
 export class GeminiShortAnswerGraderService {
   private readonly logger = new Logger(GeminiShortAnswerGraderService.name);
+  private static readonly REQUEST_TIMEOUT_MS = 15_000;
 
   constructor(private readonly configService: ConfigService) {}
 
   isConfigured(): boolean {
-    return Boolean(this.configService.get<string>('GEMINI_API_KEY'));
+    return Boolean(this.getApiKey());
   }
 
   async grade(input: GradeShortAnswerInput): Promise<ShortAnswerGradeResult | null> {
-    const apiKey = this.configService.get<string>('GEMINI_API_KEY');
+    const apiKey = this.getApiKey();
     if (!apiKey) {
+      this.logger.warn('Gemini short-answer grader is disabled because GEMINI_API_KEY/GOOGLE_API_KEY is missing');
       return null;
     }
 
-    const model = this.configService.get<string>('GEMINI_MODEL') || 'gemini-1.5-flash';
-
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+    const modelCandidates = this.getModelCandidates();
     const prompt = this.buildPrompt(input);
 
-    try {
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          contents: [
-            {
-              role: 'user',
-              parts: [{ text: prompt }],
-            },
-          ],
-          generationConfig: {
-            temperature: 0.1,
-            responseMimeType: 'application/json',
+    for (const model of modelCandidates) {
+      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), GeminiShortAnswerGraderService.REQUEST_TIMEOUT_MS);
+
+      try {
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
           },
-        }),
-      });
+          signal: controller.signal,
+          body: JSON.stringify({
+            contents: [
+              {
+                role: 'user',
+                parts: [{ text: prompt }],
+              },
+            ],
+            generationConfig: {
+              temperature: 0.1,
+              responseMimeType: 'application/json',
+            },
+          }),
+        });
 
-      if (!response.ok) {
-        const errorBody = await response.text();
+        if (!response.ok) {
+          const errorBody = await response.text();
+          this.logger.warn(
+            `Gemini grading request failed for model ${model} (${response.status}): ${errorBody.slice(0, 200)}`,
+          );
+          continue;
+        }
+
+        const payload = await response.json();
+        const text = this.extractTextResponse(payload);
+        if (!text) {
+          this.logger.warn(
+            `Gemini response has no text content for short answer grading (model=${model})`,
+          );
+          continue;
+        }
+
+        const parsed = this.parseGradePayload(text);
+        if (!parsed) {
+          this.logger.warn(`Gemini response JSON parse failed for short answer grading (model=${model})`);
+          continue;
+        }
+
+        const clampedScore = this.clampScore(parsed.score, input.maxScore);
+        const isCorrect =
+          typeof parsed.isCorrect === 'boolean' ? parsed.isCorrect : clampedScore >= input.maxScore;
+
+        return {
+          score: clampedScore,
+          isCorrect,
+          rationale: parsed.rationale,
+          model,
+        };
+      } catch (error) {
         this.logger.warn(
-          `Gemini grading request failed (${response.status}): ${errorBody.slice(0, 200)}`,
+          `Gemini short answer grading failed for model ${model}: ${(error as Error)?.message ?? 'unknown error'}`,
         );
-        return null;
+      } finally {
+        clearTimeout(timeout);
       }
-
-      const payload = await response.json();
-      const text = this.extractTextResponse(payload);
-      if (!text) {
-        this.logger.warn('Gemini response has no text content for short answer grading');
-        return null;
-      }
-
-      const parsed = this.parseGradePayload(text);
-      if (!parsed) {
-        this.logger.warn('Gemini response JSON parse failed for short answer grading');
-        return null;
-      }
-
-      const clampedScore = this.clampScore(parsed.score, input.maxScore);
-      const isCorrect =
-        typeof parsed.isCorrect === 'boolean' ? parsed.isCorrect : clampedScore >= input.maxScore;
-
-      return {
-        score: clampedScore,
-        isCorrect,
-        rationale: parsed.rationale,
-        model,
-      };
-    } catch (error) {
-      this.logger.warn(
-        `Gemini short answer grading failed: ${(error as Error)?.message ?? 'unknown error'}`,
-      );
-      return null;
     }
+
+    return null;
+  }
+
+  private getApiKey(): string | null {
+    return (
+      this.configService.get<string>('GEMINI_API_KEY') ||
+      this.configService.get<string>('GOOGLE_API_KEY') ||
+      null
+    );
+  }
+
+  private getModelCandidates(): string[] {
+    const configured = this.configService.get<string>('GEMINI_MODEL')?.trim();
+    const candidates = [
+      configured,
+      'gemini-2.5-flash-lite',
+      'gemini-2.0-flash-lite',
+      'gemini-1.5-flash',
+    ].filter((model): model is string => Boolean(model));
+
+    return Array.from(new Set(candidates));
   }
 
   private buildPrompt(input: GradeShortAnswerInput): string {
