@@ -20,6 +20,8 @@ const DEFAULT_BOOTH_POLICY_CONFIG: BoothPolicyConfigDto = {
   warnBeforeNextExamMinutes: 15,
   forceLogoutBeforeNextExamMinutes: 5,
   noShowGraceMinutes: 15,
+  enableExamFallbackAfterFailures: false,
+  maxFailedAttemptsBeforeAllow: 3,
 };
 
 @Injectable()
@@ -39,6 +41,10 @@ export class BoothPoliciesService {
 
     if (config.warnBeforeNextExamMinutes <= config.forceLogoutBeforeNextExamMinutes) {
       throw new BadRequestException('warnBeforeNextExamMinutes phai lon hon forceLogoutBeforeNextExamMinutes');
+    }
+
+    if (!config.enableExamFallbackAfterFailures && config.maxFailedAttemptsBeforeAllow < 1) {
+      throw new BadRequestException('maxFailedAttemptsBeforeAllow phai lon hon hoac bang 1');
     }
   }
 

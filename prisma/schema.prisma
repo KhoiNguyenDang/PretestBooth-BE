@@ -33,6 +33,9 @@ model User {
   kycLastAttemptAt        DateTime?
   kycConsentVersion       String?
   kycConsentedAt          DateTime?
+  studentCardImageUrl     String?
+  studentCardVerifiedAt   DateTime?
+  studentCardFaceMatchScore Float?
   lecturerRoleId          String?
   lecturerRoleAssignedAt  DateTime?
   lecturerRoleAssignedByUserId String?
@@ -575,6 +578,8 @@ model Booking {
   checkinThreshold      Float         @default(0.6)
   checkinVerifiedAt     DateTime? @db.Timestamptz(3)
   checkinAttemptCount   Int           @default(0)
+  fallbackAppliedAt     DateTime?     @db.Timestamptz(3)
+  fallbackEvidenceImageUrl String?
   
   // Relations - exam/practice sessions that reference this booking
   examSessions      ExamSession[]      @relation("ExamSessionBooking")
@@ -604,6 +609,7 @@ model BookingCheckinAttempt {
   isMatch         Boolean
   livenessPassed  Boolean  @default(true)
   failReason      String?
+  evidenceImageUrl String?
   verifierDeviceId String?
   createdAt       DateTime @default(now()) @db.Timestamptz(3)
   booking         Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
@@ -835,6 +841,7 @@ enum CheckinStatus {
   PENDING
   PASSED
   FAILED
+  FAILED_BUT_ALLOWED
 }
 
 enum PointType {

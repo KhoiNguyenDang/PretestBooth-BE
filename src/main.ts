@@ -1,4 +1,5 @@
 import { NestFactory, Reflector } from '@nestjs/core';
+import { json, urlencoded } from 'express';
 import { AppModule } from './app.module';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
 
@@ -7,6 +8,11 @@ async function bootstrap() {
   const defaultPort = Number.isNaN(preferredPort) ? 3000 : preferredPort;
   const fallbackPort = defaultPort + 1;
   const app = await NestFactory.create(AppModule);
+  const requestBodyLimit = process.env.REQUEST_BODY_LIMIT ?? '20mb';
+
+  // KYC/check-in payloads can include base64 images, so raise parser limits.
+  app.use(json({ limit: requestBodyLimit }));
+  app.use(urlencoded({ extended: true, limit: requestBodyLimit }));
 
   // Enable CORS for frontend on port 3001
   app.enableCors({

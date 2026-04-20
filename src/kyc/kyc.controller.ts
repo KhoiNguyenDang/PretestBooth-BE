@@ -5,6 +5,10 @@ import {
   KycRegisterSchema,
   type KycRegisterDto,
 } from './dto/kyc-register.dto';
+import {
+  UpdateKycCardThresholdSchema,
+  type UpdateKycCardThresholdDto,
+} from './dto/kyc-card-threshold.dto';
 import { KycService } from './kyc.service';
 
 @Controller('kyc')
@@ -23,5 +27,18 @@ export class KycController {
   @Get('status')
   status(@Req() req) {
     return this.kycService.getStatus(req.user['sub']);
+  }
+
+  @Get('card-threshold')
+  getCardThreshold() {
+    return this.kycService.getKycCardThresholdConfig();
+  }
+
+  @Post('card-threshold')
+  updateCardThreshold(
+    @Req() req,
+    @Body(new ZodValidationPipe(UpdateKycCardThresholdSchema)) dto: UpdateKycCardThresholdDto,
+  ) {
+    return this.kycService.updateKycCardThreshold(req.user['role'], req.user['sub'], dto.threshold);
   }
 }

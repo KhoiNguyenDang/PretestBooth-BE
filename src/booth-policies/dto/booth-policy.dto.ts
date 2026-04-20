@@ -8,6 +8,8 @@ export const BoothPolicyInputSchema = z.object({
   warnBeforeNextExamMinutes: z.coerce.number().int().min(1).max(240),
   forceLogoutBeforeNextExamMinutes: z.coerce.number().int().min(0).max(240),
   noShowGraceMinutes: z.coerce.number().int().min(0).max(240),
+  enableExamFallbackAfterFailures: z.boolean(),
+  maxFailedAttemptsBeforeAllow: z.coerce.number().int().min(1).max(10),
 });
 
 export type BoothPolicyConfigDto = z.output<typeof BoothPolicyInputSchema>;

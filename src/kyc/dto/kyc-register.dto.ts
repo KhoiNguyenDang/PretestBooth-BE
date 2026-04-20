@@ -9,8 +9,9 @@ export const LivenessProofSchema = z.object({
 
 export const KycRegisterSchema = z.object({
   image: z.string().min(100, 'Ảnh khuôn mặt không hợp lệ'),
+  studentCardImage: z.string().min(100, 'Ảnh thẻ sinh viên không hợp lệ'),
   consentVersion: z.string().min(1, 'Thiếu phiên bản đồng ý điều khoản'),
-  liveness: LivenessProofSchema,
+  liveness: LivenessProofSchema.optional(),
 });
 
 export type KycRegisterDto = z.output<typeof KycRegisterSchema>;
