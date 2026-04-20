@@ -208,6 +208,10 @@ export class SessionResultDto {
   appliedPassingScoreAbsolute: number | null;
   passed: boolean | null;
   status: string;
+  resultPublicationStatus: 'PENDING_REVIEW' | 'PUBLISHED';
+  resultPublishedAt: Date | null;
+  resultLastUpdatedAt: Date | null;
+  resultRevisionCount: number;
   startedAt: Date;
   finishedAt: Date | null;
   score: number | null;
@@ -255,6 +259,14 @@ export class SessionResultItemDto {
   sourceCode?: string | null;
   language?: string | null;
   languageVersion?: string | null;
+  aiSuggestedIsCorrect?: boolean | null;
+  aiSuggestedScore?: number | null;
+  aiGradingRationale?: string | null;
+  manualIsCorrect?: boolean | null;
+  manualScore?: number | null;
+  reviewerFeedback?: string | null;
+  reviewedByUserId?: string | null;
+  reviewedAt?: Date | null;
 
   constructor(partial: Partial<SessionResultItemDto>) {
     Object.assign(this, partial);
@@ -320,6 +332,9 @@ export class ExamSessionListItemDto {
   appliedPassingScoreAbsolute: number | null;
   passed: boolean | null;
   status: string;
+  resultPublicationStatus: 'PENDING_REVIEW' | 'PUBLISHED';
+  resultPublishedAt: Date | null;
+  resultRevisionCount: number;
   startedAt: Date;
   finishedAt: Date | null;
   score: number | null;

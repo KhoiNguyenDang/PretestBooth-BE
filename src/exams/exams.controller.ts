@@ -201,6 +201,14 @@ export class ExamsController {
     return this.examsService.gradeSession(sessionId, dto, userId, userRole);
   }
 
+  @Post('sessions/:sessionId/publish-results')
+  @HttpCode(HttpStatus.OK)
+  publishSessionResults(@Param('sessionId') sessionId: string, @Req() req) {
+    const userId = req.user['sub'];
+    const userRole = req.user['role'];
+    return this.examsService.publishSessionResults(sessionId, userId, userRole);
+  }
+
   @Post('sessions/:sessionId/force-submit')
   @HttpCode(HttpStatus.OK)
   forceSubmitSession(

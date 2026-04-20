@@ -9,6 +9,7 @@ import { PointsModule } from '../points/points.module';
 import { AuthorizationModule } from '../common/authorization/authorization.module';
 import { RealtimeModule } from '../realtime/realtime.module';
 import { GeminiShortAnswerGraderService } from '../common/ai/gemini-short-answer-grader.service';
+import { MailModule } from '../mail/mail.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { GeminiShortAnswerGraderService } from '../common/ai/gemini-short-answer
     PointsModule,
     AuthorizationModule,
     RealtimeModule,
+    MailModule,
   ],
   controllers: [ExamsController],
   providers: [ExamsService, GeminiShortAnswerGraderService],

@@ -402,18 +402,24 @@ model ExamSession {
   score           Float?
   maxScore        Float?
   status          ExamSessionStatus   @default(IN_PROGRESS)
+  resultPublicationStatus ResultPublicationStatus @default(PENDING_REVIEW)
+  resultPublishedAt DateTime?         @db.Timestamptz(3)
+  resultLastUpdatedAt DateTime?       @db.Timestamptz(3)
+  resultRevisionCount Int             @default(0)
   createdAt       DateTime            @default(now()) @db.Timestamptz(3)
   expiresAt       DateTime            @default(now()) @db.Timestamptz(3)
   exam            Exam                @relation(fields: [examId], references: [id], onDelete: Cascade)
   user            User                @relation(fields: [userId], references: [id], onDelete: Cascade)
   booking         Booking?            @relation("ExamSessionBooking", fields: [bookingId], references: [id], onDelete: SetNull)
   answers         ExamSessionAnswer[]
+  gradeAudits     ExamSessionGradeAudit[]
   proctoringEvents ProctoringEvent[]
 
   @@index([examId, userId])
   @@index([examId])
   @@index([userId])
   @@index([status])
+  @@index([resultPublicationStatus])
   @@index([expiresAt])
   @@index([bookingId])
   @@index([userId, isPretestSession])
@@ -432,6 +438,15 @@ model ExamSessionAnswer {
   languageVersion   String?
   isCorrect         Boolean?
   score             Float?
+  aiSuggestedIsCorrect Boolean?
+  aiSuggestedScore  Float?
+  aiGradingRationale String?
+  aiGradedAt        DateTime?
+  manualIsCorrect   Boolean?
+  manualScore       Float?
+  reviewerFeedback  String?
+  reviewedByUserId  String?
+  reviewedAt        DateTime?
   createdAt         DateTime    @default(now())
   updatedAt         DateTime    @updatedAt
   examItem          ExamItem    @relation(fields: [examItemId], references: [id], onDelete: Cascade)
@@ -440,6 +455,28 @@ model ExamSessionAnswer {
   @@unique([sessionId, examItemId])
   @@index([sessionId])
   @@index([examItemId])
+  @@index([reviewedByUserId])
+  @@index([reviewedAt])
+}
+
+model ExamSessionGradeAudit {
+  id              String           @id @default(uuid())
+  sessionId       String
+  examItemId      String?
+  action          GradeAuditAction
+  previousScore   Float?
+  newScore        Float?
+  previousIsCorrect Boolean?
+  newIsCorrect    Boolean?
+  feedback        String?
+  actorUserId     String?
+  actorRole       Role?
+  createdAt       DateTime         @default(now()) @db.Timestamptz(3)
+  session         ExamSession      @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, createdAt])
+  @@index([action])
+  @@index([actorUserId])
 }
 
 model Category {
@@ -744,6 +781,18 @@ enum ExamSessionStatus {
   IN_PROGRESS
   SUBMITTED
   GRADED
+}
+
+enum ResultPublicationStatus {
+  PENDING_REVIEW
+  PUBLISHED
+}
+
+enum GradeAuditAction {
+  AUTO_GRADED
+  REVIEWED_SHORT_ANSWER
+  RESULT_PUBLISHED
+  RESULT_UPDATED_AFTER_PUBLISH
 }
 
 enum PretestAssignmentMode {

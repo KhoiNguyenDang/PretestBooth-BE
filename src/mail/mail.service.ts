@@ -80,4 +80,64 @@ export class MailService {
 
     await this.transporter.sendMail(mailOptions);
   }
+
+  async sendExamResultPublishedEmail(params: {
+    email: string;
+    studentName?: string | null;
+    examTitle: string;
+    score: number;
+    maxScore: number | null;
+    sessionId: string;
+  }): Promise<void> {
+    const appUrl = process.env.APP_URL || 'http://localhost:3000';
+    const detailUrl = `${appUrl}/submissions/exam/${params.sessionId}`;
+    const scoreText =
+      params.maxScore && params.maxScore > 0
+        ? `${params.score}/${params.maxScore}`
+        : `${params.score}`;
+    const displayName = params.studentName?.trim() || 'Sinh viên';
+
+    await this.transporter.sendMail({
+      from: process.env.MAIL_FROM || process.env.MAIL_USER,
+      to: params.email,
+      subject: 'Ket qua bai thi da duoc cong bo - Pretest Booth',
+      html: `
+        <h2>Ket qua bai thi da duoc cong bo</h2>
+        <p>Xin chao ${displayName},</p>
+        <p>Ket qua bai thi <strong>${params.examTitle}</strong> da duoc cong bo.</p>
+        <p><strong>Diem hien tai:</strong> ${scoreText}</p>
+        <p>Ban co the xem chi tiet tai: <a href="${detailUrl}">${detailUrl}</a></p>
+      `,
+    });
+  }
+
+  async sendExamResultUpdatedEmail(params: {
+    email: string;
+    studentName?: string | null;
+    examTitle: string;
+    score: number;
+    maxScore: number | null;
+    sessionId: string;
+  }): Promise<void> {
+    const appUrl = process.env.APP_URL || 'http://localhost:3000';
+    const detailUrl = `${appUrl}/submissions/exam/${params.sessionId}`;
+    const scoreText =
+      params.maxScore && params.maxScore > 0
+        ? `${params.score}/${params.maxScore}`
+        : `${params.score}`;
+    const displayName = params.studentName?.trim() || 'Sinh viên';
+
+    await this.transporter.sendMail({
+      from: process.env.MAIL_FROM || process.env.MAIL_USER,
+      to: params.email,
+      subject: 'Ket qua bai thi da duoc cap nhat - Pretest Booth',
+      html: `
+        <h2>Ket qua bai thi da duoc cap nhat</h2>
+        <p>Xin chao ${displayName},</p>
+        <p>Diem bai thi <strong>${params.examTitle}</strong> cua ban da duoc dieu chinh boi giang vien.</p>
+        <p><strong>Diem moi:</strong> ${scoreText}</p>
+        <p>Ban co the xem chi tiet tai: <a href="${detailUrl}">${detailUrl}</a></p>
+      `,
+    });
+  }
 }

@@ -17,6 +17,7 @@ import { shuffleWithSeed } from './utils/shuffle';
 import { AuthorizationService } from '../common/authorization/authorization.service';
 import { RealtimeService } from '../realtime/realtime.service';
 import { GeminiShortAnswerGraderService } from '../common/ai/gemini-short-answer-grader.service';
+import { MailService } from '../mail/mail.service';
 
 import type { CreateExamDto } from './dto/create-exam.dto';
 import type { UpdateExamDto } from './dto/update-exam.dto';
@@ -96,6 +97,7 @@ export class ExamsService {
     private readonly authorizationService: AuthorizationService,
     private readonly realtimeService: RealtimeService,
     private readonly geminiShortAnswerGrader: GeminiShortAnswerGraderService,
+    private readonly mailService: MailService,
   ) {}
 
   private async assertExamManagementPermission(userId: string, userRole: string, actionLabel: string) {
@@ -134,6 +136,14 @@ export class ExamsService {
       'MONITOR_SESSIONS',
       'Giảng viên chưa được cấp quyền giám sát phiên thi/booth',
     );
+  }
+
+  private async assertResultReviewPermission(userRole: string, actionLabel: string) {
+    if (userRole === 'ADMIN' || userRole === 'LECTURER') {
+      return;
+    }
+
+    throw new ForbiddenException(`Chỉ giảng viên và quản trị viên mới có thể ${actionLabel}`);
   }
 
   /**
@@ -272,6 +282,86 @@ export class ExamsService {
       `Điều chỉnh điểm hoàn thành bài thi: ${score}/${maxScore ?? 0}`,
       { examSessionId: sessionId },
     );
+  }
+
+  private async notifyResultPublished(params: {
+    sessionId: string;
+    userId: string;
+    boothId?: string | null;
+    email?: string | null;
+    studentName?: string | null;
+    examTitle: string;
+    score: number;
+    maxScore: number | null;
+  }) {
+    const emittedAt = new Date().toISOString();
+
+    this.realtimeService.notify({
+      userId: params.userId,
+      boothId: params.boothId || undefined,
+      message: `Ket qua bai thi \"${params.examTitle}\" da duoc cong bo. Diem: ${params.score}/${params.maxScore ?? 0}`,
+      level: 'success',
+      emittedAt,
+    });
+
+    if (!params.email) {
+      return;
+    }
+
+    try {
+      await this.mailService.sendExamResultPublishedEmail({
+        email: params.email,
+        studentName: params.studentName,
+        examTitle: params.examTitle,
+        score: params.score,
+        maxScore: params.maxScore,
+        sessionId: params.sessionId,
+      });
+    } catch (error) {
+      this.logger.error(
+        `Failed to send published-result email for session ${params.sessionId}: ${(error as Error).message}`,
+      );
+    }
+  }
+
+  private async notifyResultUpdatedAfterPublish(params: {
+    sessionId: string;
+    userId: string;
+    boothId?: string | null;
+    email?: string | null;
+    studentName?: string | null;
+    examTitle: string;
+    score: number;
+    maxScore: number | null;
+  }) {
+    const emittedAt = new Date().toISOString();
+
+    this.realtimeService.notify({
+      userId: params.userId,
+      boothId: params.boothId || undefined,
+      message: `Diem bai thi \"${params.examTitle}\" da duoc cap nhat boi giang vien. Diem moi: ${params.score}/${params.maxScore ?? 0}`,
+      level: 'warning',
+      emittedAt,
+    });
+
+    if (!params.email) {
+      return;
+    }
+
+    try {
+      await this.mailService.sendExamResultUpdatedEmail({
+        email: params.email,
+        studentName: params.studentName,
+        examTitle: params.examTitle,
+        score: params.score,
+        maxScore: params.maxScore,
+        sessionId: params.sessionId,
+      });
+    } catch (error) {
+      this.logger.error(
+        `Failed to send updated-result email for session ${params.sessionId}: ${(error as Error).message}`,
+      );
+    }
   }
 
   private parseStoredPretestConfig(
@@ -1585,6 +1675,12 @@ export class ExamsService {
           },
         },
         answers: true,
+        user: {
+          select: {
+            email: true,
+            name: true,
+          },
+        },
       },
     });
 
@@ -1687,6 +1783,12 @@ export class ExamsService {
           },
         },
         answers: true,
+        user: {
+          select: {
+            email: true,
+            name: true,
+          },
+        },
       },
     });
 
@@ -1704,6 +1806,9 @@ export class ExamsService {
 
     // Auto-score MC questions + auto-grade coding problems
     let totalScore = 0;
+    const hasShortAnswerItems = session.exam.items.some(
+      (item) => item.section === 'QUESTION' && item.question?.questionType === 'SHORT_ANSWER',
+    );
     const failedAutoGradeItemIds = new Set<string>();
     const answerByExamItemId = new Map(session.answers.map((answer) => [answer.examItemId, answer]));
 
@@ -1717,6 +1822,11 @@ export class ExamsService {
       isCorrect: boolean | null;
       score: number | null;
       submissionId: string | null;
+      aiSuggestedIsCorrect: boolean | null;
+      aiSuggestedScore: number | null;
+      aiGradingRationale: string | null;
+      aiGradedAt: Date | null;
+      isShortAnswerItem: boolean;
     }[] = [];
 
     for (const item of session.exam.items) {
@@ -1731,6 +1841,12 @@ export class ExamsService {
       let isCorrect: boolean | null = null;
       let score: number | null = null;
       let submissionId: string | null = answer?.submissionId ?? null;
+      let aiSuggestedIsCorrect: boolean | null = null;
+      let aiSuggestedScore: number | null = null;
+      let aiGradingRationale: string | null = null;
+      let aiGradedAt: Date | null = null;
+      const isShortAnswerItem =
+        item.section === 'QUESTION' && item.question?.questionType === 'SHORT_ANSWER';
 
       if (item.section === 'QUESTION' && item.question) {
         const question = item.question;
@@ -1778,11 +1894,19 @@ export class ExamsService {
             if (aiGrade) {
               isCorrect = aiGrade.isCorrect;
               score = aiGrade.score;
+              aiSuggestedIsCorrect = aiGrade.isCorrect;
+              aiSuggestedScore = aiGrade.score;
+              aiGradingRationale = aiGrade.rationale || null;
+              aiGradedAt = new Date();
             } else {
               const expectedNormalized = expected.toLowerCase();
               const actualNormalized = actual.toLowerCase();
               isCorrect = expectedNormalized === actualNormalized;
               score = isCorrect ? item.points : 0;
+              aiSuggestedIsCorrect = isCorrect;
+              aiSuggestedScore = score;
+              aiGradingRationale = 'FALLBACK_EXACT_MATCH';
+              aiGradedAt = new Date();
             }
           }
         }
@@ -1882,6 +2006,11 @@ export class ExamsService {
         isCorrect,
         score,
         submissionId,
+        aiSuggestedIsCorrect,
+        aiSuggestedScore,
+        aiGradingRationale,
+        aiGradedAt,
+        isShortAnswerItem,
       });
     }
 
@@ -1892,6 +2021,7 @@ export class ExamsService {
     }
 
     // Update all answers and session in a transaction
+    const submittedAt = new Date();
     await this.prisma.$transaction(async (tx) => {
       for (const update of answerUpdates) {
         await tx.examSessionAnswer.upsert({
@@ -1912,6 +2042,10 @@ export class ExamsService {
             isCorrect: update.isCorrect,
             score: update.score,
             submissionId: update.submissionId,
+            aiSuggestedIsCorrect: update.aiSuggestedIsCorrect,
+            aiSuggestedScore: update.aiSuggestedScore,
+            aiGradingRationale: update.aiGradingRationale,
+            aiGradedAt: update.aiGradedAt,
           },
           update: {
             selectedChoiceIds: update.selectedChoiceIds,
@@ -1922,8 +2056,27 @@ export class ExamsService {
             isCorrect: update.isCorrect,
             score: update.score,
             submissionId: update.submissionId,
+            aiSuggestedIsCorrect: update.aiSuggestedIsCorrect,
+            aiSuggestedScore: update.aiSuggestedScore,
+            aiGradingRationale: update.aiGradingRationale,
+            aiGradedAt: update.aiGradedAt,
           },
         });
+
+        if (update.isShortAnswerItem) {
+          await tx.examSessionGradeAudit.create({
+            data: {
+              sessionId,
+              examItemId: update.examItemId,
+              action: 'AUTO_GRADED',
+              previousScore: null,
+              newScore: update.score,
+              previousIsCorrect: null,
+              newIsCorrect: update.isCorrect,
+              feedback: update.aiGradingRationale,
+            },
+          });
+        }
       }
 
       // Check if all items are graded
@@ -1943,11 +2096,24 @@ export class ExamsService {
         where: { id: sessionId },
         data: {
           status: allGraded ? 'GRADED' : 'SUBMITTED',
-          finishedAt: new Date(),
+          finishedAt: submittedAt,
           score: totalScore,
           passed,
+          resultPublicationStatus: hasShortAnswerItems ? 'PENDING_REVIEW' : 'PUBLISHED',
+          resultPublishedAt: hasShortAnswerItems ? null : submittedAt,
+          resultLastUpdatedAt: hasShortAnswerItems ? null : submittedAt,
+          resultRevisionCount: 0,
         },
       });
+
+      if (!hasShortAnswerItems) {
+        await tx.examSessionGradeAudit.create({
+          data: {
+            sessionId,
+            action: 'RESULT_PUBLISHED',
+          },
+        });
+      }
     });
 
     await this.syncExamCompletionPoints(sessionId, session.userId, totalScore, session.maxScore);
@@ -1980,6 +2146,19 @@ export class ExamsService {
       sessionId,
       emittedAt,
     });
+
+    if (result.resultPublicationStatus === 'PUBLISHED' && result.score !== null) {
+      await this.notifyResultPublished({
+        sessionId,
+        userId: session.userId,
+        boothId: linkedBooking?.boothId,
+        email: session.user.email,
+        studentName: session.user.name,
+        examTitle: session.exam.title,
+        score: result.score,
+        maxScore: result.maxScore,
+      });
+    }
 
     return result;
   }
@@ -2056,11 +2235,17 @@ export class ExamsService {
       throw new ForbiddenException('Bạn không có quyền xem kết quả phiên thi này');
     }
 
-    const canViewItemDetails = canViewAsLecturer || session.exam.allowStudentReviewResults;
+    const isResultPublishedToStudent = session.resultPublicationStatus === 'PUBLISHED';
+    const canViewResultSummary = canViewAsLecturer || isResultPublishedToStudent;
+    const canViewItemDetails =
+      canViewAsLecturer ||
+      (isResultPublishedToStudent && session.exam.allowStudentReviewResults);
     const canViewProctoringWarnings = canViewAsLecturer && session.exam.type === 'EXAM';
     const detailMessage = canViewItemDetails
       ? null
-      : 'Đề thi này không cho phép sinh viên xem chi tiết từng câu.';
+      : !isResultPublishedToStudent
+        ? 'Kết quả đang chờ giảng viên xác nhận trước khi công bố.'
+        : 'Đề thi này không cho phép sinh viên xem chi tiết từng câu.';
 
     const examItems = session.exam.items || [];
     const answerByExamItemId = new Map(session.answers.map((answer) => [answer.examItemId, answer]));
@@ -2243,6 +2428,14 @@ export class ExamsService {
           sourceCode: answer?.sourceCode ?? null,
           language: answer?.language ?? null,
           languageVersion: answer?.languageVersion ?? null,
+          aiSuggestedIsCorrect: canViewAsLecturer ? answer?.aiSuggestedIsCorrect ?? null : null,
+          aiSuggestedScore: canViewAsLecturer ? answer?.aiSuggestedScore ?? null : null,
+          aiGradingRationale: canViewAsLecturer ? answer?.aiGradingRationale ?? null : null,
+          manualIsCorrect: canViewAsLecturer ? answer?.manualIsCorrect ?? null : null,
+          manualScore: canViewAsLecturer ? answer?.manualScore ?? null : null,
+          reviewerFeedback: canViewAsLecturer ? answer?.reviewerFeedback ?? null : null,
+          reviewedByUserId: canViewAsLecturer ? answer?.reviewedByUserId ?? null : null,
+          reviewedAt: canViewAsLecturer ? answer?.reviewedAt ?? null : null,
         });
 
         if (section === 'QUESTION' && question) {
@@ -2336,15 +2529,19 @@ export class ExamsService {
       pretestThresholdSource: (session as any).pretestThresholdSource ?? null,
       pretestSourceExamId: (session as any).pretestSourceExamId ?? null,
       appliedPassingScoreAbsolute: sessionAppliedPassingScoreAbsolute ?? null,
-      passed: ((session as any).passed as boolean | null) ?? null,
+      passed: canViewResultSummary ? (((session as any).passed as boolean | null) ?? null) : null,
       status: session.status,
+      resultPublicationStatus: session.resultPublicationStatus,
+      resultPublishedAt: session.resultPublishedAt,
+      resultLastUpdatedAt: session.resultLastUpdatedAt,
+      resultRevisionCount: session.resultRevisionCount,
       startedAt: session.startedAt,
       finishedAt: session.finishedAt,
-      score: session.score,
-      maxScore: session.maxScore,
+      score: canViewResultSummary ? session.score : null,
+      maxScore: canViewResultSummary ? session.maxScore : null,
       totalItems: examItems.length,
-      correctItems,
-      pendingItems,
+      correctItems: canViewResultSummary ? correctItems : 0,
+      pendingItems: canViewResultSummary ? pendingItems : examItems.length,
       canViewItemDetails,
       detailMessage,
       proctoringWarnings,
@@ -2361,10 +2558,31 @@ export class ExamsService {
     userId: string,
     userRole: string,
   ): Promise<SessionResultDto> {
-    await this.assertExamManagementPermission(userId, userRole, 'chấm điểm');
+    await this.assertResultReviewPermission(userRole, 'chấm điểm');
 
     const session = await this.prisma.examSession.findUnique({
       where: { id: sessionId },
+      include: {
+        exam: {
+          include: {
+            items: {
+              include: {
+                question: {
+                  select: {
+                    questionType: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+        user: {
+          select: {
+            email: true,
+            name: true,
+          },
+        },
+      },
     });
 
     if (!session) throw new NotFoundException('Phiên thi không tồn tại');
@@ -2372,9 +2590,49 @@ export class ExamsService {
       throw new BadRequestException('Phiên thi chưa được nộp');
     }
 
+    const shortAnswerItemMap = new Map(
+      session.exam.items
+        .filter(
+          (examItem) =>
+            examItem.section === 'QUESTION' && examItem.question?.questionType === 'SHORT_ANSWER',
+        )
+        .map((examItem) => [examItem.id, examItem.points]),
+    );
+
+    if (shortAnswerItemMap.size === 0) {
+      throw new BadRequestException('Phiên thi này không có câu tự luận ngắn để chấm thủ công');
+    }
+
     // Update grades in a transaction
     const gradingSummary = await this.prisma.$transaction(async (tx) => {
       for (const item of dto.items) {
+        const maxPoints = shortAnswerItemMap.get(item.examItemId);
+        if (maxPoints === undefined) {
+          throw new BadRequestException(
+            'Chỉ được phép chỉnh điểm cho câu hỏi SHORT_ANSWER',
+          );
+        }
+
+        if (item.score > maxPoints) {
+          throw new BadRequestException(
+            `Điểm câu ${item.examItemId} không được vượt quá ${maxPoints}`,
+          );
+        }
+
+        const previous = await tx.examSessionAnswer.findUnique({
+          where: {
+            sessionId_examItemId: { sessionId, examItemId: item.examItemId },
+          },
+          select: {
+            score: true,
+            isCorrect: true,
+          },
+        });
+
+        if (!previous) {
+          throw new NotFoundException('Không tìm thấy câu trả lời trong phiên thi để chấm');
+        }
+
         await tx.examSessionAnswer.update({
           where: {
             sessionId_examItemId: { sessionId, examItemId: item.examItemId },
@@ -2382,6 +2640,26 @@ export class ExamsService {
           data: {
             isCorrect: item.isCorrect,
             score: item.score,
+            manualIsCorrect: item.isCorrect,
+            manualScore: item.score,
+            reviewerFeedback: item.feedback?.trim() || null,
+            reviewedByUserId: userId,
+            reviewedAt: new Date(),
+          },
+        });
+
+        await tx.examSessionGradeAudit.create({
+          data: {
+            sessionId,
+            examItemId: item.examItemId,
+            action: 'REVIEWED_SHORT_ANSWER',
+            previousScore: previous.score,
+            newScore: item.score,
+            previousIsCorrect: previous.isCorrect,
+            newIsCorrect: item.isCorrect,
+            feedback: item.feedback?.trim() || null,
+            actorUserId: userId,
+            actorRole: userRole as 'ADMIN' | 'LECTURER',
           },
         });
       }
@@ -2401,16 +2679,37 @@ export class ExamsService {
         allGraded,
       );
 
+      const scoreChanged = Number(session.score || 0) !== Number(totalScore || 0);
+      const resultUpdateData: Prisma.ExamSessionUpdateInput = {
+        score: totalScore,
+        status: allGraded ? 'GRADED' : 'SUBMITTED',
+        passed,
+      };
+
+      if (session.resultPublicationStatus === 'PUBLISHED' && scoreChanged) {
+        resultUpdateData.resultRevisionCount = { increment: 1 };
+        resultUpdateData.resultLastUpdatedAt = new Date();
+      }
+
       await tx.examSession.update({
         where: { id: sessionId },
-        data: {
-          score: totalScore,
-          status: allGraded ? 'GRADED' : 'SUBMITTED',
-          passed,
-        },
+        data: resultUpdateData,
       });
 
-      return { totalScore };
+      if (session.resultPublicationStatus === 'PUBLISHED' && scoreChanged) {
+        await tx.examSessionGradeAudit.create({
+          data: {
+            sessionId,
+            action: 'RESULT_UPDATED_AFTER_PUBLISH',
+            previousScore: session.score,
+            newScore: totalScore,
+            actorUserId: userId,
+            actorRole: userRole as 'ADMIN' | 'LECTURER',
+          },
+        });
+      }
+
+      return { totalScore, scoreChanged };
     });
 
     await this.syncExamCompletionPoints(
@@ -2419,6 +2718,137 @@ export class ExamsService {
       gradingSummary.totalScore,
       session.maxScore,
     );
+
+    const linkedBooking = session.bookingId
+      ? await this.prisma.booking.findUnique({
+          where: { id: session.bookingId },
+          select: { boothId: true },
+        })
+      : null;
+
+    if (session.resultPublicationStatus === 'PUBLISHED' && gradingSummary.scoreChanged) {
+      await this.notifyResultUpdatedAfterPublish({
+        sessionId,
+        userId: session.userId,
+        boothId: linkedBooking?.boothId,
+        email: session.user.email,
+        studentName: session.user.name,
+        examTitle: session.exam.title,
+        score: gradingSummary.totalScore,
+        maxScore: session.maxScore,
+      });
+    }
+
+    return this.getSessionResult(sessionId, userId, userRole);
+  }
+
+  async publishSessionResults(
+    sessionId: string,
+    userId: string,
+    userRole: string,
+  ): Promise<SessionResultDto> {
+    await this.assertResultReviewPermission(userRole, 'công bố kết quả');
+
+    const session = await this.prisma.examSession.findUnique({
+      where: { id: sessionId },
+      include: {
+        exam: {
+          include: {
+            items: {
+              include: {
+                question: {
+                  select: {
+                    questionType: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+        answers: {
+          select: {
+            examItemId: true,
+            reviewedAt: true,
+          },
+        },
+        user: {
+          select: {
+            email: true,
+            name: true,
+          },
+        },
+      },
+    });
+
+    if (!session) throw new NotFoundException('Phiên thi không tồn tại');
+    if (session.status === 'IN_PROGRESS') {
+      throw new BadRequestException('Phiên thi chưa được nộp');
+    }
+
+    const shortAnswerItemIds = new Set(
+      session.exam.items
+        .filter(
+          (item) => item.section === 'QUESTION' && item.question?.questionType === 'SHORT_ANSWER',
+        )
+        .map((item) => item.id),
+    );
+
+    if (shortAnswerItemIds.size > 0) {
+      const reviewedShortAnswerCount = session.answers.filter(
+        (answer) => shortAnswerItemIds.has(answer.examItemId) && Boolean(answer.reviewedAt),
+      ).length;
+
+      if (reviewedShortAnswerCount < shortAnswerItemIds.size) {
+        throw new BadRequestException(
+          'Còn câu tự luận ngắn chưa được giảng viên xác nhận, chưa thể công bố kết quả',
+        );
+      }
+    }
+
+    const shouldNotifyPublish = session.resultPublicationStatus !== 'PUBLISHED';
+
+    if (shouldNotifyPublish) {
+      const publishedAt = new Date();
+      await this.prisma.$transaction(async (tx) => {
+        await tx.examSession.update({
+          where: { id: sessionId },
+          data: {
+            resultPublicationStatus: 'PUBLISHED',
+            resultPublishedAt: session.resultPublishedAt || publishedAt,
+            resultLastUpdatedAt: publishedAt,
+          },
+        });
+
+        await tx.examSessionGradeAudit.create({
+          data: {
+            sessionId,
+            action: 'RESULT_PUBLISHED',
+            actorUserId: userId,
+            actorRole: userRole as 'ADMIN' | 'LECTURER',
+          },
+        });
+      });
+    }
+
+    const linkedBooking = session.bookingId
+      ? await this.prisma.booking.findUnique({
+          where: { id: session.bookingId },
+          select: { boothId: true },
+        })
+      : null;
+
+    if (shouldNotifyPublish) {
+      await this.notifyResultPublished({
+        sessionId,
+        userId: session.userId,
+        boothId: linkedBooking?.boothId,
+        email: session.user.email,
+        studentName: session.user.name,
+        examTitle: session.exam.title,
+        score: session.score ?? 0,
+        maxScore: session.maxScore,
+      });
+    }
 
     return this.getSessionResult(sessionId, userId, userRole);
   }
@@ -2493,6 +2923,9 @@ export class ExamsService {
           ((s as any).appliedPassingScoreAbsolute as number | null) ?? null,
         passed: ((s as any).passed as boolean | null) ?? null,
         status: s.status,
+        resultPublicationStatus: s.resultPublicationStatus,
+        resultPublishedAt: s.resultPublishedAt,
+        resultRevisionCount: s.resultRevisionCount,
         startedAt: s.startedAt,
         finishedAt: s.finishedAt,
         score: s.score,
