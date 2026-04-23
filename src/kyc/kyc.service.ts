@@ -34,7 +34,9 @@ export class KycService {
 
   private ensureAdmin(userRole: string) {
     if (userRole !== 'ADMIN') {
-      throw new ForbiddenException('Chỉ quản trị viên mới có thể cập nhật ngưỡng xác thực thẻ sinh viên');
+      throw new ForbiddenException(
+        'Chỉ quản trị viên mới có thể cập nhật ngưỡng xác thực thẻ sinh viên',
+      );
     }
   }
 
@@ -61,7 +63,9 @@ export class KycService {
     }
 
     if (userRole !== 'LECTURER') {
-      throw new ForbiddenException('Chỉ giảng viên hoặc quản trị viên mới có thể duyệt KYC thủ công');
+      throw new ForbiddenException(
+        'Chỉ giảng viên hoặc quản trị viên mới có thể duyệt KYC thủ công',
+      );
     }
 
     await this.authorizationService.assertPermission(
@@ -260,8 +264,7 @@ export class KycService {
       throw new NotFoundException('Người dùng không tồn tại');
     }
 
-    const hasEmbedding =
-      Array.isArray(user.faceEmbedding) && user.faceEmbedding.length > 0;
+    const hasEmbedding = Array.isArray(user.faceEmbedding) && user.faceEmbedding.length > 0;
 
     return {
       kycStatus: user.kycStatus,
@@ -306,7 +309,9 @@ export class KycService {
     }
 
     if (user.kycStatus === 'VERIFIED') {
-      throw new BadRequestException('Bạn đã xác thực KYC thành công, không cần gửi yêu cầu duyệt thủ công');
+      throw new BadRequestException(
+        'Bạn đã xác thực KYC thành công, không cần gửi yêu cầu duyệt thủ công',
+      );
     }
 
     if (user.kycStatus !== 'REJECTED') {
@@ -344,7 +349,11 @@ export class KycService {
     };
   }
 
-  async getPendingManualReviews(reviewerId: string, reviewerRole: string, query: QueryKycManualReviewDto) {
+  async getPendingManualReviews(
+    reviewerId: string,
+    reviewerRole: string,
+    query: QueryKycManualReviewDto,
+  ) {
     await this.assertKycReviewerAccess(reviewerId, reviewerRole);
 
     const page = query.page;

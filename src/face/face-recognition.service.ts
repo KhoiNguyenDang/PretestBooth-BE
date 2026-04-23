@@ -107,9 +107,7 @@ export class FaceRecognitionService {
     }
   }
 
-  private async extractFromEmbeddingService(
-    imageDataUrl: string,
-  ): Promise<FaceEmbeddingResult> {
+  private async extractFromEmbeddingService(imageDataUrl: string): Promise<FaceEmbeddingResult> {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
     };
@@ -127,16 +125,12 @@ export class FaceRecognitionService {
       });
     } catch (error) {
       this.logger.error('Không kết nối được face embedding service', error as Error);
-      throw new InternalServerErrorException(
-        'Không thể kết nối dịch vụ trích xuất khuôn mặt',
-      );
+      throw new InternalServerErrorException('Không thể kết nối dịch vụ trích xuất khuôn mặt');
     }
 
     if (!response.ok) {
       const payload = await response.text();
-      this.logger.error(
-        `Face embedding service trả lỗi ${response.status}: ${payload}`,
-      );
+      this.logger.error(`Face embedding service trả lỗi ${response.status}: ${payload}`);
       throw new InternalServerErrorException(
         'Dịch vụ trích xuất khuôn mặt đang tạm thời không khả dụng',
       );
@@ -145,9 +139,7 @@ export class FaceRecognitionService {
     const result = (await response.json()) as FaceEmbeddingServiceResponse;
 
     if (!Array.isArray(result.embedding) || result.embedding.length === 0) {
-      throw new InternalServerErrorException(
-        'Dữ liệu embedding trả về từ dịch vụ không hợp lệ',
-      );
+      throw new InternalServerErrorException('Dữ liệu embedding trả về từ dịch vụ không hợp lệ');
     }
 
     const normalized = this.normalize(result.embedding.map((item) => Number(item)));

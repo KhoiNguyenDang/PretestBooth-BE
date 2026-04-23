@@ -56,13 +56,10 @@ export const CreateExamSchema = z
     // Exam type classification
     type: z.enum(['PRACTICE', 'EXAM']).default('EXAM'),
   })
-  .refine(
-    (data) => !(data.publishNow && data.publishAt),
-    {
-      message: 'Không thể truyền đồng thời publishNow và publishAt',
-      path: ['publishNow'],
-    },
-  )
+  .refine((data) => !(data.publishNow && data.publishAt), {
+    message: 'Không thể truyền đồng thời publishNow và publishAt',
+    path: ['publishNow'],
+  })
   .refine(
     (data) => {
       if (!data.subjectIds?.length) return true;
@@ -103,8 +100,8 @@ export const CreateExamSchema = z
   .refine(
     (data) => {
       const isManual = data.generationMode === 'MANUAL';
-      const qCount = isManual ? (data.questionIds?.length || 0) : data.questionCount;
-      const pCount = isManual ? (data.problemIds?.length || 0) : data.problemCount;
+      const qCount = isManual ? data.questionIds?.length || 0 : data.questionCount;
+      const pCount = isManual ? data.problemIds?.length || 0 : data.problemCount;
       return qCount + pCount > 0;
     },
     {

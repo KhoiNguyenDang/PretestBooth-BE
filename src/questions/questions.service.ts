@@ -74,7 +74,10 @@ export class QuestionsService {
     return ['png', 'jpg', 'jpeg', 'webp', 'gif'].includes(ext);
   }
 
-  private unpackImportPackage(file: ImportedFile): { spreadsheetFile: ImportedFile; imageFiles: ImportedFile[] } {
+  private unpackImportPackage(file: ImportedFile): {
+    spreadsheetFile: ImportedFile;
+    imageFiles: ImportedFile[];
+  } {
     const ext = file.originalname.split('.').pop()?.toLowerCase() || '';
     if (ext !== 'zip') {
       return { spreadsheetFile: file, imageFiles: [] };
@@ -94,7 +97,10 @@ export class QuestionsService {
       if (!spreadsheetFile && this.isSupportedSpreadsheetExt(entryExt)) {
         spreadsheetFile = {
           originalname: basename,
-          mimetype: entryExt === 'csv' ? 'text/csv' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          mimetype:
+            entryExt === 'csv'
+              ? 'text/csv'
+              : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
           buffer: entryBuffer,
         };
         continue;
@@ -156,7 +162,9 @@ export class QuestionsService {
 
         // Different Excel producers can report anchor rows with different bases.
         // Store both candidates to avoid off-by-one mismatches during import mapping.
-        const candidateRows = [nativeRow, nativeRow + 1].filter((row) => Number.isInteger(row) && row > 0);
+        const candidateRows = [nativeRow, nativeRow + 1].filter(
+          (row) => Number.isInteger(row) && row > 0,
+        );
         if (candidateRows.length === 0) continue;
 
         const imageExtension = (image.extension || 'png').toLowerCase();
@@ -195,9 +203,7 @@ export class QuestionsService {
   }
 
   private isUuid(value: string): boolean {
-    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-      value,
-    );
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
   }
 
   private parseBoolean(value: unknown): boolean | undefined {
@@ -232,7 +238,11 @@ export class QuestionsService {
       .replace(/[^a-z0-9]/g, '');
   }
 
-  private async assertQuestionBankPermission(userId: string, userRole: string, actionLabel: string) {
+  private async assertQuestionBankPermission(
+    userId: string,
+    userRole: string,
+    actionLabel: string,
+  ) {
     if (userRole === 'ADMIN') {
       return;
     }
@@ -282,7 +292,9 @@ export class QuestionsService {
 
     const uploadedImageUrlCache = new Map<string, string>();
     const consumedEmbeddedRows = new Set<number>();
-    const embeddedImageEntries = Array.from(embeddedImagesByRow.entries()).sort((a, b) => a[0] - b[0]);
+    const embeddedImageEntries = Array.from(embeddedImagesByRow.entries()).sort(
+      (a, b) => a[0] - b[0],
+    );
 
     const tryTakeEmbeddedImage = (preferredRow?: number): ImportedFile | null => {
       if (typeof preferredRow === 'number') {
@@ -333,8 +345,7 @@ export class QuestionsService {
       const rowNumber = index + 2;
 
       try {
-        const subjectRefRaw =
-          row['subjectId'] || row['Môn'] || row['subjectRef'] || row['subject'];
+        const subjectRefRaw = row['subjectId'] || row['Môn'] || row['subjectRef'] || row['subject'];
         const topicRefRaw = row['topicId'] || row['Chủ đề'] || row['topicRef'] || row['topic'];
 
         let subjectId = subjectRefRaw ? String(subjectRefRaw).trim() : '';
@@ -406,8 +417,7 @@ export class QuestionsService {
               const normalizedTopicRef = this.normalizeReferenceLabel(topicId);
               const matchedByNormalized = topicReferenceLookup.find(
                 (t) =>
-                  t.normalized === normalizedTopicRef &&
-                  (!subjectId || t.subjectId === subjectId),
+                  t.normalized === normalizedTopicRef && (!subjectId || t.subjectId === subjectId),
               );
               if (matchedByNormalized) {
                 matchedTopic = { id: matchedByNormalized.id };
@@ -506,7 +516,8 @@ export class QuestionsService {
             if (cachedUploadedUrl) {
               dto.imageUrl = cachedUploadedUrl;
             } else {
-              const uploadedImageUrl = await this.cloudinaryService.uploadQuestionImage(embeddedImageFile);
+              const uploadedImageUrl =
+                await this.cloudinaryService.uploadQuestionImage(embeddedImageFile);
               uploadedImageUrlCache.set(embeddedCacheKey, uploadedImageUrl);
               dto.imageUrl = uploadedImageUrl;
             }

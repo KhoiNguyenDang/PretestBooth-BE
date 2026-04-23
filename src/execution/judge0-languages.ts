@@ -9,16 +9,16 @@
 
 export const JUDGE0_LANGUAGE_MAP: Record<string, number> = {
   // C / C++
-  c: 50,          // C (GCC 9.2.0)
-  cpp: 54,        // C++ (GCC 9.2.0)
+  c: 50, // C (GCC 9.2.0)
+  cpp: 54, // C++ (GCC 9.2.0)
   'c++': 54,
   'g++': 54,
 
   // Java
-  java: 62,       // Java (OpenJDK 13.0.1)
+  java: 62, // Java (OpenJDK 13.0.1)
 
   // Python
-  python: 71,     // Python (3.8.1)
+  python: 71, // Python (3.8.1)
   python3: 71,
   py: 71,
 
@@ -30,30 +30,30 @@ export const JUDGE0_LANGUAGE_MAP: Record<string, number> = {
   ts: 74,
 
   // C#
-  csharp: 51,     // C# (Mono 6.6.0.161)
+  csharp: 51, // C# (Mono 6.6.0.161)
   'c#': 51,
   cs: 51,
 
   // Go
-  go: 60,         // Go (1.13.5)
+  go: 60, // Go (1.13.5)
   golang: 60,
 
   // Rust
-  rust: 73,       // Rust (1.40.0)
+  rust: 73, // Rust (1.40.0)
   rs: 73,
 
   // Ruby
-  ruby: 72,       // Ruby (2.7.0)
+  ruby: 72, // Ruby (2.7.0)
   rb: 72,
 
   // PHP
-  php: 68,        // PHP (7.4.1)
+  php: 68, // PHP (7.4.1)
 
   // Swift
-  swift: 83,      // Swift (5.2.3)
+  swift: 83, // Swift (5.2.3)
 
   // Kotlin
-  kotlin: 78,     // Kotlin (1.3.70)
+  kotlin: 78, // Kotlin (1.3.70)
   kt: 78,
 };
 
@@ -92,9 +92,9 @@ export interface Judge0SubmissionResponse {
     id: number;
     description: string;
   };
-  time: string | null;       // seconds as string, e.g. "0.01"
+  time: string | null; // seconds as string, e.g. "0.01"
   wall_time: string | null;
-  memory: number | null;     // KB
+  memory: number | null; // KB
 }
 
 /**

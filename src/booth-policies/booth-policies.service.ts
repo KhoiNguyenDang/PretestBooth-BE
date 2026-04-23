@@ -1,8 +1,4 @@
-import {
-  BadRequestException,
-  ForbiddenException,
-  Injectable,
-} from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   BoothPolicyInputSchema,
@@ -36,11 +32,15 @@ export class BoothPoliciesService {
 
   private validatePolicyConsistency(config: BoothPolicyConfigDto) {
     if (config.bookingMaxDaysInAdvance < config.bookingMinDaysInAdvance) {
-      throw new BadRequestException('bookingMaxDaysInAdvance phai lon hon hoac bang bookingMinDaysInAdvance');
+      throw new BadRequestException(
+        'bookingMaxDaysInAdvance phai lon hon hoac bang bookingMinDaysInAdvance',
+      );
     }
 
     if (config.warnBeforeNextExamMinutes <= config.forceLogoutBeforeNextExamMinutes) {
-      throw new BadRequestException('warnBeforeNextExamMinutes phai lon hon forceLogoutBeforeNextExamMinutes');
+      throw new BadRequestException(
+        'warnBeforeNextExamMinutes phai lon hon forceLogoutBeforeNextExamMinutes',
+      );
     }
 
     if (!config.enableExamFallbackAfterFailures && config.maxFailedAttemptsBeforeAllow < 1) {

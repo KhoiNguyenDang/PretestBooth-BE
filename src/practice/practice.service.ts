@@ -95,10 +95,7 @@ export class PracticeService {
    * Auto-generate a new practice session based on student config
    */
   async createSession(userId: string, dto: CreatePracticeSessionDto) {
-    const activeBooking = await this.bookingsService.findActiveCheckedInBooking(
-      userId,
-      'PRACTICE',
-    );
+    const activeBooking = await this.bookingsService.findActiveCheckedInBooking(userId, 'PRACTICE');
 
     // 1. Fetch eligible items
     if (!dto.includeQuestions && !dto.includeProblems) {
@@ -136,14 +133,22 @@ export class PracticeService {
 
     // Optimize later with raw SQL TABLESAMPLE, now doing app-level random for small datasets
     if (dto.includeQuestions) {
-      const allQs = await this.prisma.question.findMany({ where: questionWhere, select: { id: true } });
-      questionsToPick = allQs.sort(() => 0.5 - Math.random()).slice(0, dto.includeProblems ? Math.ceil(dto.totalItems * 0.8) : dto.totalItems);
+      const allQs = await this.prisma.question.findMany({
+        where: questionWhere,
+        select: { id: true },
+      });
+      questionsToPick = allQs
+        .sort(() => 0.5 - Math.random())
+        .slice(0, dto.includeProblems ? Math.ceil(dto.totalItems * 0.8) : dto.totalItems);
     }
 
     if (dto.includeProblems) {
       const remainingCount = dto.totalItems - questionsToPick.length;
       if (remainingCount > 0) {
-        const allPs = await this.prisma.problem.findMany({ where: problemWhere, select: { id: true } });
+        const allPs = await this.prisma.problem.findMany({
+          where: problemWhere,
+          select: { id: true },
+        });
         problemsToPick = allPs.sort(() => 0.5 - Math.random()).slice(0, remainingCount);
       }
     }
@@ -252,7 +257,8 @@ export class PracticeService {
     });
 
     if (!session) throw new NotFoundException('Phiên luyện tập không tồn tại');
-    if (session.userId !== userId) throw new ForbiddenException('Bạn không có quyền truy cập phiên này');
+    if (session.userId !== userId)
+      throw new ForbiddenException('Bạn không có quyền truy cập phiên này');
 
     const shouldShuffleChoices = session.status === 'IN_PROGRESS';
 
@@ -324,14 +330,16 @@ export class PracticeService {
     });
 
     if (!session) throw new NotFoundException('Phiên luyện tập không tồn tại');
-    if (session.userId !== userId) throw new ForbiddenException('Bạn không có quyền truy cập phiên này');
-    if (session.status !== 'IN_PROGRESS') throw new BadRequestException('Phiên luyện tập đã kết thúc');
+    if (session.userId !== userId)
+      throw new ForbiddenException('Bạn không có quyền truy cập phiên này');
+    if (session.status !== 'IN_PROGRESS')
+      throw new BadRequestException('Phiên luyện tập đã kết thúc');
 
     // Check time limit
     const now = new Date();
     const expiryDate = new Date(session.startedAt);
     expiryDate.setMinutes(expiryDate.getMinutes() + session.duration);
-    
+
     // Add 1 min grace period
     expiryDate.setMinutes(expiryDate.getMinutes() + 1);
 
@@ -393,7 +401,8 @@ export class PracticeService {
     });
 
     if (!session) throw new NotFoundException('Phiên luyện tập không tồn tại');
-    if (session.userId !== userId) throw new ForbiddenException('Bạn không có quyền truy cập phiên này');
+    if (session.userId !== userId)
+      throw new ForbiddenException('Bạn không có quyền truy cập phiên này');
     if (session.status !== 'IN_PROGRESS') return session; // Already completed
 
     let totalScore = 0;
@@ -407,14 +416,19 @@ export class PracticeService {
         let isCorrect = false;
         let score = 0;
 
-        if (item.question.questionType === 'SINGLE_CHOICE' || item.question.questionType === 'MULTIPLE_CHOICE') {
-          const correctChoiceIds = item.question.choices.filter(c => c.isCorrect).map(c => c.id);
+        if (
+          item.question.questionType === 'SINGLE_CHOICE' ||
+          item.question.questionType === 'MULTIPLE_CHOICE'
+        ) {
+          const correctChoiceIds = item.question.choices
+            .filter((c) => c.isCorrect)
+            .map((c) => c.id);
           const selectedChoiceIds = answer.selectedChoiceIds || [];
-          
-          isCorrect = 
-            correctChoiceIds.length > 0 && 
+
+          isCorrect =
+            correctChoiceIds.length > 0 &&
             correctChoiceIds.length === selectedChoiceIds.length &&
-            correctChoiceIds.every(id => selectedChoiceIds.includes(id));
+            correctChoiceIds.every((id) => selectedChoiceIds.includes(id));
           score = isCorrect ? item.points : 0;
         } else if (item.question.questionType === 'SHORT_ANSWER') {
           const expected = item.question.correctAnswer?.trim() || '';
@@ -461,7 +475,7 @@ export class PracticeService {
         // Update question telemetry (usage count)
         await this.prisma.question.update({
           where: { id: item.questionId },
-          data: { usageCount: { increment: 1 } }
+          data: { usageCount: { increment: 1 } },
         });
 
         continue;
@@ -527,7 +541,7 @@ export class PracticeService {
     });
 
     const practicePoints = this.calculatePracticeCompletionPoints(totalScore, session.maxScore);
-    
+
     // Get booking ID from practice session via session fetch
     const practiceSessionWithBooking = await this.prisma.practiceSession.findUnique({
       where: { id: sessionId },

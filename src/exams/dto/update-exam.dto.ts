@@ -30,12 +30,9 @@ export const UpdateExamSchema = z
       path: ['passingScoreAbsolute'],
     },
   )
-  .refine(
-    (data) => !(data.publishNow && data.publishAt),
-    {
-      message: 'Không thể truyền đồng thời publishNow và publishAt',
-      path: ['publishNow'],
-    },
-  );
+  .refine((data) => !(data.publishNow && data.publishAt), {
+    message: 'Không thể truyền đồng thời publishNow và publishAt',
+    path: ['publishNow'],
+  });
 
 export type UpdateExamDto = z.infer<typeof UpdateExamSchema>;

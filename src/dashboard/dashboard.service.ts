@@ -9,12 +9,7 @@ export class DashboardService {
    * Get student-specific dashboard stats
    */
   async getStudentStats(userId: string) {
-    const [
-      totalPoints,
-      completedExams,
-      practiceSessions,
-      upcomingBookings,
-    ] = await Promise.all([
+    const [totalPoints, completedExams, practiceSessions, upcomingBookings] = await Promise.all([
       this.prisma.user.findUnique({ where: { id: userId }, select: { totalPoints: true } }),
       this.prisma.examSession.count({ where: { userId, status: 'SUBMITTED' } }), // GRADED or SUBMITTED
       this.prisma.practiceSession.count({ where: { userId, status: 'COMPLETED' } }),
@@ -55,30 +50,26 @@ export class DashboardService {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    const [
-      totalStudents,
-      activeBooths,
-      todayBookings,
-      totalExams,
-      recentEvents,
-    ] = await Promise.all([
-      this.prisma.user.count({ where: { role: 'STUDENT', isLocked: false } }),
-      this.prisma.booth.count({ where: { status: 'ACTIVE' } }),
-      this.prisma.booking.count({ where: { date: today } }),
-      this.prisma.examSession.count(),
-      this.prisma.proctoringEvent.findMany({
-        orderBy: { timestamp: 'desc' },
-        take: 10,
-        include: {
-          examSession: { select: { user: { select: { name: true, studentCode: true } } } },
-          practiceSession: { select: { user: { select: { name: true, studentCode: true } } } },
-        },
-      }),
-    ]);
+    const [totalStudents, activeBooths, todayBookings, totalExams, recentEvents] =
+      await Promise.all([
+        this.prisma.user.count({ where: { role: 'STUDENT', isLocked: false } }),
+        this.prisma.booth.count({ where: { status: 'ACTIVE' } }),
+        this.prisma.booking.count({ where: { date: today } }),
+        this.prisma.examSession.count(),
+        this.prisma.proctoringEvent.findMany({
+          orderBy: { timestamp: 'desc' },
+          take: 10,
+          include: {
+            examSession: { select: { user: { select: { name: true, studentCode: true } } } },
+            practiceSession: { select: { user: { select: { name: true, studentCode: true } } } },
+          },
+        }),
+      ]);
 
     // Booth utilization today
     const maxBookingsPerBooth = 20; // roughly 10 hours * 2 (30 min slots)
-    const utilizationRaw = activeBooths > 0 ? (todayBookings / (activeBooths * maxBookingsPerBooth)) * 100 : 0;
+    const utilizationRaw =
+      activeBooths > 0 ? (todayBookings / (activeBooths * maxBookingsPerBooth)) * 100 : 0;
     const utilization = Math.min(100, Math.round(utilizationRaw));
 
     return {

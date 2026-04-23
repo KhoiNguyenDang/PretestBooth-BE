@@ -96,12 +96,7 @@ export class PointsService {
   /**
    * Manual point adjustment by admin
    */
-  async manualAdjust(
-    adminRole: string,
-    targetUserId: string,
-    points: number,
-    reason: string,
-  ) {
+  async manualAdjust(adminRole: string, targetUserId: string, points: number, reason: string) {
     if (adminRole !== 'ADMIN') {
       throw new ForbiddenException('Chỉ quản trị viên mới có thể điều chỉnh điểm');
     }

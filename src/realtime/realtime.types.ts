@@ -11,8 +11,8 @@ export const realtimeEvents = {
 
 export interface BoothStatusUpdatedPayload {
   boothId: string;
-  status: 'ACTIVE' | 'MAINTENANCE' | 'INACTIVE';
-  previousStatus: 'ACTIVE' | 'MAINTENANCE' | 'INACTIVE';
+  status: 'ACTIVE' | 'MAINTENANCE_PENDING' | 'MAINTENANCE' | 'INACTIVE';
+  previousStatus: 'ACTIVE' | 'MAINTENANCE_PENDING' | 'MAINTENANCE' | 'INACTIVE';
   note: string;
   changedByUserId: string;
   changedAt: string;
@@ -44,6 +44,7 @@ export interface MonitoringUpdatedPayload {
   action:
     | 'CHECKIN'
     | 'CHECKOUT'
+    | 'TRANSFER_BOOKING'
     | 'FORCE_CHECKOUT'
     | 'FORCE_LOGOUT_BOOTH'
     | 'START'

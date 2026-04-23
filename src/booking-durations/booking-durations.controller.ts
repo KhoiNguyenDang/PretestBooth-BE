@@ -30,7 +30,9 @@ export class BookingDurationsController {
   constructor(private readonly bookingDurationsService: BookingDurationsService) {}
 
   @Get()
-  findAll(@Query(new ZodValidationPipe(QueryBookingDurationSchema)) query: QueryBookingDurationDto) {
+  findAll(
+    @Query(new ZodValidationPipe(QueryBookingDurationSchema)) query: QueryBookingDurationDto,
+  ) {
     return this.bookingDurationsService.findAll(query);
   }
 

@@ -173,7 +173,10 @@ export class AuthService {
       throw new ForbiddenException('Booth login chỉ áp dụng cho sinh viên');
     }
 
-    const booth = await this.boothsService.validateBoothSessionToken(boothSessionToken, boothBinding);
+    const booth = await this.boothsService.validateBoothSessionToken(
+      boothSessionToken,
+      boothBinding,
+    );
     let accessMode: BoothAccessMode = 'SCHEDULED';
     let checkedInBooking: any = null;
     let pendingCheckinBooking: any = null;
@@ -185,7 +188,10 @@ export class AuthService {
     } | null = null;
 
     try {
-      const bookingForCheckin = await this.bookingsService.getPendingCheckInByBooth(user.id, booth.id);
+      const bookingForCheckin = await this.bookingsService.getPendingCheckInByBooth(
+        user.id,
+        booth.id,
+      );
       const bookingForFreshCheckin = await this.prisma.booking.update({
         where: { id: bookingForCheckin.id },
         data: {
@@ -204,7 +210,10 @@ export class AuthService {
         throw error;
       }
 
-      const walkInResult = await this.bookingsService.createWalkInPracticeForBoothLogin(user.id, booth.id);
+      const walkInResult = await this.bookingsService.createWalkInPracticeForBoothLogin(
+        user.id,
+        booth.id,
+      );
       accessMode = 'WALK_IN';
       checkedInBooking = walkInResult.booking;
       walkInProtection = walkInResult.protection;
@@ -257,10 +266,7 @@ export class AuthService {
     return this.boothsService.deactivateBoothSession(boothSessionToken, boothBinding, userId);
   }
 
-  async getBoothSessionStatus(
-    boothSessionToken: string,
-    boothBinding: BoothSessionBindingContext,
-  ) {
+  async getBoothSessionStatus(boothSessionToken: string, boothBinding: BoothSessionBindingContext) {
     return this.boothsService.getBoothSessionStatus(boothSessionToken, boothBinding);
   }
 

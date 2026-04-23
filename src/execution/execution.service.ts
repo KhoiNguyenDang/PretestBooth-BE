@@ -42,8 +42,7 @@ export class ExecutionService implements OnModuleInit {
     private readonly configService: ConfigService,
     private readonly prisma: PrismaService,
   ) {
-    this.judge0Url =
-      this.configService.get<string>('JUDGE0_API_URL') || 'http://localhost:2358';
+    this.judge0Url = this.configService.get<string>('JUDGE0_API_URL') || 'http://localhost:2358';
 
     this.judge0FailFast =
       this.configService.get<string>('JUDGE0_FAIL_FAST', 'false')?.toLowerCase() === 'true';
@@ -56,7 +55,7 @@ export class ExecutionService implements OnModuleInit {
 
     try {
       // Validate URL shape early to fail fast on invalid config.
-      // eslint-disable-next-line no-new
+
       new URL(this.judge0Url);
     } catch {
       throw new Error(`Invalid JUDGE0_API_URL: ${this.judge0Url}`);
@@ -110,18 +109,16 @@ export class ExecutionService implements OnModuleInit {
         name: string;
       }>;
 
-      return languages.map(
-        (l) => {
-          const parsed = this.parseJudge0LanguageInfo(l.name);
-          return new LanguageInfoDto({
-            language: parsed.language,
-            version: parsed.version,
-            aliases: parsed.aliases,
-            runtime: parsed.runtime,
-            languageId: l.id,
-          });
-        },
-      );
+      return languages.map((l) => {
+        const parsed = this.parseJudge0LanguageInfo(l.name);
+        return new LanguageInfoDto({
+          language: parsed.language,
+          version: parsed.version,
+          aliases: parsed.aliases,
+          runtime: parsed.runtime,
+          languageId: l.id,
+        });
+      });
     } catch (error) {
       if (error instanceof HttpException) throw error;
       this.logger.error(`Judge0 service unavailable: ${(error as Error).message}`);
@@ -206,34 +203,25 @@ export class ExecutionService implements OnModuleInit {
     const defaultMemoryLimitKb = isJava ? 1024000 : 256000;
 
     if (isJavascript) {
-      return this.executeJavascriptLocally(
-        source,
-        dto.stdin || '',
-        dto.runTimeout || 5000,
-        0,
-      );
+      return this.executeJavascriptLocally(source, dto.stdin || '', dto.runTimeout || 5000, 0);
     }
 
     // Judge0 expects base64-encoded source code and stdin
     const payload = {
       language_id: languageId,
       source_code: Buffer.from(source).toString('base64'),
-      stdin:
-        isJavascript
-          ? ''
-          : dto.stdin
-            ? Buffer.from(dto.stdin).toString('base64')
-            : '',
+      stdin: isJavascript ? '' : dto.stdin ? Buffer.from(dto.stdin).toString('base64') : '',
       cpu_time_limit: (dto.runTimeout || 5000) / 1000, // Convert ms to seconds
       cpu_extra_time: 2,
-      wall_time_limit: ((dto.runTimeout || 5000) / 1000) + 5,
+      wall_time_limit: (dto.runTimeout || 5000) / 1000 + 5,
       memory_limit:
         dto.runMemoryLimit && dto.runMemoryLimit > 0
           ? dto.runMemoryLimit * 1024
           : defaultMemoryLimitKb, // Convert MB to KB
       compiler_options: this.getCompilerOptions(dto.language),
-      command_line_arguments:
-        isJavascript ? Buffer.from(dto.stdin || '').toString('base64') : undefined,
+      command_line_arguments: isJavascript
+        ? Buffer.from(dto.stdin || '').toString('base64')
+        : undefined,
     };
 
     try {
@@ -299,7 +287,10 @@ export class ExecutionService implements OnModuleInit {
     } catch (error) {
       if (error instanceof HttpException) throw error;
       if ((error as Error).name === 'AbortError') {
-        throw new HttpException('Execution timed out while waiting for Judge0', HttpStatus.GATEWAY_TIMEOUT);
+        throw new HttpException(
+          'Execution timed out while waiting for Judge0',
+          HttpStatus.GATEWAY_TIMEOUT,
+        );
       }
       this.logger.error(`Judge0 execution error: ${(error as Error).message}`);
       throw new HttpException(
@@ -487,12 +478,20 @@ export class ExecutionService implements OnModuleInit {
    */
   private compareOutput(actual: string, expected: string): boolean {
     // Keep token boundaries to avoid matching "1 2 3" with "123".
-    const normalize = (str: string) => str.replace(/\r\n/g, '\n').trim().replace(/[ \t\f\v]+/g, ' ');
+    const normalize = (str: string) =>
+      str
+        .replace(/\r\n/g, '\n')
+        .trim()
+        .replace(/[ \t\f\v]+/g, ' ');
 
     return normalize(actual) === normalize(expected);
   }
 
-  private async fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+  private async fetchWithTimeout(
+    url: string,
+    init: RequestInit,
+    timeoutMs: number,
+  ): Promise<Response> {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -554,9 +553,7 @@ export class ExecutionService implements OnModuleInit {
     try {
       return Buffer.from(value, 'base64').toString('utf-8');
     } catch (error) {
-      this.logger.warn(
-        `Failed to decode Judge0 ${fieldName}: ${(error as Error).message}`,
-      );
+      this.logger.warn(`Failed to decode Judge0 ${fieldName}: ${(error as Error).message}`);
       return '';
     }
   }
@@ -691,9 +688,7 @@ export class ExecutionService implements OnModuleInit {
     }
     if (!result.isSuccess) {
       const hasExitCode = typeof result.exitCode === 'number';
-      return hasExitCode
-        ? `Runtime Error (exit code: ${result.exitCode})`
-        : 'Runtime Error';
+      return hasExitCode ? `Runtime Error (exit code: ${result.exitCode})` : 'Runtime Error';
     }
     return 'Accepted';
   }

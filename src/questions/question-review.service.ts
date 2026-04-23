@@ -1,4 +1,9 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { QuestionReviewStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import type { GenerateReviewSessionsDto } from './dto/generate-review-sessions.dto';
@@ -108,15 +113,17 @@ export class QuestionReviewService {
 
     const stats = {
       total: groupedStats.reduce((acc, item) => acc + item._count._all, 0),
-      pending: groupedStats.find((item) => item.status === QuestionReviewStatus.PENDING)?._count
-        ._all ?? 0,
+      pending:
+        groupedStats.find((item) => item.status === QuestionReviewStatus.PENDING)?._count._all ?? 0,
       resubmitted:
         groupedStats.find((item) => item.status === QuestionReviewStatus.RESUBMITTED)?._count
           ._all ?? 0,
       approved:
-        groupedStats.find((item) => item.status === QuestionReviewStatus.APPROVED)?._count._all ?? 0,
+        groupedStats.find((item) => item.status === QuestionReviewStatus.APPROVED)?._count._all ??
+        0,
       needsRevision:
-        groupedStats.find((item) => item.status === QuestionReviewStatus.NEEDS_REVISION)?._count._all ?? 0,
+        groupedStats.find((item) => item.status === QuestionReviewStatus.NEEDS_REVISION)?._count
+          ._all ?? 0,
       skipped:
         groupedStats.find((item) => item.status === QuestionReviewStatus.SKIPPED)?._count._all ?? 0,
     };
@@ -241,11 +248,15 @@ export class QuestionReviewService {
 
     const isOwner = session.question.creatorId === actorId;
     if (!isOwner && actorRole !== 'ADMIN') {
-      throw new ForbiddenException('Chỉ người tạo câu hỏi hoặc quản trị viên mới được gửi duyệt lại');
+      throw new ForbiddenException(
+        'Chỉ người tạo câu hỏi hoặc quản trị viên mới được gửi duyệt lại',
+      );
     }
 
     if (session.status !== QuestionReviewStatus.NEEDS_REVISION) {
-      throw new BadRequestException('Chỉ câu hỏi đang ở trạng thái Cần sửa mới có thể gửi duyệt lại');
+      throw new BadRequestException(
+        'Chỉ câu hỏi đang ở trạng thái Cần sửa mới có thể gửi duyệt lại',
+      );
     }
 
     const reviewedAt = new Date();

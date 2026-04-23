@@ -31,7 +31,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         },
       });
 
-      if (!booth || booth.status !== 'ACTIVE' || !booth.sessionTokenHash) {
+      const allowedStatuses = new Set(['ACTIVE', 'MAINTENANCE_PENDING']);
+      if (!booth || !allowedStatuses.has(booth.status) || !booth.sessionTokenHash) {
         throw new UnauthorizedException('Phiên kiosk đã hết hiệu lực');
       }
     }

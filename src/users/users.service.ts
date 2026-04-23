@@ -56,6 +56,10 @@ export class UsersService {
     );
   }
 
+  private toImportRowRecord(row: unknown): Record<string, unknown> {
+    return (row && typeof row === 'object' ? row : {}) as Record<string, unknown>;
+  }
+
   private async assertLecturerPermissionManagementAccess(
     requesterId: string,
     requesterRole: string,
@@ -107,9 +111,7 @@ export class UsersService {
     };
     permissions?: { permission: LecturerPermissionKey }[];
   }) {
-    const permissions = (record.permissions || []).map(
-      (item) => item.permission as LecturerPermissionKey,
-    );
+    const permissions = (record.permissions || []).map((item) => item.permission);
 
     return {
       id: record.id,
@@ -141,13 +143,9 @@ export class UsersService {
       permissions: { permission: LecturerPermissionKey }[];
     } | null;
   }) {
-    const individualPermissions = record.lecturerPermissions.map(
-      (item) => item.permission as LecturerPermissionKey,
-    );
+    const individualPermissions = record.lecturerPermissions.map((item) => item.permission);
     const rolePermissions = record.lecturerRole
-      ? record.lecturerRole.permissions.map(
-          (item) => item.permission as LecturerPermissionKey,
-        )
+      ? record.lecturerRole.permissions.map((item) => item.permission)
       : [];
     const permissions = this.mergePermissions(individualPermissions, rolePermissions);
 
@@ -205,10 +203,7 @@ export class UsersService {
       return roles.map((role) => this.mapLecturerRole(role));
     }
 
-    if (
-      requesterRole !== 'LECTURER' ||
-      !requesterPermissions.includes(LECTURER_ADMIN_PERMISSION)
-    ) {
+    if (requesterRole !== 'LECTURER' || !requesterPermissions.includes(LECTURER_ADMIN_PERMISSION)) {
       return [];
     }
 
@@ -387,9 +382,7 @@ export class UsersService {
       email: student.email,
       name: student.name || '',
       className: student.className || '',
-      dateOfBirth: student.dateOfBirth
-        ? student.dateOfBirth.toISOString().slice(0, 10)
-        : '',
+      dateOfBirth: student.dateOfBirth ? student.dateOfBirth.toISOString().slice(0, 10) : '',
       status: student.isLocked ? 'LOCKED' : 'ACTIVE',
       lockedReason: student.lockedReason || '',
       totalPoints: student.totalPoints,
@@ -425,9 +418,7 @@ export class UsersService {
 
       const csvLines = [
         headers.join(','),
-        ...rows.map((row) =>
-          headers.map((key) => escapeCsv((row as any)[key] ?? '')).join(','),
-        ),
+        ...rows.map((row) => headers.map((key) => escapeCsv((row as any)[key] ?? '')).join(',')),
       ];
 
       const csvWithBom = `\uFEFF${csvLines.join('\r\n')}`;
@@ -445,8 +436,7 @@ export class UsersService {
     const buffer = xlsx.write(workbook, { bookType: 'xlsx', type: 'buffer' }) as Buffer;
     return {
       fileName: `students_${dateStamp}.xlsx`,
-      contentType:
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       buffer,
     };
   }
@@ -458,9 +448,19 @@ export class UsersService {
     const user = await this.prisma.user.findUnique({
       where: { id },
       select: {
-        id: true, email: true, name: true, studentCode: true, className: true, role: true,
-        isEmailVerified: true, isLocked: true, lockedAt: true, lockedReason: true,
-        dateOfBirth: true, totalPoints: true, createdAt: true,
+        id: true,
+        email: true,
+        name: true,
+        studentCode: true,
+        className: true,
+        role: true,
+        isEmailVerified: true,
+        isLocked: true,
+        lockedAt: true,
+        lockedReason: true,
+        dateOfBirth: true,
+        totalPoints: true,
+        createdAt: true,
       },
     });
 
@@ -493,10 +493,7 @@ export class UsersService {
 
     const existing = await this.prisma.user.findFirst({
       where: {
-        OR: [
-          { email: dto.email },
-          ...(dto.studentCode ? [{ studentCode: dto.studentCode }] : []),
-        ],
+        OR: [{ email: dto.email }, ...(dto.studentCode ? [{ studentCode: dto.studentCode }] : [])],
       },
     });
 
@@ -522,7 +519,7 @@ export class UsersService {
         name: dto.name,
         role: dto.role as Role,
         studentCode: dto.studentCode,
-        className: dto.role === 'STUDENT' ? (dto.className || null) : null,
+        className: dto.role === 'STUDENT' ? dto.className || null : null,
         password: hashedPassword,
         dateOfBirth: dobDate,
         isEmailVerified: true, // Created by admin = verified
@@ -561,7 +558,8 @@ export class UsersService {
       email: user.email,
       name: user.name,
       emailSent: true,
-      message: 'Tài khoản sinh viên đã tạo thành công và thông tin đăng nhập đã được gửi qua email.',
+      message:
+        'Tài khoản sinh viên đã tạo thành công và thông tin đăng nhập đã được gửi qua email.',
     };
   }
 
@@ -725,9 +723,7 @@ export class UsersService {
       (item) => item.permission as LecturerPermissionKey,
     );
     const rolePermissions = lecturer.lecturerRole
-      ? lecturer.lecturerRole.permissions.map(
-          (item) => item.permission as LecturerPermissionKey,
-        )
+      ? lecturer.lecturerRole.permissions.map((item) => item.permission as LecturerPermissionKey)
       : [];
     const permissions = this.mergePermissions(individualPermissions, rolePermissions);
 
@@ -792,18 +788,12 @@ export class UsersService {
     }
 
     const requestedPermissions = [...new Set(dto.permissions)] as LecturerPermissionKey[];
-    const currentSnapshot = await this.authorizationService.getPermissionSnapshotForLecturer(
-      lecturerId,
-    );
+    const currentSnapshot =
+      await this.authorizationService.getPermissionSnapshotForLecturer(lecturerId);
     const currentPermissions = currentSnapshot.permissions;
 
-    if (
-      requesterRole !== 'ADMIN' &&
-      currentPermissions.includes(LECTURER_ADMIN_PERMISSION)
-    ) {
-      throw new ForbiddenException(
-        'Giảng viên có quyền admin chỉ được quản lý bởi ADMIN gốc.',
-      );
+    if (requesterRole !== 'ADMIN' && currentPermissions.includes(LECTURER_ADMIN_PERMISSION)) {
+      throw new ForbiddenException('Giảng viên có quyền admin chỉ được quản lý bởi ADMIN gốc.');
     }
 
     for (const permission of requestedPermissions) {
@@ -830,10 +820,10 @@ export class UsersService {
       }
     });
 
-    const refreshedPermissions = await this.authorizationService.getPermissionsForLecturer(lecturerId);
-    const refreshedSnapshot = await this.authorizationService.getPermissionSnapshotForLecturer(
-      lecturerId,
-    );
+    const refreshedPermissions =
+      await this.authorizationService.getPermissionsForLecturer(lecturerId);
+    const refreshedSnapshot =
+      await this.authorizationService.getPermissionSnapshotForLecturer(lecturerId);
 
     return {
       lecturerId,
@@ -847,11 +837,7 @@ export class UsersService {
     };
   }
 
-  async findLecturerRoles(
-    query: QueryLecturerRoleDto,
-    requesterId: string,
-    requesterRole: string,
-  ) {
+  async findLecturerRoles(query: QueryLecturerRoleDto, requesterId: string, requesterRole: string) {
     const requesterPermissions =
       requesterRole === 'ADMIN'
         ? this.authorizationService.getAllLecturerPermissions()
@@ -966,11 +952,7 @@ export class UsersService {
     };
   }
 
-  async createLecturerRole(
-    dto: CreateLecturerRoleDto,
-    requesterId: string,
-    requesterRole: string,
-  ) {
+  async createLecturerRole(dto: CreateLecturerRoleDto, requesterId: string, requesterRole: string) {
     this.assertLecturerRoleCatalogManagementAccess(requesterRole);
 
     const normalizedCode = dto.code.trim().toUpperCase();
@@ -1233,9 +1215,8 @@ export class UsersService {
           },
     });
 
-    const refreshedSnapshot = await this.authorizationService.getPermissionSnapshotForLecturer(
-      lecturerId,
-    );
+    const refreshedSnapshot =
+      await this.authorizationService.getPermissionSnapshotForLecturer(lecturerId);
 
     return {
       lecturerId,
@@ -1286,7 +1267,9 @@ export class UsersService {
 
     if (dto.studentCode !== undefined && dto.studentCode !== user.studentCode) {
       if (dto.studentCode) {
-        const studentCodeExists = await this.prisma.user.findUnique({ where: { studentCode: dto.studentCode } });
+        const studentCodeExists = await this.prisma.user.findUnique({
+          where: { studentCode: dto.studentCode },
+        });
         if (studentCodeExists) {
           throw new ConflictException('MSSV đã tồn tại');
         }
@@ -1365,7 +1348,7 @@ export class UsersService {
 
   /**
    * Import students from CSV/Excel
-  * Expected columns: studentCode, email, name, className?, dateOfBirth (YYYY-MM-DD or DD/MM/YYYY)
+   * Expected columns: studentCode, email, name, className?, dateOfBirth (YYYY-MM-DD or DD/MM/YYYY)
    */
   async importStudents(file: Express.Multer.File, requesterId: string, requesterRole: string) {
     await this.assertStudentManagementAccess(requesterId, requesterRole);
@@ -1378,7 +1361,7 @@ export class UsersService {
     const workbook = xlsx.read(file.buffer, { type: 'buffer' });
     const sheetName = workbook.SheetNames[0];
     const sheet = workbook.Sheets[sheetName];
-    const data = xlsx.utils.sheet_to_json(sheet) as any[];
+    const data = xlsx.utils.sheet_to_json<unknown>(sheet);
 
     if (data.length === 0) {
       throw new BadRequestException('File không có dữ liệu');
@@ -1395,13 +1378,14 @@ export class UsersService {
     // a bulk insert with ON CONFLICT DO NOTHING is faster
     for (const [index, row] of data.entries()) {
       const rowNum = index + 2; // +1 for 0-index, +1 for header
-      
+      const rowData = this.toImportRowRecord(row);
+
       try {
-        const studentCode = row.studentCode?.toString()?.trim();
-        const email = row.email?.toString()?.trim()?.toLowerCase();
-        const name = row.name?.toString()?.trim();
-        const className = row.className?.toString()?.trim();
-        const dobStr = row.dateOfBirth?.toString()?.trim();
+        const studentCode = rowData.studentCode?.toString()?.trim();
+        const email = rowData.email?.toString()?.trim()?.toLowerCase();
+        const name = rowData.name?.toString()?.trim();
+        const className = rowData.className?.toString()?.trim();
+        const dobStr = rowData.dateOfBirth?.toString()?.trim();
 
         if (!studentCode || !email || !name) {
           throw new Error('Thiếu trường bắt buộc (studentCode, email, name)');
@@ -1417,8 +1401,8 @@ export class UsersService {
 
         if (dobStr) {
           // If Excel date serial number
-          if (typeof row.dateOfBirth === 'number') {
-            dobDate = new Date((row.dateOfBirth - (25567 + 1)) * 86400 * 1000);
+          if (typeof rowData.dateOfBirth === 'number') {
+            dobDate = new Date((rowData.dateOfBirth - (25567 + 1)) * 86400 * 1000);
           } else if (dobStr.includes('/')) {
             // Assume DD/MM/YYYY
             const parts = dobStr.split('/');
@@ -1452,9 +1436,9 @@ export class UsersService {
         });
 
         results.success++;
-      } catch (err) {
+      } catch (err: unknown) {
         // If it's a Prisma unique constraint violation
-        if (err.code === 'P2002') {
+        if (typeof err === 'object' && err !== null && 'code' in err && err.code === 'P2002') {
           results.errors.push(`Dòng ${rowNum}: MSSV hoặc Email đã tồn tại`);
         } else {
           results.errors.push(`Dòng ${rowNum}: ${(err as Error).message}`);

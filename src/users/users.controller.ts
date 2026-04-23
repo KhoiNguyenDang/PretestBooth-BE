@@ -1,6 +1,20 @@
 import {
-  Controller, Get, Post, Put, Patch, Delete, Body, Param, Query, Req, Res,
-  UseGuards, UseInterceptors, UploadedFile, ParseFilePipe, MaxFileSizeValidator
+  Controller,
+  Get,
+  Post,
+  Put,
+  Patch,
+  Delete,
+  Body,
+  Param,
+  Query,
+  Req,
+  Res,
+  UseGuards,
+  UseInterceptors,
+  UploadedFile,
+  ParseFilePipe,
+  MaxFileSizeValidator,
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { AuthGuard } from '@nestjs/passport';

@@ -8,7 +8,10 @@ export const QueryUserSchema = z.object({
   search: z.string().optional(),
   className: z.string().optional(),
   cohort: z.coerce.number().int().min(1).max(99).optional(),
-  isLocked: z.preprocess((val) => val === 'true' ? true : val === 'false' ? false : undefined, z.boolean().optional()),
+  isLocked: z.preprocess(
+    (val) => (val === 'true' ? true : val === 'false' ? false : undefined),
+    z.boolean().optional(),
+  ),
   sortOrder: z.enum(['asc', 'desc']).default('desc'),
   format: z.enum(['csv', 'xlsx']).optional(),
 });
@@ -21,7 +24,10 @@ export const CreateUserSchema = z.object({
   role: z.literal('STUDENT'),
   studentCode: z.string().optional(),
   className: z.string().optional(),
-  dateOfBirth: z.string().refine((val) => !isNaN(Date.parse(val)), 'Ngày sinh không hợp lệ').optional(),
+  dateOfBirth: z
+    .string()
+    .refine((val) => !isNaN(Date.parse(val)), 'Ngày sinh không hợp lệ')
+    .optional(),
 });
 
 export type CreateUserDto = z.output<typeof CreateUserSchema>;
@@ -29,10 +35,7 @@ export type CreateUserDto = z.output<typeof CreateUserSchema>;
 export const CreateLecturerSchema = z.object({
   email: z.string().email('Email không hợp lệ'),
   name: z.string().min(1, 'Tên không được để trống'),
-  password: z
-    .string()
-    .min(8, 'Mật khẩu phải có ít nhất 8 ký tự')
-    .max(72, 'Mật khẩu không hợp lệ'),
+  password: z.string().min(8, 'Mật khẩu phải có ít nhất 8 ký tự').max(72, 'Mật khẩu không hợp lệ'),
 });
 
 export type CreateLecturerDto = z.output<typeof CreateLecturerSchema>;
@@ -42,7 +45,10 @@ export const UpdateUserSchema = z.object({
   studentCode: z.string().optional(),
   name: z.string().min(1).optional(),
   className: z.string().optional(),
-  dateOfBirth: z.string().refine((val) => !isNaN(Date.parse(val)), 'Ngày sinh không hợp lệ').optional(),
+  dateOfBirth: z
+    .string()
+    .refine((val) => !isNaN(Date.parse(val)), 'Ngày sinh không hợp lệ')
+    .optional(),
   isLocked: z.boolean().optional(),
   lockedReason: z.string().optional(),
 });
@@ -71,11 +77,10 @@ export const QueryLecturerRoleSchema = z.object({
   page: z.coerce.number().int().positive().default(1),
   limit: z.coerce.number().int().positive().max(100).default(20),
   search: z.string().optional(),
-  isActive: z
-    .preprocess(
-      (val) => (val === 'true' ? true : val === 'false' ? false : undefined),
-      z.boolean().optional(),
-    ),
+  isActive: z.preprocess(
+    (val) => (val === 'true' ? true : val === 'false' ? false : undefined),
+    z.boolean().optional(),
+  ),
   sortOrder: z.enum(['asc', 'desc']).default('asc'),
 });
 

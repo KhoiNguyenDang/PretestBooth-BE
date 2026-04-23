@@ -97,7 +97,13 @@ export class SubmissionsController {
   ) {
     const userId = req.user['sub'];
     const userRole = req.user['role'];
-    return this.submissionsService.findSubmissionTestMembers(userId, userRole, type, entityId, query);
+    return this.submissionsService.findSubmissionTestMembers(
+      userId,
+      userRole,
+      type,
+      entityId,
+      query,
+    );
   }
 
   /**

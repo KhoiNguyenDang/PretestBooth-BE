@@ -36,7 +36,9 @@ export class GeminiShortAnswerGraderService {
   async grade(input: GradeShortAnswerInput): Promise<ShortAnswerGradeResult | null> {
     const apiKey = this.getApiKey();
     if (!apiKey) {
-      this.logger.warn('Gemini short-answer grader is disabled because GEMINI_API_KEY/GOOGLE_API_KEY is missing');
+      this.logger.warn(
+        'Gemini short-answer grader is disabled because GEMINI_API_KEY/GOOGLE_API_KEY is missing',
+      );
       return null;
     }
 
@@ -46,7 +48,10 @@ export class GeminiShortAnswerGraderService {
     for (const model of modelCandidates) {
       const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), GeminiShortAnswerGraderService.REQUEST_TIMEOUT_MS);
+      const timeout = setTimeout(
+        () => controller.abort(),
+        GeminiShortAnswerGraderService.REQUEST_TIMEOUT_MS,
+      );
 
       try {
         const response = await fetch(endpoint, {
@@ -88,7 +93,9 @@ export class GeminiShortAnswerGraderService {
 
         const parsed = this.parseGradePayload(text);
         if (!parsed) {
-          this.logger.warn(`Gemini response JSON parse failed for short answer grading (model=${model})`);
+          this.logger.warn(
+            `Gemini response JSON parse failed for short answer grading (model=${model})`,
+          );
           continue;
         }
 

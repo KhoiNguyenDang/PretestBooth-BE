@@ -1,9 +1,6 @@
 import { z } from 'zod';
 
-export const PretestAssignmentModeSchema = z.enum([
-  'QUESTION_BANK_RANDOM',
-  'OFFICIAL_EXAM_POOL',
-]);
+export const PretestAssignmentModeSchema = z.enum(['QUESTION_BANK_RANDOM', 'OFFICIAL_EXAM_POOL']);
 
 export const PretestQuestionBankRandomConfigSchema = z
   .object({
@@ -59,9 +56,7 @@ export type PretestAssignmentMode = z.output<typeof PretestAssignmentModeSchema>
 export type PretestQuestionBankRandomConfig = z.output<
   typeof PretestQuestionBankRandomConfigSchema
 >;
-export type PretestOfficialExamPoolConfig = z.output<
-  typeof PretestOfficialExamPoolConfigSchema
->;
+export type PretestOfficialExamPoolConfig = z.output<typeof PretestOfficialExamPoolConfigSchema>;
 export type UpsertPretestConfigDto = z.output<typeof UpsertPretestConfigSchema>;
 
 export type PretestConfigDto = {

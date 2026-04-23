@@ -825,6 +825,7 @@ enum PretestThresholdSource {
 
 enum BoothStatus {
   ACTIVE
+  MAINTENANCE_PENDING
   MAINTENANCE
   INACTIVE
 }

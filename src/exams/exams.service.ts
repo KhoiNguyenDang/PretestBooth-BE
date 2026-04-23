@@ -25,9 +25,7 @@ import type { QueryExamDto } from './dto/query-exam.dto';
 import type { SaveAnswerDto } from './dto/save-answer.dto';
 import type { GradeSessionDto } from './dto/grade-session.dto';
 import type { QueryExamSessionsDto } from './dto/query-exam-sessions.dto';
-import {
-  UpsertPretestConfigSchema,
-} from './dto/pretest-config.dto';
+import { UpsertPretestConfigSchema } from './dto/pretest-config.dto';
 import type {
   PretestConfigDto,
   PretestQuestionBankRandomConfig,
@@ -76,10 +74,7 @@ const VIETNAM_UTC_OFFSET_MINUTES = 7 * 60;
 @Injectable()
 export class ExamsService {
   private readonly logger = new Logger(ExamsService.name);
-  private readonly defaultPretestConfig: Omit<
-    PretestConfigDto,
-    'updatedAt' | 'updatedByUserId'
-  > = {
+  private readonly defaultPretestConfig: Omit<PretestConfigDto, 'updatedAt' | 'updatedByUserId'> = {
     isEnabled: false,
     assignmentMode: 'OFFICIAL_EXAM_POOL',
     maxAttempts: 3,
@@ -100,7 +95,11 @@ export class ExamsService {
     private readonly mailService: MailService,
   ) {}
 
-  private async assertExamManagementPermission(userId: string, userRole: string, actionLabel: string) {
+  private async assertExamManagementPermission(
+    userId: string,
+    userRole: string,
+    actionLabel: string,
+  ) {
     if (userRole === 'ADMIN') {
       return;
     }
@@ -152,10 +151,15 @@ export class ExamsService {
    * @param durationMinutes - Exam duration in minutes (from exam.duration)
    * @returns true if session time has expired
    */
-  private isSessionExpired(session: { startedAt: Date; expiresAt?: Date }, durationMinutes: number): boolean {
+  private isSessionExpired(
+    session: { startedAt: Date; expiresAt?: Date },
+    durationMinutes: number,
+  ): boolean {
     const now = Date.now();
     // If expiresAt is set, use it; otherwise calculate from startedAt
-    const deadline = session.expiresAt ? session.expiresAt.getTime() : session.startedAt.getTime() + durationMinutes * 60 * 1000;
+    const deadline = session.expiresAt
+      ? session.expiresAt.getTime()
+      : session.startedAt.getTime() + durationMinutes * 60 * 1000;
     return now > deadline;
   }
 
@@ -253,8 +257,7 @@ export class ExamsService {
       return;
     }
 
-    const isOnlinePracticeSession =
-      sessionMeta.exam.type === 'PRACTICE' && !sessionMeta.bookingId;
+    const isOnlinePracticeSession = sessionMeta.exam.type === 'PRACTICE' && !sessionMeta.bookingId;
     const targetPoints = isOnlinePracticeSession
       ? 0
       : this.calculateExamCompletionPoints(score, maxScore);
@@ -460,8 +463,7 @@ export class ExamsService {
 
       const missingThreshold = exams
         .filter(
-          (exam) =>
-            exam.passingScoreAbsolute === null || exam.passingScoreAbsolute === undefined,
+          (exam) => exam.passingScoreAbsolute === null || exam.passingScoreAbsolute === undefined,
         )
         .map((exam) => exam.id);
       if (missingThreshold.length > 0) {
@@ -800,8 +802,10 @@ export class ExamsService {
     });
 
     if (existingInProgress) {
-      const existingAppliedThreshold = (existingInProgress as any)
-        .appliedPassingScoreAbsolute as number | null | undefined;
+      const existingAppliedThreshold = (existingInProgress as any).appliedPassingScoreAbsolute as
+        | number
+        | null
+        | undefined;
       if (this.isSessionExpired(existingInProgress, existingInProgress.exam.duration)) {
         await this.prisma.examSession.update({
           where: { id: existingInProgress.id },
@@ -861,7 +865,7 @@ export class ExamsService {
       assignedExam = await this.pickAssignedOfficialExamFromPool(poolExamIds);
       assignmentMode = 'OFFICIAL_EXAM_POOL';
       thresholdSource = 'EXAM';
-      appliedPassingScoreAbsolute = Number((assignedExam as any).passingScoreAbsolute);
+      appliedPassingScoreAbsolute = Number(assignedExam.passingScoreAbsolute);
       sourceExamId = assignedExam.id;
     } else {
       const randomConfig = config.questionBankRandom;
@@ -1006,7 +1010,7 @@ export class ExamsService {
     // Determine generation mode
     const isManual = dto.generationMode === 'MANUAL';
 
-    if (isManual && (!dto.questionIds?.length && !dto.problemIds?.length)) {
+    if (isManual && !dto.questionIds?.length && !dto.problemIds?.length) {
       throw new BadRequestException('MANUAL mode yêu cầu questionIds hoặc problemIds');
     }
 
@@ -1033,7 +1037,7 @@ export class ExamsService {
     let finalProblemIds: string[] = [];
 
     if (isManualQuestions) {
-      const distinctQuestionIds = [...new Set(dto.questionIds!)];
+      const distinctQuestionIds = [...new Set(dto.questionIds)];
       if (distinctQuestionIds.length !== dto.questionIds!.length) {
         throw new BadRequestException('Danh sách questionIds bị trùng');
       }
@@ -1070,15 +1074,15 @@ export class ExamsService {
           allocationPolicy,
         );
       } else {
-      const useQuestionDetailDistribution = Boolean(dto.questionDifficultyDistribution);
-      const questionFilter = {
-        classification: questionClassificationFilter,
-        subjectIds: selectedSubjectIds.length > 0 ? selectedSubjectIds : undefined,
-        topicId: dto.topicId || undefined,
-        difficulty: useQuestionDetailDistribution
-          ? undefined
-          : ((dto.difficulty as Difficulty) || undefined),
-      };
+        const useQuestionDetailDistribution = Boolean(dto.questionDifficultyDistribution);
+        const questionFilter = {
+          classification: questionClassificationFilter,
+          subjectIds: selectedSubjectIds.length > 0 ? selectedSubjectIds : undefined,
+          topicId: dto.topicId || undefined,
+          difficulty: useQuestionDetailDistribution
+            ? undefined
+            : (dto.difficulty as Difficulty) || undefined,
+        };
 
         if (dto.questionDifficultyDistribution) {
           finalQuestionIds = await this.pickRandomQuestionIdsByDifficultyDistribution(
@@ -1087,7 +1091,10 @@ export class ExamsService {
             allocationPolicy,
           );
         } else {
-          finalQuestionIds = await this.pickRandomQuestionIdsBySql(questionFilter, dto.questionCount);
+          finalQuestionIds = await this.pickRandomQuestionIdsBySql(
+            questionFilter,
+            dto.questionCount,
+          );
         }
       }
 
@@ -1104,7 +1111,7 @@ export class ExamsService {
     }
 
     if (isManualProblems) {
-      const distinctProblemIds = [...new Set(dto.problemIds!)];
+      const distinctProblemIds = [...new Set(dto.problemIds)];
       if (distinctProblemIds.length !== dto.problemIds!.length) {
         throw new BadRequestException('Danh sách problemIds bị trùng');
       }
@@ -1132,7 +1139,7 @@ export class ExamsService {
         topicId: dto.includeProblemsRelatedToQuestions ? dto.topicId || undefined : undefined,
         difficulty: useProblemDetailDistribution
           ? undefined
-          : ((dto.difficulty as Difficulty) || undefined),
+          : (dto.difficulty as Difficulty) || undefined,
       };
 
       if (dto.problemDifficultyDistribution) {
@@ -1159,11 +1166,15 @@ export class ExamsService {
 
     const effectiveQuestionCount = finalQuestionIds.length;
     const effectiveProblemCount = finalProblemIds.length;
-    const examType = (dto.type as 'PRACTICE' | 'EXAM') || 'EXAM';
+    const examType = dto.type || 'EXAM';
     const maxExamScore = effectiveQuestionCount + effectiveProblemCount;
 
     let passingScoreAbsolute: number | null = null;
-    if (examType === 'EXAM' && dto.passingScoreAbsolute !== undefined && dto.passingScoreAbsolute !== null) {
+    if (
+      examType === 'EXAM' &&
+      dto.passingScoreAbsolute !== undefined &&
+      dto.passingScoreAbsolute !== null
+    ) {
       if (dto.passingScoreAbsolute > maxExamScore) {
         throw new BadRequestException(
           `Ngưỡng điểm đạt không được vượt quá tổng điểm tối đa (${maxExamScore})`,
@@ -1199,9 +1210,7 @@ export class ExamsService {
           publishedAt: publication.publishedAt,
           isPublished: publication.isPublished,
           subjectId:
-            selectedSubjectIds.length === 1
-              ? selectedSubjectIds[0]
-              : dto.subjectId || null,
+            selectedSubjectIds.length === 1 ? selectedSubjectIds[0] : dto.subjectId || null,
           topicId: dto.topicId || null,
           creatorId,
           type: examType,
@@ -1276,8 +1285,7 @@ export class ExamsService {
       isPublished,
       sortBy,
       sortOrder,
-    } =
-      query;
+    } = query;
     const skip = (page - 1) * limit;
 
     const where: Prisma.ExamWhereInput = {};
@@ -1417,10 +1425,12 @@ export class ExamsService {
     const exam = await this.prisma.exam.findUnique({ where: { id } });
     if (!exam) throw new NotFoundException('Đề thi không tồn tại');
 
-    const nextType = (dto.type as 'PRACTICE' | 'EXAM' | undefined) || exam.type;
+    const nextType = dto.type || exam.type;
     const currentPassingScoreAbsolute = (exam as any).passingScoreAbsolute as number | null;
     let nextPassingScoreAbsolute =
-      dto.passingScoreAbsolute !== undefined ? dto.passingScoreAbsolute : currentPassingScoreAbsolute;
+      dto.passingScoreAbsolute !== undefined
+        ? dto.passingScoreAbsolute
+        : currentPassingScoreAbsolute;
 
     if (nextType === 'PRACTICE') {
       if (dto.passingScoreAbsolute !== undefined && dto.passingScoreAbsolute !== null) {
@@ -1499,7 +1509,7 @@ export class ExamsService {
   /**
    * Start an exam session for a student.
    * Generates a random seed and returns shuffled items.
-    * Requires booth check-in only for EXAM sessions.
+   * Requires booth check-in only for EXAM sessions.
    */
   async startSession(
     examId: string,
@@ -1587,7 +1597,8 @@ export class ExamsService {
     });
 
     if (!fullExam) throw new NotFoundException('Đề thi không tồn tại');
-    if (!this.isExamPubliclyAvailable(fullExam)) throw new ForbiddenException('Đề thi chưa được công bố');
+    if (!this.isExamPubliclyAvailable(fullExam))
+      throw new ForbiddenException('Đề thi chưa được công bố');
 
     // Check if there's an existing session of this exam for this user
     const existingSession = await this.prisma.examSession.findFirst({
@@ -1739,14 +1750,14 @@ export class ExamsService {
         languageVersion: dto.languageVersion ?? null,
       },
       update: {
-        ...(dto.selectedChoiceIds !== undefined ? { selectedChoiceIds: dto.selectedChoiceIds } : {}),
+        ...(dto.selectedChoiceIds !== undefined
+          ? { selectedChoiceIds: dto.selectedChoiceIds }
+          : {}),
         ...(dto.textAnswer !== undefined ? { textAnswer: dto.textAnswer } : {}),
         ...(dto.submissionId !== undefined ? { submissionId: dto.submissionId } : {}),
         ...(dto.sourceCode !== undefined ? { sourceCode: dto.sourceCode } : {}),
         ...(dto.language !== undefined ? { language: dto.language } : {}),
-        ...(dto.languageVersion !== undefined
-          ? { languageVersion: dto.languageVersion }
-          : {}),
+        ...(dto.languageVersion !== undefined ? { languageVersion: dto.languageVersion } : {}),
       },
     });
 
@@ -1810,7 +1821,9 @@ export class ExamsService {
       (item) => item.section === 'QUESTION' && item.question?.questionType === 'SHORT_ANSWER',
     );
     const failedAutoGradeItemIds = new Set<string>();
-    const answerByExamItemId = new Map(session.answers.map((answer) => [answer.examItemId, answer]));
+    const answerByExamItemId = new Map(
+      session.answers.map((answer) => [answer.examItemId, answer]),
+    );
 
     const answerUpdates: {
       examItemId: string;
@@ -2084,13 +2097,11 @@ export class ExamsService {
         where: { sessionId },
       });
       const allGraded = allAnswers.every((a) => a.isCorrect !== null);
-      const appliedPassingScoreAbsolute = (session as any)
-        .appliedPassingScoreAbsolute as number | null | undefined;
-      const passed = this.resolvePassedState(
-        totalScore,
-        appliedPassingScoreAbsolute,
-        allGraded,
-      );
+      const appliedPassingScoreAbsolute = (session as any).appliedPassingScoreAbsolute as
+        | number
+        | null
+        | undefined;
+      const passed = this.resolvePassedState(totalScore, appliedPassingScoreAbsolute, allGraded);
 
       await tx.examSession.update({
         where: { id: sessionId },
@@ -2238,8 +2249,7 @@ export class ExamsService {
     const isResultPublishedToStudent = session.resultPublicationStatus === 'PUBLISHED';
     const canViewResultSummary = canViewAsLecturer || isResultPublishedToStudent;
     const canViewItemDetails =
-      canViewAsLecturer ||
-      (isResultPublishedToStudent && session.exam.allowStudentReviewResults);
+      canViewAsLecturer || (isResultPublishedToStudent && session.exam.allowStudentReviewResults);
     const canViewProctoringWarnings = canViewAsLecturer && session.exam.type === 'EXAM';
     const detailMessage = canViewItemDetails
       ? null
@@ -2248,7 +2258,9 @@ export class ExamsService {
         : 'Đề thi này không cho phép sinh viên xem chi tiết từng câu.';
 
     const examItems = session.exam.items || [];
-    const answerByExamItemId = new Map(session.answers.map((answer) => [answer.examItemId, answer]));
+    const answerByExamItemId = new Map(
+      session.answers.map((answer) => [answer.examItemId, answer]),
+    );
 
     const resolveItemOutcome = (
       examItem: (typeof examItems)[number],
@@ -2428,14 +2440,14 @@ export class ExamsService {
           sourceCode: answer?.sourceCode ?? null,
           language: answer?.language ?? null,
           languageVersion: answer?.languageVersion ?? null,
-          aiSuggestedIsCorrect: canViewAsLecturer ? answer?.aiSuggestedIsCorrect ?? null : null,
-          aiSuggestedScore: canViewAsLecturer ? answer?.aiSuggestedScore ?? null : null,
-          aiGradingRationale: canViewAsLecturer ? answer?.aiGradingRationale ?? null : null,
-          manualIsCorrect: canViewAsLecturer ? answer?.manualIsCorrect ?? null : null,
-          manualScore: canViewAsLecturer ? answer?.manualScore ?? null : null,
-          reviewerFeedback: canViewAsLecturer ? answer?.reviewerFeedback ?? null : null,
-          reviewedByUserId: canViewAsLecturer ? answer?.reviewedByUserId ?? null : null,
-          reviewedAt: canViewAsLecturer ? answer?.reviewedAt ?? null : null,
+          aiSuggestedIsCorrect: canViewAsLecturer ? (answer?.aiSuggestedIsCorrect ?? null) : null,
+          aiSuggestedScore: canViewAsLecturer ? (answer?.aiSuggestedScore ?? null) : null,
+          aiGradingRationale: canViewAsLecturer ? (answer?.aiGradingRationale ?? null) : null,
+          manualIsCorrect: canViewAsLecturer ? (answer?.manualIsCorrect ?? null) : null,
+          manualScore: canViewAsLecturer ? (answer?.manualScore ?? null) : null,
+          reviewerFeedback: canViewAsLecturer ? (answer?.reviewerFeedback ?? null) : null,
+          reviewedByUserId: canViewAsLecturer ? (answer?.reviewedByUserId ?? null) : null,
+          reviewedAt: canViewAsLecturer ? (answer?.reviewedAt ?? null) : null,
         });
 
         if (section === 'QUESTION' && question) {
@@ -2467,8 +2479,8 @@ export class ExamsService {
 
           if (normalizedSourceCode) {
             resolvedSubmissionId =
-              recoveredSubmissionByKey.get(`${examItem.problem.id}::${normalizedSourceCode}`)
-                ?.id || null;
+              recoveredSubmissionByKey.get(`${examItem.problem.id}::${normalizedSourceCode}`)?.id ||
+              null;
           }
         }
 
@@ -2516,8 +2528,10 @@ export class ExamsService {
       }
     }
 
-    const sessionAppliedPassingScoreAbsolute = (session as any)
-      .appliedPassingScoreAbsolute as number | null | undefined;
+    const sessionAppliedPassingScoreAbsolute = (session as any).appliedPassingScoreAbsolute as
+      | number
+      | null
+      | undefined;
 
     return new SessionResultDto({
       id: session.id,
@@ -2608,9 +2622,7 @@ export class ExamsService {
       for (const item of dto.items) {
         const maxPoints = shortAnswerItemMap.get(item.examItemId);
         if (maxPoints === undefined) {
-          throw new BadRequestException(
-            'Chỉ được phép chỉnh điểm cho câu hỏi SHORT_ANSWER',
-          );
+          throw new BadRequestException('Chỉ được phép chỉnh điểm cho câu hỏi SHORT_ANSWER');
         }
 
         if (item.score > maxPoints) {
@@ -2671,13 +2683,11 @@ export class ExamsService {
 
       const totalScore = allAnswers.reduce((sum, a) => sum + (a.score || 0), 0);
       const allGraded = allAnswers.every((a) => a.isCorrect !== null);
-      const appliedPassingScoreAbsolute = (session as any)
-        .appliedPassingScoreAbsolute as number | null | undefined;
-      const passed = this.resolvePassedState(
-        totalScore,
-        appliedPassingScoreAbsolute,
-        allGraded,
-      );
+      const appliedPassingScoreAbsolute = (session as any).appliedPassingScoreAbsolute as
+        | number
+        | null
+        | undefined;
+      const passed = this.resolvePassedState(totalScore, appliedPassingScoreAbsolute, allGraded);
 
       const scoreChanged = Number(session.score || 0) !== Number(totalScore || 0);
       const resultUpdateData: Prisma.ExamSessionUpdateInput = {
@@ -3288,7 +3298,12 @@ export class ExamsService {
       publishNow,
     });
 
-    if (next.visibility === 'PUBLIC' && next.isPublished && !exam.publishedAt && !next.publishedAt) {
+    if (
+      next.visibility === 'PUBLIC' &&
+      next.isPublished &&
+      !exam.publishedAt &&
+      !next.publishedAt
+    ) {
       next.publishedAt = new Date();
     }
 
@@ -3811,9 +3826,9 @@ export class ExamsService {
       proctoringEnabled: exam.type === 'EXAM',
       isPretestSession: Boolean(session.isPretestSession),
       pretestAttemptNumber: session.pretestAttemptNumber ?? null,
-      pretestAssignmentMode: (session as any).pretestAssignmentMode ?? null,
-      pretestThresholdSource: (session as any).pretestThresholdSource ?? null,
-      pretestSourceExamId: (session as any).pretestSourceExamId ?? null,
+      pretestAssignmentMode: session.pretestAssignmentMode ?? null,
+      pretestThresholdSource: session.pretestThresholdSource ?? null,
+      pretestSourceExamId: session.pretestSourceExamId ?? null,
       appliedPassingScoreAbsolute: session.appliedPassingScoreAbsolute ?? null,
       passed: session.passed ?? null,
       examTitle: exam.title,

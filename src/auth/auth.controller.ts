@@ -39,9 +39,7 @@ export class AuthController {
 
   private extractBoothSessionBinding(req: any) {
     const rawBoothClientId = req?.headers?.['x-booth-client-id'];
-    const boothClientId = Array.isArray(rawBoothClientId)
-      ? rawBoothClientId[0]
-      : rawBoothClientId;
+    const boothClientId = Array.isArray(rawBoothClientId) ? rawBoothClientId[0] : rawBoothClientId;
 
     if (typeof boothClientId !== 'string' || boothClientId.trim().length < 16) {
       throw new BadRequestException('Thiếu hoặc không hợp lệ header x-booth-client-id');

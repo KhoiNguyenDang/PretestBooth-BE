@@ -7,8 +7,13 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import type { CreateBoothDto, UpdateBoothDto, QueryBoothDto } from './dto/booth.dto';
-import type { BoothStatus, Prisma } from '@prisma/client';
+import type {
+  CreateBoothDto,
+  UpdateBoothDto,
+  QueryBoothDto,
+  TransferBoothBookingsDto,
+} from './dto/booth.dto';
+import type { BookingStatus, BoothStatus, Prisma } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { JwtService } from '@nestjs/jwt';
 import * as crypto from 'crypto';
@@ -31,7 +36,11 @@ export class BoothsService {
     private readonly authorizationService: AuthorizationService,
   ) {}
 
-  private async assertBoothManagementPermission(userId: string, userRole: string, actionLabel: string) {
+  private async assertBoothManagementPermission(
+    userId: string,
+    userRole: string,
+    actionLabel: string,
+  ) {
     if (userRole === 'ADMIN') {
       return;
     }
@@ -74,7 +83,9 @@ export class BoothsService {
   }
 
   private getBoothSessionSecret() {
-    return process.env.BOOTH_SESSION_SECRET || process.env.JWT_ACCESS_SECRET || 'booth-session-secret';
+    return (
+      process.env.BOOTH_SESSION_SECRET || process.env.JWT_ACCESS_SECRET || 'booth-session-secret'
+    );
   }
 
   private normalizeBoothCode(code: string) {
@@ -123,7 +134,8 @@ export class BoothsService {
     const { sessionTokenHash, ...rest } = booth;
     return {
       ...rest,
-      isSessionActive: rest.status === 'ACTIVE' && Boolean(sessionTokenHash),
+      isSessionActive:
+        ['ACTIVE', 'MAINTENANCE_PENDING'].includes(rest.status) && Boolean(sessionTokenHash),
     };
   }
 
@@ -221,7 +233,8 @@ export class BoothsService {
       if (nameExists) throw new ConflictException(`Tên booth "${dto.name}" đã tồn tại`);
     }
 
-    const normalizedCode = dto.code === null ? null : dto.code ? this.normalizeBoothCode(dto.code) : undefined;
+    const normalizedCode =
+      dto.code === null ? null : dto.code ? this.normalizeBoothCode(dto.code) : undefined;
     if (normalizedCode && normalizedCode !== booth.code) {
       const codeExists = await this.prisma.booth.findUnique({ where: { code: normalizedCode } });
       if (codeExists) throw new ConflictException(`Mã booth "${normalizedCode}" đã tồn tại`);
@@ -229,7 +242,8 @@ export class BoothsService {
 
     const isStatusChanged = dto.status && dto.status !== booth.status;
 
-    const shouldInvalidateSession = isStatusChanged && dto.status !== 'ACTIVE';
+    const shouldInvalidateSession =
+      isStatusChanged && dto.status !== 'ACTIVE' && dto.status !== 'MAINTENANCE_PENDING';
 
     const txResult = await this.prisma.$transaction(async (tx) => {
       const updateData: Prisma.BoothUpdateInput = {
@@ -309,6 +323,245 @@ export class BoothsService {
     return { message: 'Xóa booth thành công' };
   }
 
+  async transferBookingsFromIncidentBooth(
+    sourceBoothId: string,
+    dto: TransferBoothBookingsDto,
+    userRole: string,
+    userId: string,
+  ) {
+    await this.assertBoothManagementPermission(userId, userRole, 'chuyển danh sách booth bị sự cố');
+
+    if (sourceBoothId === dto.targetBoothId) {
+      throw new BadRequestException('Booth nguồn và booth đích không được trùng nhau');
+    }
+
+    const selectedBookingIds = dto.bookingIds ? Array.from(new Set(dto.bookingIds)) : null;
+    const candidateStatuses: BookingStatus[] = dto.includeCheckedIn
+      ? ['CONFIRM', 'CHECKED_IN']
+      : ['CONFIRM'];
+
+    const now = new Date();
+    const transferResult = await this.prisma.$transaction(async (tx) => {
+      const sourceBooth = await tx.booth.findUnique({ where: { id: sourceBoothId } });
+      if (!sourceBooth) {
+        throw new NotFoundException('Booth nguồn không tồn tại');
+      }
+
+      const targetBooth = await tx.booth.findUnique({ where: { id: dto.targetBoothId } });
+      if (!targetBooth) {
+        throw new NotFoundException('Booth đích không tồn tại');
+      }
+
+      if (targetBooth.status !== 'ACTIVE') {
+        throw new BadRequestException('Booth đích phải ở trạng thái ACTIVE');
+      }
+
+      const candidates = await tx.booking.findMany({
+        where: {
+          boothId: sourceBoothId,
+          status: { in: candidateStatuses },
+          endTime: { gte: now },
+          ...(selectedBookingIds ? { id: { in: selectedBookingIds } } : {}),
+        },
+        orderBy: [{ startTime: 'asc' }, { createdAt: 'asc' }],
+        select: {
+          id: true,
+          userId: true,
+          status: true,
+          startTime: true,
+          endTime: true,
+        },
+      });
+
+      const transferred: Array<{ bookingId: string; userId: string; status: string }> = [];
+      const skipped: Array<{ bookingId: string; reason: string }> = [];
+
+      for (const candidate of candidates) {
+        const conflict = await tx.booking.findFirst({
+          where: {
+            boothId: targetBooth.id,
+            status: { in: ['CONFIRM', 'CHECKED_IN'] },
+            startTime: { lt: candidate.endTime },
+            endTime: { gt: candidate.startTime },
+          },
+          select: { id: true },
+        });
+
+        if (conflict) {
+          skipped.push({
+            bookingId: candidate.id,
+            reason: 'Booth đích đã có lịch trùng khung giờ',
+          });
+          continue;
+        }
+
+        if (dto.dryRun) {
+          transferred.push({
+            bookingId: candidate.id,
+            userId: candidate.userId,
+            status: candidate.status,
+          });
+          continue;
+        }
+
+        const updated = await tx.booking.updateMany({
+          where: {
+            id: candidate.id,
+            boothId: sourceBooth.id,
+            status: { in: ['CONFIRM', 'CHECKED_IN'] },
+            endTime: { gte: now },
+          },
+          data: {
+            boothId: targetBooth.id,
+          },
+        });
+
+        if (updated.count === 0) {
+          skipped.push({
+            bookingId: candidate.id,
+            reason: 'Booking đã thay đổi trạng thái hoặc booth trong lúc xử lý',
+          });
+          continue;
+        }
+
+        transferred.push({
+          bookingId: candidate.id,
+          userId: candidate.userId,
+          status: candidate.status,
+        });
+      }
+
+      if (dto.dryRun) {
+        return {
+          dryRun: true,
+          sourceBooth,
+          targetBooth,
+          updatedSourceBooth: null,
+          sourceStatusAfterTransfer: null,
+          transferred,
+          skipped,
+          totalCandidates: candidates.length,
+        };
+      }
+
+      const remainingBookingsOnSource = await tx.booking.count({
+        where: {
+          boothId: sourceBooth.id,
+          status: { in: ['CONFIRM', 'CHECKED_IN'] },
+          endTime: { gte: now },
+        },
+      });
+
+      const sourceStatusAfterTransfer: BoothStatus =
+        remainingBookingsOnSource > 0 ? 'MAINTENANCE_PENDING' : 'MAINTENANCE';
+
+      const updatedSourceBooth = await tx.booth.update({
+        where: { id: sourceBooth.id },
+        data: {
+          status: sourceStatusAfterTransfer,
+          ...(sourceStatusAfterTransfer === 'MAINTENANCE'
+            ? {
+                sessionTokenHash: null,
+                sessionActivatedAt: null,
+              }
+            : {}),
+        },
+      });
+
+      const note = [
+        `Chuyển booking do booth sự cố sang ${targetBooth.name}${targetBooth.code ? ` (${targetBooth.code})` : ''}.`,
+        `Lý do: ${dto.reason}.`,
+        selectedBookingIds
+          ? `Chế độ thủ công: ${selectedBookingIds.length} booking được chọn.`
+          : 'Chế độ tự động: xử lý toàn bộ booking đủ điều kiện.',
+        dto.includeCheckedIn
+          ? 'Bao gồm booking CHECKED_IN.'
+          : 'Không bao gồm booking CHECKED_IN.',
+        `Ứng viên: ${candidates.length}, chuyển thành công: ${transferred.length}, bỏ qua: ${skipped.length}.`,
+      ].join(' ');
+
+      await tx.boothStatusLog.create({
+        data: {
+          boothId: sourceBooth.id,
+          fromStatus: sourceBooth.status,
+          toStatus: sourceStatusAfterTransfer,
+          note,
+          changedByUserId: userId,
+        },
+      });
+
+      return {
+        dryRun: false,
+        sourceBooth,
+        targetBooth,
+        updatedSourceBooth,
+        sourceStatusAfterTransfer,
+        transferred,
+        skipped,
+        totalCandidates: candidates.length,
+      };
+    });
+
+    if (transferResult.dryRun) {
+      return {
+        sourceBoothId: transferResult.sourceBooth.id,
+        targetBoothId: transferResult.targetBooth.id,
+        dryRun: true,
+        totalCandidates: transferResult.totalCandidates,
+        transferableCount: transferResult.transferred.length,
+        conflictCount: transferResult.skipped.length,
+        transferableBookingIds: transferResult.transferred.map((item) => item.bookingId),
+        conflicts: transferResult.skipped,
+        includeCheckedIn: dto.includeCheckedIn,
+      };
+    }
+
+    if (!transferResult.updatedSourceBooth) {
+      throw new BadRequestException('Không thể cập nhật trạng thái booth nguồn sau khi chuyển lịch');
+    }
+
+    const emittedAt = new Date().toISOString();
+    this.realtimeService.boothStatusUpdated({
+      boothId: transferResult.updatedSourceBooth.id,
+      status: transferResult.updatedSourceBooth.status,
+      previousStatus: transferResult.sourceBooth.status,
+      note: `Booth chuyển lịch sự cố sang ${transferResult.targetBooth.name}. Lý do: ${dto.reason}`,
+      changedByUserId: userId,
+      changedAt: emittedAt,
+    });
+
+    for (const transferred of transferResult.transferred) {
+      this.realtimeService.monitoringUpdated({
+        scope: 'BOOKING',
+        action: 'TRANSFER_BOOKING',
+        bookingId: transferred.bookingId,
+        boothId: transferResult.targetBooth.id,
+        userId: transferred.userId,
+        emittedAt,
+      });
+
+      this.realtimeService.notify({
+        userId: transferred.userId,
+        boothId: transferResult.targetBooth.id,
+        message: `Lịch booth của bạn đã được chuyển sang ${transferResult.targetBooth.name}${transferResult.targetBooth.code ? ` (${transferResult.targetBooth.code})` : ''} do sự cố booth. Lý do: ${dto.reason}`,
+        level: 'warning',
+        emittedAt,
+      });
+    }
+
+    return {
+      sourceBoothId: transferResult.sourceBooth.id,
+      targetBoothId: transferResult.targetBooth.id,
+      dryRun: false,
+      totalCandidates: transferResult.totalCandidates,
+      transferredCount: transferResult.transferred.length,
+      skippedCount: transferResult.skipped.length,
+      transferredBookingIds: transferResult.transferred.map((item) => item.bookingId),
+      skipped: transferResult.skipped,
+      sourceBoothStatusAfterTransfer: transferResult.sourceStatusAfterTransfer,
+    };
+  }
+
   /**
    * Get count of active booths (used by booking validation)
    */
@@ -329,9 +582,7 @@ export class BoothsService {
       where: {
         date,
         status: { in: ['CONFIRM', 'CHECKED_IN'] },
-        OR: [
-          { startTime: { lt: endTime }, endTime: { gt: startTime } },
-        ],
+        OR: [{ startTime: { lt: endTime }, endTime: { gt: startTime } }],
       },
       select: { boothId: true },
     });

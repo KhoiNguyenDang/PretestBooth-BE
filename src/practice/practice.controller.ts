@@ -1,5 +1,13 @@
 import {
-  Controller, Get, Post, Param, Body, UseGuards, Req, HttpCode, HttpStatus,
+  Controller,
+  Get,
+  Post,
+  Param,
+  Body,
+  UseGuards,
+  Req,
+  HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { PracticeService } from './practice.service';
@@ -74,6 +82,11 @@ export class PracticeController {
     @Body(new ZodValidationPipe(AbortPracticeSessionSchema)) dto: AbortPracticeSessionDto,
     @Req() req,
   ) {
-    return this.practiceService.abortSessionByMonitor(id, dto.reason, req.user['sub'], req.user['role']);
+    return this.practiceService.abortSessionByMonitor(
+      id,
+      dto.reason,
+      req.user['sub'],
+      req.user['role'],
+    );
   }
 }

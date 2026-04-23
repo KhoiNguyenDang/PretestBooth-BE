@@ -77,7 +77,9 @@ export class ProblemsService {
   }
 
   private normalizeDifficulty(value: unknown): Difficulty {
-    const raw = String(value || 'MEDIUM').trim().toUpperCase();
+    const raw = String(value || 'MEDIUM')
+      .trim()
+      .toUpperCase();
     if (['EASY', 'MEDIUM', 'HARD'].includes(raw)) return raw as Difficulty;
     throw new Error('difficulty không hợp lệ (EASY/MEDIUM/HARD)');
   }
@@ -119,7 +121,9 @@ export class ProblemsService {
 
       try {
         const title = String(row.title || '').trim();
-        const slug = String(row.slug || '').trim().toLowerCase();
+        const slug = String(row.slug || '')
+          .trim()
+          .toLowerCase();
         const description = String(row.description || '').trim();
         const difficulty = this.normalizeDifficulty(row.difficulty || 'MEDIUM');
         const functionName = String(row.functionName || 'solution').trim() || 'solution';
@@ -128,8 +132,12 @@ export class ProblemsService {
         const memoryLimit = Number(row.memoryLimit || 256);
         const constraints = String(row.constraints || '').trim() || null;
         const isPublished = this.parseBooleanValue(row.isPublished, false);
-        const subjectRef = String(row.subjectId || row.subjectRef || row.subjectName || row.subject || '').trim();
-        const topicRef = String(row.topicId || row.topicRef || row.topicName || row.topic || '').trim();
+        const subjectRef = String(
+          row.subjectId || row.subjectRef || row.subjectName || row.subject || '',
+        ).trim();
+        const topicRef = String(
+          row.topicId || row.topicRef || row.topicName || row.topic || '',
+        ).trim();
 
         if (!title || !slug || !description) {
           throw new Error('Thiếu trường bắt buộc (title, slug, description)');

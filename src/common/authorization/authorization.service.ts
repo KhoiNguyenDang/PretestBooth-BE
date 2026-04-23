@@ -29,9 +29,7 @@ export class AuthorizationService {
   private mergePermissions(
     ...permissionGroups: LecturerPermissionKey[][]
   ): LecturerPermissionKey[] {
-    return Array.from(new Set(permissionGroups.flat())).sort((a, b) =>
-      a.localeCompare(b),
-    );
+    return Array.from(new Set(permissionGroups.flat())).sort((a, b) => a.localeCompare(b));
   }
 
   getAllLecturerPermissions(): LecturerPermissionKey[] {
@@ -42,10 +40,7 @@ export class AuthorizationService {
     return [...LOWER_LECTURER_PERMISSIONS];
   }
 
-  async getPermissionsForUser(
-    userId: string,
-    role: string,
-  ): Promise<LecturerPermissionKey[]> {
+  async getPermissionsForUser(userId: string, role: string): Promise<LecturerPermissionKey[]> {
     if (role === 'ADMIN') {
       return this.getAllLecturerPermissions();
     }
@@ -57,9 +52,7 @@ export class AuthorizationService {
     return this.getPermissionsForLecturer(userId);
   }
 
-  async getPermissionSnapshotForLecturer(
-    lecturerId: string,
-  ): Promise<LecturerPermissionSnapshot> {
+  async getPermissionSnapshotForLecturer(lecturerId: string): Promise<LecturerPermissionSnapshot> {
     const lecturer = await this.prisma.user.findUnique({
       where: { id: lecturerId },
       select: {
@@ -111,9 +104,7 @@ export class AuthorizationService {
       const roleRecord = roleRows[0];
 
       if (roleRecord) {
-        const rolePermissionRows = await this.prisma.$queryRaw<
-          Array<{ permission: string }>
-        >`
+        const rolePermissionRows = await this.prisma.$queryRaw<Array<{ permission: string }>>`
           SELECT "permission"::text AS permission
           FROM "LecturerRolePermission"
           WHERE "roleId" = ${roleRecord.id}
@@ -142,9 +133,7 @@ export class AuthorizationService {
     };
   }
 
-  async getPermissionsForLecturer(
-    lecturerId: string,
-  ): Promise<LecturerPermissionKey[]> {
+  async getPermissionsForLecturer(lecturerId: string): Promise<LecturerPermissionKey[]> {
     const snapshot = await this.getPermissionSnapshotForLecturer(lecturerId);
     return snapshot.permissions;
   }
@@ -186,10 +175,7 @@ export class AuthorizationService {
       return true;
     }
 
-    return (
-      requesterRole === 'LECTURER' &&
-      requesterPermissions.includes(LECTURER_ADMIN_PERMISSION)
-    );
+    return requesterRole === 'LECTURER' && requesterPermissions.includes(LECTURER_ADMIN_PERMISSION);
   }
 
   assertCanManageLecturerPermissions(

@@ -38,9 +38,7 @@ import type {
   ExtendExamSessionDto,
   ForceSubmitExamSessionDto,
 } from './dto/monitor-session.dto';
-import {
-  UpsertPretestConfigSchema,
-} from './dto/pretest-config.dto';
+import { UpsertPretestConfigSchema } from './dto/pretest-config.dto';
 import type { UpsertPretestConfigDto } from './dto/pretest-config.dto';
 
 @Controller('exams')
@@ -51,20 +49,14 @@ export class ExamsController {
   // ==================== EXAM CRUD ====================
 
   @Post('create-random')
-  createRandomExam(
-    @Body(new ZodValidationPipe(CreateExamSchema)) dto: CreateExamDto,
-    @Req() req,
-  ) {
+  createRandomExam(@Body(new ZodValidationPipe(CreateExamSchema)) dto: CreateExamDto, @Req() req) {
     const userId = req.user['sub'];
     const userRole = req.user['role'];
     return this.examsService.createRandom(userId, userRole, dto);
   }
 
   @Post('create-manual')
-  createManualExam(
-    @Body(new ZodValidationPipe(CreateExamSchema)) dto: CreateExamDto,
-    @Req() req,
-  ) {
+  createManualExam(@Body(new ZodValidationPipe(CreateExamSchema)) dto: CreateExamDto, @Req() req) {
     const userId = req.user['sub'];
     const userRole = req.user['role'];
     return this.examsService.createManual(userId, userRole, dto);

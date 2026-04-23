@@ -1,8 +1,4 @@
-import {
-  Injectable,
-  NotFoundException,
-  ForbiddenException,
-} from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { PointsService } from '../points/points.service';
 import type { ReportProctoringEventDto } from './dto/proctoring.dto';
@@ -22,7 +18,7 @@ export class ProctoringService {
    */
   async reportEvent(userId: string, dto: ReportProctoringEventDto) {
     // Find which type of session this is (EXAM or PRACTICE)
-    let examSession = await this.prisma.examSession.findFirst({
+    const examSession = await this.prisma.examSession.findFirst({
       where: { id: dto.sessionId },
       include: {
         booking: true,
@@ -42,7 +38,8 @@ export class ProctoringService {
 
     const session = examSession || practiceSession;
     if (!session) throw new NotFoundException('Phiên làm bài không tồn tại (EXAM hoặc PRACTICE)');
-    if (session.userId !== userId) throw new ForbiddenException('Bạn không có quyền báo cáo cho phiên này');
+    if (session.userId !== userId)
+      throw new ForbiddenException('Bạn không có quyền báo cáo cho phiên này');
 
     const isExamSession = !!examSession;
     const isPracticeExamSession = !!examSession && examSession.exam.type === 'PRACTICE';
@@ -76,7 +73,7 @@ export class ProctoringService {
       warningLevel,
       metadata: (dto.metadata || {}) as Prisma.InputJsonValue,
     };
-    if (isExamSession) eventData.examSessionId = examSession!.id;
+    if (isExamSession) eventData.examSessionId = examSession.id;
     if (isPracticeSession) eventData.practiceSessionId = practiceSession!.id;
 
     const event = await this.prisma.proctoringEvent.create({
@@ -85,9 +82,9 @@ export class ProctoringService {
 
     // Check total severity for this session
     const whereClause: any = isExamSession
-      ? { examSessionId: examSession!.id }
+      ? { examSessionId: examSession.id }
       : { practiceSessionId: practiceSession!.id };
-      
+
     const allEvents = await this.prisma.proctoringEvent.findMany({
       where: whereClause,
     });
@@ -118,8 +115,7 @@ export class ProctoringService {
       );
 
       actionTaken = 'EXAM_CANCELLED';
-    } 
-    else if (isExamSession && totalSeverity >= 5 && totalSeverity < 10 && warningLevel > 1) {
+    } else if (isExamSession && totalSeverity >= 5 && totalSeverity < 10 && warningLevel > 1) {
       // Threshold 2: Mild point penalty per major infraction after 5
       await this.pointsService.addTransaction(
         userId,

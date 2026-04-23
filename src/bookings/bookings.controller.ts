@@ -37,18 +37,12 @@ export class BookingsController {
   constructor(private readonly bookingsService: BookingsService) {}
 
   @Post()
-  create(
-    @Body(new ZodValidationPipe(CreateBookingSchema)) dto: CreateBookingDto,
-    @Req() req,
-  ) {
+  create(@Body(new ZodValidationPipe(CreateBookingSchema)) dto: CreateBookingDto, @Req() req) {
     return this.bookingsService.create(req.user['sub'], req.user['role'], dto);
   }
 
   @Get()
-  findAll(
-    @Query(new ZodValidationPipe(QueryBookingSchema)) query: QueryBookingDto,
-    @Req() req,
-  ) {
+  findAll(@Query(new ZodValidationPipe(QueryBookingSchema)) query: QueryBookingDto, @Req() req) {
     return this.bookingsService.findAll(req.user['sub'], req.user['role'], query);
   }
 
@@ -64,7 +58,11 @@ export class BookingsController {
     @Query(new ZodValidationPipe(QueryActiveMonitoringSchema)) query: QueryActiveMonitoringDto,
     @Req() req,
   ) {
-    return this.bookingsService.findActiveMonitoringSessions(req.user['sub'], req.user['role'], query);
+    return this.bookingsService.findActiveMonitoringSessions(
+      req.user['sub'],
+      req.user['role'],
+      query,
+    );
   }
 
   @Post(':id/force-checkout')

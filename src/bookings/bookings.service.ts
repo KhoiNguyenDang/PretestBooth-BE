@@ -57,7 +57,9 @@ export class BookingsService {
   }
 
   private isWithinAutoCheckInWindow(startTime: Date, endTime: Date, now: Date) {
-    const earliestCheckIn = new Date(startTime.getTime() - this.getCheckInEarlyMinutes() * 60 * 1000);
+    const earliestCheckIn = new Date(
+      startTime.getTime() - this.getCheckInEarlyMinutes() * 60 * 1000,
+    );
     const latestCheckIn = new Date(endTime.getTime() + this.getCheckInLateMinutes() * 60 * 1000);
 
     return now >= earliestCheckIn && now <= latestCheckIn;
@@ -154,7 +156,11 @@ export class BookingsService {
     const endTime = new Date(dto.endTime);
     const now = this.normalizeVietnamDayBoundary(this.getNowInVietnamConvention());
 
-    if (Number.isNaN(bookingDate.getTime()) || Number.isNaN(startTime.getTime()) || Number.isNaN(endTime.getTime())) {
+    if (
+      Number.isNaN(bookingDate.getTime()) ||
+      Number.isNaN(startTime.getTime()) ||
+      Number.isNaN(endTime.getTime())
+    ) {
       throw new BadRequestException('Thời gian booking không hợp lệ');
     }
 
@@ -178,7 +184,7 @@ export class BookingsService {
     const { hour: startHour } = this.getVietnamHourMinute(startTime);
     const { hour: endHour, minute: endMinute } = this.getVietnamHourMinute(endTime);
 
-    if (startHour < 7 || (endHour > 17 || (endHour === 17 && endMinute > 0))) {
+    if (startHour < 7 || endHour > 17 || (endHour === 17 && endMinute > 0)) {
       throw new BadRequestException('Khung giờ sử dụng booth: 7:00 - 17:00');
     }
 
@@ -234,9 +240,7 @@ export class BookingsService {
         userId,
         date: bookingDate,
         status: { in: ['CONFIRM', 'CHECKED_IN'] },
-        OR: [
-          { startTime: { lt: gapCheckEnd }, endTime: { gt: gapCheckStart } },
-        ],
+        OR: [{ startTime: { lt: gapCheckEnd }, endTime: { gt: gapCheckStart } }],
       },
     });
 
@@ -249,7 +253,11 @@ export class BookingsService {
     // Rule 5: Check booth availability (concurrent bookings < active booths)
     const booth = await this.prisma.booth.findUnique({ where: { id: dto.boothId } });
     if (!booth) throw new NotFoundException('Booth không tồn tại');
-    if (booth.status !== 'ACTIVE') {
+    const boothStatus = String(booth.status);
+    if (boothStatus === 'MAINTENANCE_PENDING') {
+      throw new BadRequestException('Booth đang gặp sự cố, vui lòng chọn booth khác');
+    }
+    if (boothStatus !== 'ACTIVE') {
       throw new BadRequestException('Booth hiện không hoạt động');
     }
 
@@ -323,10 +331,7 @@ export class BookingsService {
       const dayStart = this.normalizeVietnamDayBoundary(new Date(date));
       const dayEnd = this.addDaysVietnam(dayStart, 1);
 
-      where.AND = [
-        { startTime: { lt: dayEnd } },
-        { endTime: { gte: dayStart } },
-      ];
+      where.AND = [{ startTime: { lt: dayEnd } }, { endTime: { gte: dayStart } }];
     }
 
     const [bookings, total] = await Promise.all([
@@ -357,7 +362,11 @@ export class BookingsService {
     requesterRole: string,
     query: QueryActiveMonitoringDto,
   ) {
-    await this.assertMonitoringPermission(requesterId, requesterRole, 'xem giám sát phiên thi/booth');
+    await this.assertMonitoringPermission(
+      requesterId,
+      requesterRole,
+      'xem giám sát phiên thi/booth',
+    );
     await this.autoCheckOutExpiredBookings();
 
     const { page, limit, boothId, activityType, search, sortOrder } = query;
@@ -754,12 +763,10 @@ export class BookingsService {
         // Enforce VN timezone (+07:00) so that slot times are inherently timezone-independent
         const isoStringStart = `${normalizedDateStr}T${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}:00.000+07:00`;
         const slotStart = new Date(isoStringStart);
-        
+
         const slotEnd = new Date(slotStart.getTime() + 30 * 60000);
 
-        const booked = bookings.filter(
-          (b) => b.startTime < slotEnd && b.endTime > slotStart,
-        );
+        const booked = bookings.filter((b) => b.startTime < slotEnd && b.endTime > slotStart);
 
         slots.push({
           startTime: slotStart.toISOString(),
@@ -899,7 +906,9 @@ export class BookingsService {
     });
 
     if (activeCheckedInBooking && activeCheckedInBooking.boothId !== boothId) {
-      throw new ForbiddenException('Ban dang co phien su dung booth khac, khong the tan dung booth nay');
+      throw new ForbiddenException(
+        'Ban dang co phien su dung booth khac, khong the tan dung booth nay',
+      );
     }
 
     let nextExamStartTime: string | null = null;

@@ -134,7 +134,9 @@ export class CheckinService {
   }
 
   private isWithinCheckInWindow(startTime: Date, endTime: Date, now: Date) {
-    const earliestCheckIn = new Date(startTime.getTime() - this.getCheckInEarlyMinutes() * 60 * 1000);
+    const earliestCheckIn = new Date(
+      startTime.getTime() - this.getCheckInEarlyMinutes() * 60 * 1000,
+    );
     const latestCheckIn = new Date(endTime.getTime() + this.getCheckInLateMinutes() * 60 * 1000);
 
     return now >= earliestCheckIn && now <= latestCheckIn;
@@ -171,6 +173,18 @@ export class CheckinService {
 
     if (!['CONFIRM', 'CHECKED_IN'].includes(booking.status)) {
       throw new BadRequestException('Booking không ở trạng thái cho phép check-in');
+    }
+
+    const boothStatus = String(booking.booth.status);
+
+    if (boothStatus === 'MAINTENANCE_PENDING') {
+      throw new ForbiddenException(
+        'Booth đang ở trạng thái sự cố, không thể thực hiện check-in tại booth này',
+      );
+    }
+
+    if (boothStatus !== 'ACTIVE') {
+      throw new ForbiddenException('Booth hiện không hoạt động');
     }
 
     const now = this.getNowInVietnamConvention();

@@ -230,6 +230,52 @@ Authorization: Bearer <admin_access_token>
 
 ---
 
+### Transfer Booth Bookings Due To Incident (Admin/Lecturer)
+
+```http
+POST /booths/:id/transfer-bookings
+Authorization: Bearer <admin_or_lecturer_token>
+```
+
+**Description:** Chuyển danh sách booking còn hiệu lực (`CONFIRM`, `CHECKED_IN`, `endTime >= now`) từ booth sự cố sang booth khác theo cơ chế partial success.
+
+**Request Body:**
+
+```json
+{
+  "targetBoothId": "target-booth-uuid",
+  "reason": "Booth bi mat dien"
+}
+```
+
+**Success Response (200):**
+
+```json
+{
+  "sourceBoothId": "source-booth-uuid",
+  "targetBoothId": "target-booth-uuid",
+  "totalCandidates": 10,
+  "transferredCount": 8,
+  "skippedCount": 2,
+  "transferredBookingIds": ["booking-1", "booking-2"],
+  "skipped": [
+    {
+      "bookingId": "booking-9",
+      "reason": "Booth đích đã có lịch trùng khung giờ"
+    }
+  ],
+  "sourceBoothStatusAfterTransfer": "MAINTENANCE_PENDING"
+}
+```
+
+**Notes:**
+
+- `targetBooth` phải ở trạng thái `ACTIVE`.
+- Booth nguồn sẽ được đưa về `MAINTENANCE_PENDING` hoặc `MAINTENANCE` tùy kết quả thực tế.
+- Trạng thái booth mới hỗ trợ: `MAINTENANCE_PENDING` (không nhận booking/check-in mới).
+
+---
+
 ### Booth Login
 
 ```http

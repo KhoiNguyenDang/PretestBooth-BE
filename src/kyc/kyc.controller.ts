@@ -1,10 +1,7 @@
 import { Body, Controller, Get, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { ZodValidationPipe } from '../common/zod/zod-validation.pipe';
-import {
-  KycRegisterSchema,
-  type KycRegisterDto,
-} from './dto/kyc-register.dto';
+import { KycRegisterSchema, type KycRegisterDto } from './dto/kyc-register.dto';
 import {
   ApproveKycManualReviewSchema,
   QueryKycManualReviewSchema,
@@ -27,10 +24,7 @@ export class KycController {
   constructor(private readonly kycService: KycService) {}
 
   @Post('register')
-  register(
-    @Req() req,
-    @Body(new ZodValidationPipe(KycRegisterSchema)) dto: KycRegisterDto,
-  ) {
+  register(@Req() req, @Body(new ZodValidationPipe(KycRegisterSchema)) dto: KycRegisterDto) {
     return this.kycService.register(req.user['sub'], dto);
   }
 

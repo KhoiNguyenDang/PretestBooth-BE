@@ -21,6 +21,7 @@ import {
   QueryBoothSchema,
   GenerateActivationOtpSchema,
   ForceBoothLogoutSchema,
+  TransferBoothBookingsSchema,
 } from './dto/booth.dto';
 import type {
   CreateBoothDto,
@@ -28,6 +29,7 @@ import type {
   QueryBoothDto,
   GenerateActivationOtpDto,
   ForceBoothLogoutDto,
+  TransferBoothBookingsDto,
 } from './dto/booth.dto';
 
 @Controller('booths')
@@ -36,10 +38,7 @@ export class BoothsController {
   constructor(private readonly boothsService: BoothsService) {}
 
   @Post()
-  create(
-    @Body(new ZodValidationPipe(CreateBoothSchema)) dto: CreateBoothDto,
-    @Req() req,
-  ) {
+  create(@Body(new ZodValidationPipe(CreateBoothSchema)) dto: CreateBoothDto, @Req() req) {
     return this.boothsService.create(dto, req.user['role'], req.user['sub']);
   }
 
@@ -85,7 +84,11 @@ export class BoothsController {
     @Body(new ZodValidationPipe(GenerateActivationOtpSchema)) dto: GenerateActivationOtpDto,
     @Req() req,
   ) {
-    return this.boothsService.generateActivationOtp(dto.boothCode, req.user['role'], req.user['sub']);
+    return this.boothsService.generateActivationOtp(
+      dto.boothCode,
+      req.user['role'],
+      req.user['sub'],
+    );
   }
 
   @Post(':id/force-logout')
@@ -98,6 +101,21 @@ export class BoothsController {
     return this.boothsService.forceDeactivateBoothSessionByBoothId(
       id,
       dto.reason,
+      req.user['role'],
+      req.user['sub'],
+    );
+  }
+
+  @Post(':id/transfer-bookings')
+  @HttpCode(HttpStatus.OK)
+  transferBoothBookings(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(TransferBoothBookingsSchema)) dto: TransferBoothBookingsDto,
+    @Req() req,
+  ) {
+    return this.boothsService.transferBookingsFromIncidentBooth(
+      id,
+      dto,
       req.user['role'],
       req.user['sub'],
     );
