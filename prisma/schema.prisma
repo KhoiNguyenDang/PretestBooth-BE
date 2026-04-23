@@ -31,6 +31,14 @@ model User {
   kycRegisteredAt         DateTime?
   kycVerifiedAt           DateTime?
   kycLastAttemptAt        DateTime?
+  kycFaceImageUrl         String?
+  kycManualReviewStatus   KycManualReviewStatus @default(NOT_REQUESTED)
+  kycManualReviewRequestedAt DateTime?
+  kycManualReviewRequestedReason String?
+  kycManualReviewReviewedAt DateTime?
+  kycManualReviewedByUserId String?
+  kycManualReviewRejectionReason String?
+  kycManualReviewNotes    String?
   kycConsentVersion       String?
   kycConsentedAt          DateTime?
   studentCardImageUrl     String?
@@ -70,6 +78,9 @@ model User {
   @@index([isEmailVerified])
   @@index([isLocked])
   @@index([kycStatus])
+  @@index([kycManualReviewStatus])
+  @@index([kycManualReviewRequestedAt])
+  @@index([kycManualReviewReviewedAt])
   @@index([lecturerRoleId])
   @@index([lecturerRoleAssignedByUserId])
 }
@@ -735,6 +746,7 @@ enum LecturerPermission {
   MANAGE_STUDENTS
   MANAGE_BOOTHS
   MONITOR_SESSIONS
+  APPROVE_KYC
   LECTURER_ADMIN
 }
 
@@ -834,6 +846,13 @@ enum KycStatus {
   NOT_STARTED
   PENDING
   VERIFIED
+  REJECTED
+}
+
+enum KycManualReviewStatus {
+  NOT_REQUESTED
+  PENDING
+  APPROVED
   REJECTED
 }
 
