@@ -13,6 +13,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import type { KycRegisterDto } from './dto/kyc-register.dto';
 import type {
   ApproveKycManualReviewDto,
+  CancelVerifiedKycDto,
+  QueryVerifiedKycDto,
   QueryKycManualReviewDto,
   RejectKycManualReviewDto,
   RequestKycManualReviewDto,
@@ -411,6 +413,72 @@ export class KycService {
     };
   }
 
+  async getVerifiedStudents(
+    reviewerId: string,
+    reviewerRole: string,
+    query: QueryVerifiedKycDto,
+  ) {
+    await this.assertKycReviewerAccess(reviewerId, reviewerRole);
+
+    const page = query.page;
+    const limit = query.limit;
+    const skip = (page - 1) * limit;
+    const search = query.search?.trim();
+
+    const where: Prisma.UserWhereInput = {
+      role: 'STUDENT',
+      kycStatus: 'VERIFIED',
+      ...(search
+        ? {
+            OR: [
+              { name: { contains: search, mode: 'insensitive' } },
+              { email: { contains: search, mode: 'insensitive' } },
+              { studentCode: { contains: search, mode: 'insensitive' } },
+            ],
+          }
+        : {}),
+    };
+
+    const [total, data] = await Promise.all([
+      this.prisma.user.count({ where }),
+      this.prisma.user.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: [
+          {
+            kycVerifiedAt: query.sortOrder,
+          },
+          {
+            createdAt: 'desc',
+          },
+        ],
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          studentCode: true,
+          className: true,
+          kycStatus: true,
+          kycVerifiedAt: true,
+          kycLastAttemptAt: true,
+          kycManualReviewStatus: true,
+          studentCardFaceMatchScore: true,
+          studentCardVerifiedAt: true,
+          faceEmbeddingUpdatedAt: true,
+        },
+      }),
+    ]);
+
+    return {
+      data,
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit),
+    };
+  }
+
   async getManualReviewDetail(reviewerId: string, reviewerRole: string, studentId: string) {
     await this.assertKycReviewerAccess(reviewerId, reviewerRole);
 
@@ -555,6 +623,62 @@ export class KycService {
 
     return {
       message: 'Từ chối KYC thủ công thành công',
+      ...updated,
+    };
+  }
+
+  async cancelVerifiedStatus(
+    reviewerId: string,
+    reviewerRole: string,
+    studentId: string,
+    dto: CancelVerifiedKycDto,
+  ) {
+    await this.assertKycReviewerAccess(reviewerId, reviewerRole);
+
+    const student = await this.prisma.user.findFirst({
+      where: {
+        id: studentId,
+        role: 'STUDENT',
+      },
+      select: {
+        id: true,
+        kycStatus: true,
+      },
+    });
+
+    if (!student) {
+      throw new NotFoundException('Không tìm thấy hồ sơ sinh viên cần cập nhật KYC');
+    }
+
+    if (student.kycStatus !== 'VERIFIED') {
+      throw new ConflictException('Chỉ có thể hủy xác thực đối với hồ sơ đang ở trạng thái VERIFIED');
+    }
+
+    const updated = await this.prisma.user.update({
+      where: { id: student.id },
+      data: {
+        kycStatus: 'REJECTED',
+        kycVerifiedAt: null,
+        studentCardVerifiedAt: null,
+        kycManualReviewStatus: 'NOT_REQUESTED',
+        kycManualReviewRequestedAt: null,
+        kycManualReviewRequestedReason: null,
+        kycManualReviewReviewedAt: new Date(),
+        kycManualReviewedByUserId: reviewerId,
+        kycManualReviewRejectionReason: dto.reason.trim(),
+      },
+      select: {
+        id: true,
+        kycStatus: true,
+        kycManualReviewStatus: true,
+        kycManualReviewReviewedAt: true,
+        kycManualReviewedByUserId: true,
+        kycManualReviewRejectionReason: true,
+      },
+    });
+
+    return {
+      message: 'Đã hủy trạng thái đã xác thực KYC của sinh viên',
       ...updated,
     };
   }

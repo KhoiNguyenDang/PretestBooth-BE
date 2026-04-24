@@ -4,10 +4,14 @@ import { ZodValidationPipe } from '../common/zod/zod-validation.pipe';
 import { KycRegisterSchema, type KycRegisterDto } from './dto/kyc-register.dto';
 import {
   ApproveKycManualReviewSchema,
+  CancelVerifiedKycSchema,
+  QueryVerifiedKycSchema,
   QueryKycManualReviewSchema,
   RejectKycManualReviewSchema,
   RequestKycManualReviewSchema,
   type ApproveKycManualReviewDto,
+  type CancelVerifiedKycDto,
+  type QueryVerifiedKycDto,
   type QueryKycManualReviewDto,
   type RejectKycManualReviewDto,
   type RequestKycManualReviewDto,
@@ -62,6 +66,14 @@ export class KycController {
     return this.kycService.getPendingManualReviews(req.user['sub'], req.user['role'], query);
   }
 
+  @Get('verified')
+  verifiedStudents(
+    @Req() req,
+    @Query(new ZodValidationPipe(QueryVerifiedKycSchema)) query: QueryVerifiedKycDto,
+  ) {
+    return this.kycService.getVerifiedStudents(req.user['sub'], req.user['role'], query);
+  }
+
   @Get('manual-review/:studentId')
   manualReviewDetail(@Req() req, @Param('studentId') studentId: string) {
     return this.kycService.getManualReviewDetail(req.user['sub'], req.user['role'], studentId);
@@ -83,5 +95,14 @@ export class KycController {
     @Body(new ZodValidationPipe(RejectKycManualReviewSchema)) dto: RejectKycManualReviewDto,
   ) {
     return this.kycService.rejectManualReview(req.user['sub'], req.user['role'], studentId, dto);
+  }
+
+  @Post('verified/:studentId/cancel')
+  cancelVerifiedStatus(
+    @Req() req,
+    @Param('studentId') studentId: string,
+    @Body(new ZodValidationPipe(CancelVerifiedKycSchema)) dto: CancelVerifiedKycDto,
+  ) {
+    return this.kycService.cancelVerifiedStatus(req.user['sub'], req.user['role'], studentId, dto);
   }
 }
