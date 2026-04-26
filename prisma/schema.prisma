@@ -32,6 +32,7 @@ model User {
   kycVerifiedAt           DateTime?
   kycLastAttemptAt        DateTime?
   kycFaceImageUrl         String?
+  kycStudentImageUrl      String?
   kycManualReviewStatus   KycManualReviewStatus @default(NOT_REQUESTED)
   kycManualReviewRequestedAt DateTime?
   kycManualReviewRequestedReason String?

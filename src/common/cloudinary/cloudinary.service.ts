@@ -7,6 +7,7 @@ export class CloudinaryService {
   private readonly folder: string;
   private readonly kycCardFolder: string;
   private readonly kycFaceFolder: string;
+  private readonly kycStudentFolder: string;
   private readonly checkinEvidenceFolder: string;
   private readonly isConfigured: boolean;
 
@@ -41,6 +42,11 @@ export class CloudinaryService {
       'pretestbooth/kyc-faces',
     );
 
+    this.kycStudentFolder = this.configService.get<string>(
+      'CLOUDINARY_KYC_STUDENT_IMAGE_FOLDER',
+      'pretestbooth/kyc-students',
+    );
+
     this.checkinEvidenceFolder = this.configService.get<string>(
       'CLOUDINARY_CHECKIN_EVIDENCE_FOLDER',
       'pretestbooth/checkin-evidence',
@@ -61,6 +67,10 @@ export class CloudinaryService {
 
   async uploadKycFaceImage(imageDataUrl: string): Promise<string> {
     return this.uploadDataUrl(imageDataUrl, this.kycFaceFolder);
+  }
+
+  async uploadKycStudentImage(imageDataUrl: string): Promise<string> {
+    return this.uploadDataUrl(imageDataUrl, this.kycStudentFolder);
   }
 
   async uploadCheckinEvidenceImage(imageDataUrl: string): Promise<string> {

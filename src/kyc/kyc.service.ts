@@ -169,9 +169,10 @@ export class KycService {
       embeddingResult.embedding,
     );
 
-    const [cardImageUrl, faceImageUrl] = await Promise.all([
+    const [cardImageUrl, faceImageUrl, studentImageUrl] = await Promise.all([
       this.cloudinaryService.uploadKycStudentCardImage(dto.studentCardImage),
       this.cloudinaryService.uploadKycFaceImage(dto.image),
+      this.cloudinaryService.uploadKycStudentImage(dto.image),
     ]);
     const now = new Date();
 
@@ -182,6 +183,7 @@ export class KycService {
           kycStatus: 'REJECTED',
           kycLastAttemptAt: now,
           kycFaceImageUrl: faceImageUrl,
+          kycStudentImageUrl: studentImageUrl,
           kycManualReviewStatus: 'NOT_REQUESTED',
           kycManualReviewRequestedAt: null,
           kycManualReviewRequestedReason: null,
@@ -207,6 +209,7 @@ export class KycService {
         kycVerifiedAt: now,
         kycLastAttemptAt: now,
         kycFaceImageUrl: faceImageUrl,
+        kycStudentImageUrl: studentImageUrl,
         kycManualReviewStatus: 'NOT_REQUESTED',
         kycManualReviewRequestedAt: null,
         kycManualReviewRequestedReason: null,
@@ -238,6 +241,7 @@ export class KycService {
       cardFaceMatchScore,
       cardThreshold: cardThresholdConfig.threshold,
       studentCardImageUrl: cardImageUrl,
+      studentImageUrl,
       faceImageUrl,
     };
   }
@@ -298,6 +302,7 @@ export class KycService {
         kycStatus: true,
         kycManualReviewStatus: true,
         studentCardImageUrl: true,
+        kycStudentImageUrl: true,
         kycFaceImageUrl: true,
       },
     });
@@ -306,7 +311,7 @@ export class KycService {
       throw new NotFoundException('Không tìm thấy hồ sơ sinh viên cần yêu cầu duyệt');
     }
 
-    if (!user.studentCardImageUrl || !user.kycFaceImageUrl) {
+    if (!user.studentCardImageUrl || (!user.kycStudentImageUrl && !user.kycFaceImageUrl)) {
       throw new BadRequestException('Thiếu dữ liệu ảnh KYC để gửi yêu cầu duyệt thủ công');
     }
 
@@ -394,6 +399,7 @@ export class KycService {
           className: true,
           kycStatus: true,
           kycLastAttemptAt: true,
+          kycStudentImageUrl: true,
           kycFaceImageUrl: true,
           studentCardImageUrl: true,
           studentCardFaceMatchScore: true,
@@ -405,7 +411,10 @@ export class KycService {
     ]);
 
     return {
-      data,
+      data: data.map((item) => ({
+        ...item,
+        kycFaceImageUrl: item.kycStudentImageUrl || item.kycFaceImageUrl,
+      })),
       page,
       limit,
       total,
@@ -497,6 +506,7 @@ export class KycService {
         kycLastAttemptAt: true,
         kycRegisteredAt: true,
         kycVerifiedAt: true,
+        kycStudentImageUrl: true,
         kycFaceImageUrl: true,
         studentCardImageUrl: true,
         studentCardFaceMatchScore: true,
@@ -514,7 +524,10 @@ export class KycService {
       throw new NotFoundException('Không tìm thấy hồ sơ sinh viên cần duyệt KYC');
     }
 
-    return student;
+    return {
+      ...student,
+      kycFaceImageUrl: student.kycStudentImageUrl || student.kycFaceImageUrl,
+    };
   }
 
   async approveManualReview(
