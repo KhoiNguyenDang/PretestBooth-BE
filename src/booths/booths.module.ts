@@ -5,9 +5,10 @@ import { BoothsService } from './booths.service';
 import { PrismaModule } from '../prisma/prisma.module';
 import { RealtimeModule } from '../realtime/realtime.module';
 import { AuthorizationModule } from '../common/authorization/authorization.module';
+import { MailModule } from '../mail/mail.module';
 
 @Module({
-  imports: [PrismaModule, JwtModule.register({}), RealtimeModule, AuthorizationModule],
+  imports: [PrismaModule, JwtModule.register({}), RealtimeModule, AuthorizationModule, MailModule],
   controllers: [BoothsController],
   providers: [BoothsService],
   exports: [BoothsService],

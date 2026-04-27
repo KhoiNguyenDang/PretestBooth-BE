@@ -140,4 +140,36 @@ export class MailService {
       `,
     });
   }
+
+  async sendBoothTransferConflictEmail(params: {
+    email: string;
+    studentName?: string | null;
+    studentCode?: string | null;
+    sourceBoothName: string;
+    sourceBoothCode?: string | null;
+    targetBoothName: string;
+    targetBoothCode?: string | null;
+    reason: string;
+    bookingWindow: string;
+    conflictReason: string;
+  }): Promise<void> {
+    const displayName = params.studentName?.trim() || params.studentCode || 'Sinh vien';
+    const sourceBoothLabel = `${params.sourceBoothName}${params.sourceBoothCode ? ` (${params.sourceBoothCode})` : ''}`;
+    const targetBoothLabel = `${params.targetBoothName}${params.targetBoothCode ? ` (${params.targetBoothCode})` : ''}`;
+
+    await this.transporter.sendMail({
+      from: process.env.MAIL_FROM || process.env.MAIL_USER,
+      to: params.email,
+      subject: 'Thong bao dieu phoi booth that bai - Pretest Booth',
+      html: `
+        <h2>Thong bao dieu phoi lich booth</h2>
+        <p>Xin chao ${displayName},</p>
+        <p>He thong da thu dieu phoi lich cua ban tu booth <strong>${sourceBoothLabel}</strong> sang <strong>${targetBoothLabel}</strong> do su co.</p>
+        <p><strong>Khung gio booking:</strong> ${params.bookingWindow}</p>
+        <p><strong>Ly do dieu phoi:</strong> ${params.reason}</p>
+        <p><strong>Ket qua:</strong> Khong the chuyen booth do trung lich (${params.conflictReason}).</p>
+        <p>Vui long theo doi thong bao tiep theo hoac lien he quan tri vien/giam thi de duoc ho tro.</p>
+      `,
+    });
+  }
 }

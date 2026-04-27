@@ -19,10 +19,18 @@ import { JwtService } from '@nestjs/jwt';
 import * as crypto from 'crypto';
 import { RealtimeService } from '../realtime/realtime.service';
 import { AuthorizationService } from '../common/authorization/authorization.service';
+import { MailService } from '../mail/mail.service';
 
 interface BoothSessionBindingContext {
   boothClientId: string;
   userAgent?: string | null;
+}
+
+interface TransferCandidateStudent {
+  id: string;
+  email: string;
+  name: string | null;
+  studentCode: string | null;
 }
 
 @Injectable()
@@ -34,6 +42,7 @@ export class BoothsService {
     private readonly jwtService: JwtService,
     private readonly realtimeService: RealtimeService,
     private readonly authorizationService: AuthorizationService,
+    private readonly mailService: MailService,
   ) {}
 
   private async assertBoothManagementPermission(
@@ -128,6 +137,50 @@ export class BoothsService {
 
     const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
     return `${get('year')}-${get('month')}-${get('day')} ${get('hour')}:${get('minute')}:${get('second')}`;
+  }
+
+  private buildStudentLabel(student: TransferCandidateStudent) {
+    return student.name?.trim() || student.studentCode || student.email;
+  }
+
+  private formatTransferWindow(startTime: Date, endTime: Date) {
+    return `${this.formatVnDateTime(startTime)} - ${this.formatVnDateTime(endTime)}`;
+  }
+
+  private async notifyTransferConflictsByEmail(params: {
+    sourceBoothName: string;
+    sourceBoothCode?: string | null;
+    targetBoothName: string;
+    targetBoothCode?: string | null;
+    reason: string;
+    conflicts: Array<{
+      student: TransferCandidateStudent;
+      bookingId: string;
+      startTime: Date;
+      endTime: Date;
+      reason: string;
+    }>;
+  }) {
+    if (params.conflicts.length === 0) {
+      return;
+    }
+
+    const mailJobs = params.conflicts.map((item) =>
+      this.mailService.sendBoothTransferConflictEmail({
+        email: item.student.email,
+        studentName: item.student.name,
+        studentCode: item.student.studentCode,
+        sourceBoothName: params.sourceBoothName,
+        sourceBoothCode: params.sourceBoothCode,
+        targetBoothName: params.targetBoothName,
+        targetBoothCode: params.targetBoothCode,
+        reason: params.reason,
+        bookingWindow: this.formatTransferWindow(item.startTime, item.endTime),
+        conflictReason: item.reason,
+      }),
+    );
+
+    await Promise.allSettled(mailJobs);
   }
 
   private mapBoothForResponse(booth: any) {
@@ -370,13 +423,39 @@ export class BoothsService {
           status: true,
           startTime: true,
           endTime: true,
+          user: {
+            select: {
+              id: true,
+              email: true,
+              name: true,
+              studentCode: true,
+            },
+          },
         },
       });
 
-      const transferred: Array<{ bookingId: string; userId: string; status: string }> = [];
-      const skipped: Array<{ bookingId: string; reason: string }> = [];
+      const transferred: Array<{
+        bookingId: string;
+        userId: string;
+        status: string;
+        studentName: string;
+        studentEmail: string;
+        startTime: Date;
+        endTime: Date;
+      }> = [];
+      const skipped: Array<{
+        bookingId: string;
+        reason: string;
+        wasCancelled: boolean;
+        userId: string;
+        studentName: string;
+        studentEmail: string;
+        startTime: Date;
+        endTime: Date;
+      }> = [];
 
       for (const candidate of candidates) {
+        const studentName = this.buildStudentLabel(candidate.user);
         const conflict = await tx.booking.findFirst({
           where: {
             boothId: targetBooth.id,
@@ -388,9 +467,43 @@ export class BoothsService {
         });
 
         if (conflict) {
+          if (!dto.dryRun) {
+            const cancelled = await tx.booking.updateMany({
+              where: {
+                id: candidate.id,
+                boothId: sourceBooth.id,
+                status: { in: ['CONFIRM', 'CHECKED_IN'] },
+                endTime: { gte: now },
+              },
+              data: {
+                status: 'CANCEL',
+              },
+            });
+
+            if (cancelled.count > 0) {
+              skipped.push({
+                bookingId: candidate.id,
+                reason: 'Booth đích đã có lịch trùng khung giờ. Booking đã được chuyển trạng thái CANCEL',
+                wasCancelled: true,
+                userId: candidate.userId,
+                studentName,
+                studentEmail: candidate.user.email,
+                startTime: candidate.startTime,
+                endTime: candidate.endTime,
+              });
+              continue;
+            }
+          }
+
           skipped.push({
             bookingId: candidate.id,
             reason: 'Booth đích đã có lịch trùng khung giờ',
+            wasCancelled: false,
+            userId: candidate.userId,
+            studentName,
+            studentEmail: candidate.user.email,
+            startTime: candidate.startTime,
+            endTime: candidate.endTime,
           });
           continue;
         }
@@ -400,6 +513,10 @@ export class BoothsService {
             bookingId: candidate.id,
             userId: candidate.userId,
             status: candidate.status,
+            studentName,
+            studentEmail: candidate.user.email,
+            startTime: candidate.startTime,
+            endTime: candidate.endTime,
           });
           continue;
         }
@@ -420,6 +537,12 @@ export class BoothsService {
           skipped.push({
             bookingId: candidate.id,
             reason: 'Booking đã thay đổi trạng thái hoặc booth trong lúc xử lý',
+            wasCancelled: false,
+            userId: candidate.userId,
+            studentName,
+            studentEmail: candidate.user.email,
+            startTime: candidate.startTime,
+            endTime: candidate.endTime,
           });
           continue;
         }
@@ -428,6 +551,10 @@ export class BoothsService {
           bookingId: candidate.id,
           userId: candidate.userId,
           status: candidate.status,
+          studentName,
+          studentEmail: candidate.user.email,
+          startTime: candidate.startTime,
+          endTime: candidate.endTime,
         });
       }
 
@@ -510,11 +637,49 @@ export class BoothsService {
         totalCandidates: transferResult.totalCandidates,
         transferableCount: transferResult.transferred.length,
         conflictCount: transferResult.skipped.length,
+        transferableBookings: transferResult.transferred.map((item) => ({
+          bookingId: item.bookingId,
+          studentName: item.studentName,
+          studentEmail: item.studentEmail,
+          status: item.status,
+          startTime: item.startTime,
+          endTime: item.endTime,
+        })),
         transferableBookingIds: transferResult.transferred.map((item) => item.bookingId),
-        conflicts: transferResult.skipped,
+        conflicts: transferResult.skipped.map((item) => ({
+          bookingId: item.bookingId,
+          userId: item.userId,
+          studentName: item.studentName,
+          studentEmail: item.studentEmail,
+          startTime: item.startTime,
+          endTime: item.endTime,
+          wasCancelled: item.wasCancelled,
+          reason: item.reason,
+        })),
         includeCheckedIn: dto.includeCheckedIn,
       };
     }
+
+    const cancelledConflicts = transferResult.skipped.filter((item) => item.wasCancelled);
+    await this.notifyTransferConflictsByEmail({
+      sourceBoothName: transferResult.sourceBooth.name,
+      sourceBoothCode: transferResult.sourceBooth.code,
+      targetBoothName: transferResult.targetBooth.name,
+      targetBoothCode: transferResult.targetBooth.code,
+      reason: dto.reason,
+      conflicts: cancelledConflicts.map((item) => ({
+        student: {
+          id: item.userId,
+          email: item.studentEmail,
+          name: item.studentName,
+          studentCode: null,
+        },
+        bookingId: item.bookingId,
+        startTime: item.startTime,
+        endTime: item.endTime,
+        reason: item.reason,
+      })),
+    });
 
     if (!transferResult.updatedSourceBooth) {
       throw new BadRequestException('Không thể cập nhật trạng thái booth nguồn sau khi chuyển lịch');
@@ -553,11 +718,34 @@ export class BoothsService {
       sourceBoothId: transferResult.sourceBooth.id,
       targetBoothId: transferResult.targetBooth.id,
       dryRun: false,
+      cancelledDueToConflicts: false,
+      message:
+        cancelledConflicts.length > 0
+          ? `Đã chuyển ${transferResult.transferred.length} booking. Có ${cancelledConflicts.length} booking trùng lịch đã được cập nhật sang CANCEL.`
+          : undefined,
       totalCandidates: transferResult.totalCandidates,
       transferredCount: transferResult.transferred.length,
       skippedCount: transferResult.skipped.length,
       transferredBookingIds: transferResult.transferred.map((item) => item.bookingId),
-      skipped: transferResult.skipped,
+      transferredBookings: transferResult.transferred.map((item) => ({
+        bookingId: item.bookingId,
+        userId: item.userId,
+        studentName: item.studentName,
+        studentEmail: item.studentEmail,
+        status: item.status,
+        startTime: item.startTime,
+        endTime: item.endTime,
+      })),
+      skipped: transferResult.skipped.map((item) => ({
+        bookingId: item.bookingId,
+        userId: item.userId,
+        studentName: item.studentName,
+        studentEmail: item.studentEmail,
+        startTime: item.startTime,
+        endTime: item.endTime,
+        wasCancelled: item.wasCancelled,
+        reason: item.reason,
+      })),
       sourceBoothStatusAfterTransfer: transferResult.sourceStatusAfterTransfer,
     };
   }
