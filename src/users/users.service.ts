@@ -256,14 +256,40 @@ export class UsersService {
     return String(cohort + 4).padStart(2, '0');
   }
 
+  private normalizeClassNameFilter(className?: string) {
+    const value = className?.trim();
+    if (!value) return undefined;
+
+    // Allow explicit lookup of students whose className is NULL.
+    // The UI may pass the literal string from a route label instead of "null".
+    const normalized = value.toLowerCase();
+    if (
+      normalized === 'null' ||
+      normalized === 'none' ||
+      normalized === 'chưa có lớp' ||
+      normalized === 'không có lớp' ||
+      normalized === 'no class'
+    ) {
+      return null;
+    }
+
+    return value;
+  }
+
   private buildStudentWhere(query: QueryUserDto): Prisma.UserWhereInput {
     const { role, search, className, cohort, isLocked } = query;
     const where: Prisma.UserWhereInput = {};
+    const normalizedClassName = this.normalizeClassNameFilter(className);
 
     // This module is scoped to student data management.
     where.role = role ? (role as Role) : 'STUDENT';
     if (isLocked !== undefined) where.isLocked = isLocked;
-    if (className) where.className = { contains: className, mode: 'insensitive' };
+    if (normalizedClassName !== undefined) {
+      where.className =
+        normalizedClassName === null
+          ? null
+          : { contains: normalizedClassName, mode: 'insensitive' };
+    }
     if (cohort !== undefined) {
       where.studentCode = {
         startsWith: this.getStudentCodePrefixForCohort(cohort),
