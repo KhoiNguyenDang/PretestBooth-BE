@@ -9,7 +9,9 @@ import {
   UseGuards,
   Req,
   Query,
+  Res,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { AuthGuard } from '@nestjs/passport';
 import { AuthService } from './auth.service';
 import type { RegisterDto } from './dto/register.dto';
@@ -35,7 +37,65 @@ import { ActivateBoothSchema } from '../booths/dto/booth.dto';
 
 @Controller('auth')
 export class AuthController {
+  private static readonly REFRESH_COOKIE_NAME = 'refreshToken';
+
   constructor(private readonly authService: AuthService) {}
+
+  private getRefreshCookieOptions() {
+    const isProd = process.env.NODE_ENV === 'production';
+    const sameSite =
+      (process.env.REFRESH_COOKIE_SAMESITE as 'lax' | 'strict' | 'none' | undefined) ||
+      (isProd ? 'none' : 'lax');
+    const cookieDomain = process.env.REFRESH_COOKIE_DOMAIN;
+
+    return {
+      httpOnly: true,
+      secure: sameSite === 'none' ? true : isProd,
+      sameSite,
+      path: '/',
+      maxAge: 90 * 60 * 1000,
+      ...(cookieDomain ? { domain: cookieDomain } : {}),
+    };
+  }
+
+  private setRefreshTokenCookie(res: Response, refreshToken: string) {
+    res.cookie(
+      AuthController.REFRESH_COOKIE_NAME,
+      refreshToken,
+      this.getRefreshCookieOptions(),
+    );
+  }
+
+  private clearRefreshTokenCookie(res: Response) {
+    const cookieOptions = this.getRefreshCookieOptions();
+    res.clearCookie(AuthController.REFRESH_COOKIE_NAME, {
+      path: cookieOptions.path,
+      sameSite: cookieOptions.sameSite,
+      secure: cookieOptions.secure,
+      ...(cookieOptions.domain ? { domain: cookieOptions.domain } : {}),
+    });
+  }
+
+  private getRefreshTokenFromCookie(req: any): string | null {
+    const cookieHeader = req?.headers?.cookie;
+
+    if (typeof cookieHeader !== 'string' || cookieHeader.length === 0) {
+      return null;
+    }
+
+    const parts = cookieHeader.split(';');
+    for (const part of parts) {
+      const trimmed = part.trim();
+      if (!trimmed.startsWith(`${AuthController.REFRESH_COOKIE_NAME}=`)) {
+        continue;
+      }
+
+      const rawValue = trimmed.slice(AuthController.REFRESH_COOKIE_NAME.length + 1);
+      return decodeURIComponent(rawValue);
+    }
+
+    return null;
+  }
 
   private extractBoothSessionBinding(req: any) {
     const rawBoothClientId = req?.headers?.['x-booth-client-id'];
@@ -65,10 +125,18 @@ export class AuthController {
   @Post('login')
   @HttpCode(HttpStatus.OK)
   login(
+    @Res({ passthrough: true }) res: Response,
     @Body(new ZodValidationPipe(LoginSchema))
     dto: LoginDto,
   ) {
-    return this.authService.login(dto.email, dto.password);
+    return this.authService.login(dto.email, dto.password).then((tokens) => {
+      this.setRefreshTokenCookie(res, tokens.refreshToken);
+
+      return {
+        accessToken: tokens.accessToken,
+        user: tokens.user,
+      };
+    });
   }
 
   @Post('booth-activate')
@@ -89,15 +157,30 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   boothLogin(
     @Req() req,
+    @Res({ passthrough: true }) res: Response,
     @Body(new ZodValidationPipe(BoothLoginSchema))
     dto: BoothLoginDto,
   ) {
-    return this.authService.boothLogin(
+    return this.authService
+      .boothLogin(
       dto.email,
       dto.password,
       dto.boothSessionToken,
       this.extractBoothSessionBinding(req),
-    );
+    )
+      .then((result) => {
+        this.setRefreshTokenCookie(res, result.refreshToken);
+
+        return {
+          accessToken: result.accessToken,
+          user: result.user,
+          booth: result.booth,
+          accessMode: result.accessMode,
+          checkedInBooking: result.checkedInBooking,
+          pendingCheckinBooking: result.pendingCheckinBooking,
+          walkInProtection: result.walkInProtection,
+        };
+      });
   }
 
   @Post('booth-logout')
@@ -128,17 +211,33 @@ export class AuthController {
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
   refresh(
+    @Req() req,
+    @Res({ passthrough: true }) res: Response,
     @Body(new ZodValidationPipe(RefreshSchema))
     dto: RefreshDto,
   ) {
-    return this.authService.refresh(dto.refreshToken);
+    const refreshTokenFromCookie = this.getRefreshTokenFromCookie(req);
+    const refreshToken = refreshTokenFromCookie || dto.refreshToken;
+
+    if (!refreshToken) {
+      throw new BadRequestException('Thiếu refresh token');
+    }
+
+    return this.authService.refresh(refreshToken).then((tokens) => {
+      this.setRefreshTokenCookie(res, tokens.refreshToken);
+
+      return {
+        accessToken: tokens.accessToken,
+      };
+    });
   }
 
   @UseGuards(AuthGuard('jwt'))
   @Post('logout')
   @HttpCode(HttpStatus.OK)
-  logout(@Req() req) {
+  logout(@Req() req, @Res({ passthrough: true }) res: Response) {
     const userId = req.user['sub'];
+    this.clearRefreshTokenCookie(res);
     return this.authService.logout(userId);
   }
 
