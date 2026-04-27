@@ -2104,6 +2104,9 @@ export class ExamsService {
         | undefined;
       const passed = this.resolvePassedState(totalScore, appliedPassingScoreAbsolute, allGraded);
 
+      const shouldPublishResultImmediately =
+        session.exam.type === 'PRACTICE' || !hasShortAnswerItems;
+
       await tx.examSession.update({
         where: { id: sessionId },
         data: {
@@ -2111,14 +2114,16 @@ export class ExamsService {
           finishedAt: submittedAt,
           score: totalScore,
           passed,
-          resultPublicationStatus: hasShortAnswerItems ? 'PENDING_REVIEW' : 'PUBLISHED',
-          resultPublishedAt: hasShortAnswerItems ? null : submittedAt,
-          resultLastUpdatedAt: hasShortAnswerItems ? null : submittedAt,
+          resultPublicationStatus: shouldPublishResultImmediately
+            ? 'PUBLISHED'
+            : 'PENDING_REVIEW',
+          resultPublishedAt: shouldPublishResultImmediately ? submittedAt : null,
+          resultLastUpdatedAt: shouldPublishResultImmediately ? submittedAt : null,
           resultRevisionCount: 0,
         },
       });
 
-      if (!hasShortAnswerItems) {
+      if (shouldPublishResultImmediately) {
         await tx.examSessionGradeAudit.create({
           data: {
             sessionId,
@@ -2267,16 +2272,18 @@ export class ExamsService {
     const canViewItemDetails =
       canViewAsLecturer || (isResultPublishedToStudent && session.exam.allowStudentReviewResults);
     const canViewProctoringWarnings = canViewAsLecturer && session.exam.type === 'EXAM';
-    const fallbackReview = canViewAsLecturer
-      ? new SessionFallbackReviewDto({
-          bookingId: session.booking?.id ?? null,
-          checkinStatus: session.booking?.checkinStatus ?? null,
-          checkinAttemptCount: session.booking?.checkinAttemptCount ?? 0,
-          fallbackAppliedAt: session.booking?.fallbackAppliedAt ?? null,
-          fallbackEvidenceImageUrl: session.booking?.fallbackEvidenceImageUrl ?? null,
-          registeredFaceImageUrl: session.user.kycFaceImageUrl ?? null,
-          studentCardImageUrl: session.user.studentCardImageUrl ?? null,
-        })
+    // Check-in fallback review only applies to official EXAM sessions.
+    const fallbackReview =
+      canViewAsLecturer && session.exam.type === 'EXAM'
+        ? new SessionFallbackReviewDto({
+            bookingId: session.booking?.id ?? null,
+            checkinStatus: session.booking?.checkinStatus ?? null,
+            checkinAttemptCount: session.booking?.checkinAttemptCount ?? 0,
+            fallbackAppliedAt: session.booking?.fallbackAppliedAt ?? null,
+            fallbackEvidenceImageUrl: session.booking?.fallbackEvidenceImageUrl ?? null,
+            registeredFaceImageUrl: session.user.kycFaceImageUrl ?? null,
+            studentCardImageUrl: session.user.studentCardImageUrl ?? null,
+          })
       : null;
     const detailMessage = canViewItemDetails
       ? null

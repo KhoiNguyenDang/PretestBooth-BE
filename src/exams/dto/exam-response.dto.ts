@@ -238,6 +238,7 @@ export class SessionFallbackReviewDto {
   fallbackEvidenceImageUrl: string | null;
   registeredFaceImageUrl: string | null;
   studentCardImageUrl: string | null;
+  shouldAutoExpand: boolean;
 
   constructor(partial: Partial<SessionFallbackReviewDto>) {
     Object.assign(this, partial);

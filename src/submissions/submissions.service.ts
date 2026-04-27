@@ -166,6 +166,7 @@ export class SubmissionsService {
 
     const unifiedGroups: Array<{
       type: 'PROBLEM' | 'EXAM';
+      examType: 'PRACTICE' | 'EXAM' | null;
       entityId: string;
       title: string;
       slug: string | null;
@@ -206,6 +207,7 @@ export class SubmissionsService {
         string,
         {
           type: 'PROBLEM';
+          examType: null;
           entityId: string;
           title: string;
           slug: string | null;
@@ -230,6 +232,7 @@ export class SubmissionsService {
         if (!existing) {
           groupedByProblem.set(key, {
             type: 'PROBLEM',
+            examType: null,
             entityId: key,
             title: submission.problem.title,
             slug: submission.problem.slug,
@@ -257,6 +260,7 @@ export class SubmissionsService {
       for (const group of groupedByProblem.values()) {
         unifiedGroups.push({
           type: group.type,
+          examType: group.examType,
           entityId: group.entityId,
           title: group.title,
           slug: group.slug,
@@ -288,6 +292,7 @@ export class SubmissionsService {
             select: {
               id: true,
               title: true,
+              type: true,
               questionCount: true,
               problemCount: true,
             },
@@ -299,6 +304,7 @@ export class SubmissionsService {
         string,
         {
           type: 'EXAM';
+          examType: 'PRACTICE' | 'EXAM';
           entityId: string;
           title: string;
           slug: string | null;
@@ -323,6 +329,7 @@ export class SubmissionsService {
         if (!existing) {
           groupedByExam.set(key, {
             type: 'EXAM',
+            examType: session.exam.type,
             entityId: key,
             title: session.exam.title,
             slug: null,
@@ -350,6 +357,7 @@ export class SubmissionsService {
       for (const group of groupedByExam.values()) {
         unifiedGroups.push({
           type: group.type,
+          examType: group.examType,
           entityId: group.entityId,
           title: group.title,
           slug: group.slug,
@@ -451,6 +459,7 @@ export class SubmissionsService {
       return {
         test: {
           type: 'PROBLEM' as const,
+          examType: null,
           entityId,
           title: testMeta?.title || 'Unknown Problem',
           slug: testMeta?.slug || null,
@@ -471,6 +480,7 @@ export class SubmissionsService {
           totalTestCases: row.totalTestCases,
           score: null,
           maxScore: null,
+          examType: null,
           submittedAt: row.createdAt,
         })),
         total,
@@ -504,6 +514,7 @@ export class SubmissionsService {
             select: {
               id: true,
               title: true,
+              type: true,
               questionCount: true,
               problemCount: true,
             },
@@ -526,6 +537,7 @@ export class SubmissionsService {
     return {
       test: {
         type: 'EXAM' as const,
+        examType: testMeta?.type ?? null,
         entityId,
         title: testMeta?.title || 'Unknown Exam',
         slug: null,
@@ -546,6 +558,7 @@ export class SubmissionsService {
         totalTestCases: null,
         score: row.score,
         maxScore: row.maxScore,
+        examType: row.exam?.type ?? null,
         submittedAt: row.finishedAt || row.startedAt,
       })),
       total,
@@ -776,6 +789,7 @@ export class SubmissionsService {
               select: {
                 id: true,
                 title: true,
+                type: true,
                 questionCount: true,
                 problemCount: true,
               },
@@ -796,6 +810,7 @@ export class SubmissionsService {
       unified.push({
         id: s.id,
         type: 'PROBLEM' as const,
+        examType: null,
         title: s.problem?.title || 'Unknown Problem',
         slug: s.problem?.slug || null,
         difficulty: s.problem?.difficulty || null,
@@ -824,6 +839,7 @@ export class SubmissionsService {
       unified.push({
         id: s.id,
         type: 'EXAM' as const,
+        examType: s.exam?.type ?? null,
         title: s.exam?.title || 'Unknown Exam',
         slug: null,
         difficulty: null,
