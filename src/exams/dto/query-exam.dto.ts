@@ -14,6 +14,7 @@ export const QueryExamSchema = z
     maxDuration: z.coerce.number().int().positive().optional(),
     minQuestionCount: z.coerce.number().int().nonnegative().optional(),
     maxQuestionCount: z.coerce.number().int().nonnegative().optional(),
+    pretestGroup: z.enum(['PRETEST', 'REGULAR']).optional(),
     isPublished: z
       .string()
       .transform((val) => val === 'true')

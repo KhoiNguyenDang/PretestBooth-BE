@@ -3,6 +3,8 @@
 export class ExamListItemDto {
   id: string;
   title: string;
+  displayTitle: string;
+  isPretestExam: boolean;
   description: string | null;
   type: 'PRACTICE' | 'EXAM';
   questionCount: number;

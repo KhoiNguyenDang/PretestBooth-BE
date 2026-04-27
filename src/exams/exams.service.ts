@@ -117,6 +117,35 @@ export class ExamsService {
     );
   }
 
+  private isPretestExamListItem(exam: { title: string; description: string | null }) {
+    const title = exam.title?.toLowerCase() || '';
+    const description = exam.description?.toLowerCase() || '';
+
+    return (
+      title.startsWith('pretest') ||
+      title.startsWith(PRETEST_RANDOM_EXAM_TITLE_PREFIX.toLowerCase()) ||
+      description.includes('pretest')
+    );
+  }
+
+  private buildFriendlyExamTitle(exam: { title: string; createdAt: Date; description: string | null }) {
+    if (!this.isPretestExamListItem(exam)) {
+      return exam.title;
+    }
+
+    const createdAtLabel = new Intl.DateTimeFormat('vi-VN', {
+      timeZone: 'Asia/Ho_Chi_Minh',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).format(exam.createdAt);
+
+    return `Pretest - ${createdAtLabel}`;
+  }
+
   private async assertSessionMonitoringPermission(
     userId: string,
     userRole: string,
@@ -1283,6 +1312,7 @@ export class ExamsService {
       maxDuration,
       minQuestionCount,
       maxQuestionCount,
+      pretestGroup,
       isPublished,
       sortBy,
       sortOrder,
@@ -1290,18 +1320,26 @@ export class ExamsService {
     const skip = (page - 1) * limit;
 
     const where: Prisma.ExamWhereInput = {};
+    const andConditions: Prisma.ExamWhereInput[] = [];
 
-    // Students only see published exams
+    // Students can view full exam library in the new UX.
     if (userRole === 'STUDENT') {
-      where.AND = [
-        { type: { in: ['EXAM', 'PRACTICE'] } },
-        { visibility: 'PUBLIC' },
-        {
-          OR: [{ publishAt: null }, { publishAt: { lte: new Date() } }],
-        },
-      ];
+      andConditions.push({ type: { in: ['EXAM', 'PRACTICE'] } });
     } else if (isPublished !== undefined) {
       where.isPublished = isPublished;
+    }
+
+    const pretestMatchCondition: Prisma.ExamWhereInput = {
+      OR: [
+        { title: { contains: 'pretest', mode: 'insensitive' } },
+        { description: { contains: 'pretest', mode: 'insensitive' } },
+      ],
+    };
+
+    if (pretestGroup === 'PRETEST') {
+      andConditions.push(pretestMatchCondition);
+    } else if (pretestGroup === 'REGULAR') {
+      andConditions.push({ NOT: pretestMatchCondition });
     }
 
     if (subjectId) where.subjectId = subjectId;
@@ -1325,6 +1363,10 @@ export class ExamsService {
       where.title = { contains: search, mode: 'insensitive' };
     }
 
+    if (andConditions.length > 0) {
+      where.AND = andConditions;
+    }
+
     const orderBy: Prisma.ExamOrderByWithRelationInput = { [sortBy]: sortOrder };
 
     const [exams, total] = await Promise.all([
@@ -1343,10 +1385,16 @@ export class ExamsService {
     ]);
 
     const data = exams.map(
-      (e) =>
+      (e) => {
+        const isPretestExam = this.isPretestExamListItem(e);
+        const displayTitle = this.buildFriendlyExamTitle(e);
+
+        return (
         new ExamListItemDto({
           id: e.id,
           title: e.title,
+          displayTitle,
+          isPretestExam,
           description: e.description,
           type: e.type,
           questionCount: e.questionCount,
@@ -1369,7 +1417,9 @@ export class ExamsService {
           shuffleQuestions: e.shuffleQuestions,
           shuffleChoices: e.shuffleChoices,
           createdAt: e.createdAt,
-        }),
+        })
+        );
+      },
     );
 
     return new PaginatedExamsDto({
