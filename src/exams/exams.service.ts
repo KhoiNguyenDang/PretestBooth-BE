@@ -45,6 +45,7 @@ import {
   ShuffledItemDto,
   SessionAnswerDto,
   SessionResultDto,
+  SessionFallbackReviewDto,
   SessionResultProctoringWarningDto,
   SessionResultChoiceDto,
   SessionResultItemDto,
@@ -2218,6 +2219,21 @@ export class ExamsService {
             },
           },
         },
+        user: {
+          select: {
+            kycFaceImageUrl: true,
+            studentCardImageUrl: true,
+          },
+        },
+        booking: {
+          select: {
+            id: true,
+            checkinStatus: true,
+            checkinAttemptCount: true,
+            fallbackAppliedAt: true,
+            fallbackEvidenceImageUrl: true,
+          },
+        },
       },
     });
 
@@ -2251,6 +2267,17 @@ export class ExamsService {
     const canViewItemDetails =
       canViewAsLecturer || (isResultPublishedToStudent && session.exam.allowStudentReviewResults);
     const canViewProctoringWarnings = canViewAsLecturer && session.exam.type === 'EXAM';
+    const fallbackReview = canViewAsLecturer
+      ? new SessionFallbackReviewDto({
+          bookingId: session.booking?.id ?? null,
+          checkinStatus: session.booking?.checkinStatus ?? null,
+          checkinAttemptCount: session.booking?.checkinAttemptCount ?? 0,
+          fallbackAppliedAt: session.booking?.fallbackAppliedAt ?? null,
+          fallbackEvidenceImageUrl: session.booking?.fallbackEvidenceImageUrl ?? null,
+          registeredFaceImageUrl: session.user.kycFaceImageUrl ?? null,
+          studentCardImageUrl: session.user.studentCardImageUrl ?? null,
+        })
+      : null;
     const detailMessage = canViewItemDetails
       ? null
       : !isResultPublishedToStudent
@@ -2558,6 +2585,7 @@ export class ExamsService {
       pendingItems: canViewResultSummary ? pendingItems : examItems.length,
       canViewItemDetails,
       detailMessage,
+      fallbackReview,
       proctoringWarnings,
       items,
     });

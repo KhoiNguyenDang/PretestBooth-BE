@@ -5,7 +5,6 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
-import { BoothPoliciesService } from '../booth-policies/booth-policies.service';
 import { CloudinaryService } from '../common/cloudinary/cloudinary.service';
 import { FaceRecognitionService } from '../face/face-recognition.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -16,6 +15,7 @@ const CHECKIN_THRESHOLD_SETTING_KEY = 'CHECKIN_SIMILARITY_THRESHOLD';
 const DEFAULT_CHECKIN_THRESHOLD = 0.6;
 const MIN_CHECKIN_THRESHOLD = 0.5;
 const MAX_CHECKIN_THRESHOLD = 0.99;
+const EXAM_FALLBACK_MAX_FAILED_ATTEMPTS = 5;
 
 @Injectable()
 export class CheckinService {
@@ -23,7 +23,6 @@ export class CheckinService {
     private readonly prisma: PrismaService,
     private readonly faceRecognitionService: FaceRecognitionService,
     private readonly realtimeService: RealtimeService,
-    private readonly boothPoliciesService: BoothPoliciesService,
     private readonly cloudinaryService: CloudinaryService,
   ) {}
 
@@ -211,7 +210,6 @@ export class CheckinService {
 
     const thresholdConfig = await this.getCheckinThresholdConfig();
     const threshold = thresholdConfig.threshold;
-    const boothPolicy = await this.boothPoliciesService.getConfig();
 
     const storedEmbedding = this.getStoredEmbedding(bookingUser.faceEmbedding);
     const liveEmbeddingResult = await this.faceRecognitionService.extractEmbedding(dto.image);
@@ -222,12 +220,11 @@ export class CheckinService {
     const matched = similarityScore > threshold;
     const attemptNumber = booking.checkinAttemptCount + 1;
 
-    const fallbackPolicyEnabled =
-      booking.type === 'EXAM' && boothPolicy.enableExamFallbackAfterFailures;
+    const fallbackPolicyEnabled = booking.type === 'EXAM';
     const fallbackActivated =
       !matched &&
       fallbackPolicyEnabled &&
-      attemptNumber >= boothPolicy.maxFailedAttemptsBeforeAllow;
+      attemptNumber > EXAM_FALLBACK_MAX_FAILED_ATTEMPTS;
 
     let evidenceImageUrl: string | null = null;
     if (fallbackActivated) {
@@ -263,7 +260,7 @@ export class CheckinService {
         checkinSimilarityScore: similarityScore,
         checkinThreshold: threshold,
         checkinVerifiedAt: shouldAllowEntry ? now : null,
-        checkinAttemptCount: { increment: 1 },
+        checkinAttemptCount: matched ? 0 : { increment: 1 },
         fallbackAppliedAt: fallbackActivated ? now : null,
         fallbackEvidenceImageUrl: fallbackActivated ? evidenceImageUrl : null,
         ...(!shouldAllowEntry && booking.status === 'CHECKED_IN'
@@ -312,7 +309,7 @@ export class CheckinService {
         userId: updatedBooking.userId,
         boothId: updatedBooking.boothId,
         message: fallbackActivated
-          ? 'Xac thuc khuon mat khong dat nguong, he thong da luu bang chung va cho phep vao booth theo policy EXAM.'
+          ? 'Xac thuc khuon mat that bai qua 5 lan, he thong da luu anh lan cuoi va cho phep vao thi de giang vien doi chieu truoc khi cong bo diem.'
           : 'Xác thực khuôn mặt thành công. Check-in đã được ghi nhận.',
         level: fallbackActivated ? 'warning' : 'success',
         emittedAt: new Date().toISOString(),
@@ -320,7 +317,7 @@ export class CheckinService {
     }
 
     const remainingAttempts = fallbackPolicyEnabled
-      ? Math.max(0, boothPolicy.maxFailedAttemptsBeforeAllow - updatedBooking.checkinAttemptCount)
+      ? Math.max(0, EXAM_FALLBACK_MAX_FAILED_ATTEMPTS - updatedBooking.checkinAttemptCount)
       : null;
 
     return {
@@ -332,7 +329,7 @@ export class CheckinService {
       evidenceCaptured: Boolean(evidenceImageUrl),
       attemptNumber: updatedBooking.checkinAttemptCount,
       maxFailedAttemptsBeforeAllow: fallbackPolicyEnabled
-        ? boothPolicy.maxFailedAttemptsBeforeAllow
+        ? EXAM_FALLBACK_MAX_FAILED_ATTEMPTS
         : null,
       remainingAttempts,
       checkinStatus: updatedBooking.checkinStatus,

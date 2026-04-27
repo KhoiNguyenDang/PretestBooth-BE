@@ -221,10 +221,25 @@ export class SessionResultDto {
   pendingItems: number;
   canViewItemDetails: boolean;
   detailMessage: string | null;
+  fallbackReview: SessionFallbackReviewDto | null;
   proctoringWarnings?: SessionResultProctoringWarningDto[];
   items: SessionResultItemDto[];
 
   constructor(partial: Partial<SessionResultDto>) {
+    Object.assign(this, partial);
+  }
+}
+
+export class SessionFallbackReviewDto {
+  bookingId: string | null;
+  checkinStatus: string | null;
+  checkinAttemptCount: number;
+  fallbackAppliedAt: Date | null;
+  fallbackEvidenceImageUrl: string | null;
+  registeredFaceImageUrl: string | null;
+  studentCardImageUrl: string | null;
+
+  constructor(partial: Partial<SessionFallbackReviewDto>) {
     Object.assign(this, partial);
   }
 }
