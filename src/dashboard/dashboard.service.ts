@@ -40,11 +40,11 @@ export class DashboardService {
   }
 
   /**
-   * Get admin system-wide stats
+   * Get admin/lecturer system-wide stats
    */
   async getAdminStats(userRole: string) {
-    if (userRole !== 'ADMIN') {
-      throw new ForbiddenException('Chỉ quản trị viên mới xem được thống kê hệ thống');
+    if (userRole !== 'ADMIN' && userRole !== 'LECTURER') {
+      throw new ForbiddenException('Chỉ quản trị viên và giảng viên mới xem được thống kê hệ thống');
     }
 
     const today = new Date();
