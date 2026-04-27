@@ -10,3 +10,4 @@ services:
       INSIGHTFACE_MODEL_NAME: buffalo_l
       INSIGHTFACE_MODEL_VERSION: "1"
       INSIGHTFACE_DET_SIZE: "640"
+    restart: unless-stopped
