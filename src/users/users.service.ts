@@ -61,6 +61,80 @@ export class UsersService {
     return (row && typeof row === 'object' ? row : {}) as Record<string, unknown>;
   }
 
+  private normalizeSpreadsheetHeader(rawValue: unknown): string {
+    if (rawValue === undefined || rawValue === null) return '';
+
+    return String(rawValue)
+      .trim()
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/đ/g, 'd')
+      .replace(/[^a-z0-9]/g, '');
+  }
+
+  private parseSpreadsheetRowsWithHeader(
+    sheet: xlsx.WorkSheet,
+    requiredHeaders: string[],
+  ): Array<{ rowNumber: number; data: Record<string, unknown> }> {
+    const rows = xlsx.utils.sheet_to_json<unknown[]>(sheet, {
+      header: 1,
+      raw: false,
+      defval: '',
+    }) as unknown[][];
+
+    const normalizedRequiredHeaders = requiredHeaders.map((header) =>
+      this.normalizeSpreadsheetHeader(header),
+    );
+
+    const headerRowIndex = rows.findIndex((row) => {
+      const normalizedRowHeaders = new Set(
+        (row || []).map((cell) => this.normalizeSpreadsheetHeader(cell)).filter(Boolean),
+      );
+
+      return normalizedRequiredHeaders.every((header) => normalizedRowHeaders.has(header));
+    });
+
+    if (headerRowIndex === -1) {
+      throw new BadRequestException(
+        `Không tìm thấy dòng tiêu đề hợp lệ trong file import. Hãy đảm bảo file có các cột: ${requiredHeaders.join(
+          ', ',
+        )}`,
+      );
+    }
+
+    const headerRow = rows[headerRowIndex] || [];
+    const dataRows = rows.slice(headerRowIndex + 1);
+    const normalizedHeaders = headerRow.map((cell) => this.normalizeSpreadsheetHeader(cell));
+
+    return dataRows
+      .map((row, index) => {
+        const isEmpty = !row || row.every((cell) => String(cell ?? '').trim() === '');
+        if (isEmpty) return null;
+
+        const data: Record<string, unknown> = {};
+
+        headerRow.forEach((headerCell, columnIndex) => {
+          const originalHeader = String(headerCell ?? '').trim();
+          if (!originalHeader) return;
+
+          const value = row[columnIndex];
+          data[originalHeader] = value;
+
+          const normalizedHeader = normalizedHeaders[columnIndex];
+          if (normalizedHeader) {
+            data[normalizedHeader] = value;
+          }
+        });
+
+        return {
+          rowNumber: headerRowIndex + index + 2,
+          data,
+        };
+      })
+      .filter((item): item is { rowNumber: number; data: Record<string, unknown> } => Boolean(item));
+  }
+
   private async assertLecturerPermissionManagementAccess(
     requesterId: string,
     requesterRole: string,
@@ -741,6 +815,189 @@ export class UsersService {
     return {
       ...updated,
       message: 'Cập nhật thông tin giảng viên thành công.',
+    };
+  }
+
+  async lockLecturer(
+    lecturerId: string,
+    requesterId: string,
+    requesterRole: string,
+    reason?: string,
+  ) {
+    const requesterPermissions = await this.assertLecturerPermissionManagementAccess(
+      requesterId,
+      requesterRole,
+    );
+
+    const lecturer = await this.prisma.user.findUnique({
+      where: { id: lecturerId },
+      select: {
+        id: true,
+        role: true,
+        lecturerRole: {
+          select: {
+            priority: true,
+          },
+        },
+      },
+    });
+
+    if (!lecturer || lecturer.role !== 'LECTURER') {
+      throw new NotFoundException('Giảng viên không tồn tại');
+    }
+
+    if (requesterRole === 'LECTURER') {
+      if (requesterId === lecturerId) {
+        throw new ForbiddenException('Giảng viên không thể tự khóa tài khoản của chính mình');
+      }
+
+      const requester = await this.prisma.user.findUnique({
+        where: { id: requesterId },
+        select: {
+          lecturerRole: {
+            select: {
+              priority: true,
+            },
+          },
+        },
+      });
+
+      if (requester?.lecturerRole) {
+        const requesterPriority = requester.lecturerRole.priority;
+        if (lecturer.lecturerRole && lecturer.lecturerRole.priority <= requesterPriority) {
+          throw new ForbiddenException(
+            'Bạn chỉ có thể khóa giảng viên có vai trò thấp hơn vai trò của bạn',
+          );
+        }
+      } else {
+        const topRolePriority = await this.getTopActiveLecturerRolePriority();
+        if (
+          topRolePriority !== null &&
+          lecturer.lecturerRole &&
+          lecturer.lecturerRole.priority <= topRolePriority
+        ) {
+          throw new ForbiddenException(
+            'Bạn không thể khóa giảng viên đang có vai trò ưu tiên cao nhất',
+          );
+        }
+      }
+
+      if (!requesterPermissions.includes(LECTURER_ADMIN_PERMISSION)) {
+        throw new ForbiddenException('Bạn chưa được cấp quyền quản trị giảng viên');
+      }
+    }
+
+    const updated = await this.prisma.user.update({
+      where: { id: lecturerId },
+      data: {
+        isLocked: true,
+        lockedAt: new Date(),
+        lockedReason: reason?.trim() || 'Khóa bởi quản trị viên',
+      },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        role: true,
+        isLocked: true,
+        lockedAt: true,
+        lockedReason: true,
+        createdAt: true,
+      },
+    });
+
+    return {
+      ...updated,
+      message: 'Khóa tài khoản giảng viên thành công.',
+    };
+  }
+
+  async unlockLecturer(lecturerId: string, requesterId: string, requesterRole: string) {
+    const requesterPermissions = await this.assertLecturerPermissionManagementAccess(
+      requesterId,
+      requesterRole,
+    );
+
+    const lecturer = await this.prisma.user.findUnique({
+      where: { id: lecturerId },
+      select: {
+        id: true,
+        role: true,
+        lecturerRole: {
+          select: {
+            priority: true,
+          },
+        },
+      },
+    });
+
+    if (!lecturer || lecturer.role !== 'LECTURER') {
+      throw new NotFoundException('Giảng viên không tồn tại');
+    }
+
+    if (requesterRole === 'LECTURER') {
+      if (requesterId === lecturerId) {
+        throw new ForbiddenException('Giảng viên không thể tự mở khóa tài khoản của chính mình');
+      }
+
+      const requester = await this.prisma.user.findUnique({
+        where: { id: requesterId },
+        select: {
+          lecturerRole: {
+            select: {
+              priority: true,
+            },
+          },
+        },
+      });
+
+      if (requester?.lecturerRole) {
+        const requesterPriority = requester.lecturerRole.priority;
+        if (lecturer.lecturerRole && lecturer.lecturerRole.priority <= requesterPriority) {
+          throw new ForbiddenException(
+            'Bạn chỉ có thể mở khóa giảng viên có vai trò thấp hơn vai trò của bạn',
+          );
+        }
+      } else {
+        const topRolePriority = await this.getTopActiveLecturerRolePriority();
+        if (
+          topRolePriority !== null &&
+          lecturer.lecturerRole &&
+          lecturer.lecturerRole.priority <= topRolePriority
+        ) {
+          throw new ForbiddenException(
+            'Bạn không thể mở khóa giảng viên đang có vai trò ưu tiên cao nhất',
+          );
+        }
+      }
+
+      if (!requesterPermissions.includes(LECTURER_ADMIN_PERMISSION)) {
+        throw new ForbiddenException('Bạn chưa được cấp quyền quản trị giảng viên');
+      }
+    }
+
+    const updated = await this.prisma.user.update({
+      where: { id: lecturerId },
+      data: {
+        isLocked: false,
+        lockedAt: null,
+        lockedReason: null,
+      },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        role: true,
+        isLocked: true,
+        lockedAt: true,
+        lockedReason: true,
+        createdAt: true,
+      },
+    });
+
+    return {
+      ...updated,
+      message: 'Mở khóa tài khoản giảng viên thành công.',
     };
   }
 
@@ -1506,7 +1763,11 @@ export class UsersService {
     const workbook = xlsx.read(file.buffer, { type: 'buffer' });
     const sheetName = workbook.SheetNames[0];
     const sheet = workbook.Sheets[sheetName];
-    const data = xlsx.utils.sheet_to_json<unknown>(sheet);
+    const data = this.parseSpreadsheetRowsWithHeader(sheet, [
+      'studentCode',
+      'email',
+      'name',
+    ]);
 
     if (data.length === 0) {
       throw new BadRequestException('File không có dữ liệu');
@@ -1521,9 +1782,7 @@ export class UsersService {
 
     // We process sequentially to catch specific errors, but in production
     // a bulk insert with ON CONFLICT DO NOTHING is faster
-    for (const [index, row] of data.entries()) {
-      const rowNum = index + 2; // +1 for 0-index, +1 for header
-      const rowData = this.toImportRowRecord(row);
+    for (const { rowNumber: rowNum, data: rowData } of data) {
 
       try {
         const studentCode = rowData.studentCode?.toString()?.trim();

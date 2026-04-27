@@ -373,6 +373,14 @@ Toggles `isPublished` between `true` and `false`.
 
 Trong file import, dùng cột `image` (hoặc `imageFile`/`imageName`) để điền **tên file ảnh** tương ứng (ví dụ `question-1.png`).
 
+CSV template có thể có các dòng hướng dẫn ở đầu file bắt đầu bằng `#`; hệ thống sẽ bỏ qua các dòng này khi import.
+
+Nếu bạn mở file bằng Excel, nên dùng các mẫu `.xlsx` trong thư mục gốc của repo:
+
+- `sample_question_import.xlsx`
+- `sample_question_import_test.xlsx`
+- `sample_student_import.xlsx`
+
 > Lưu ý:
 >
 > - Không hỗ trợ URL ảnh trong import. Nếu cột ảnh chứa URL (`http://` hoặc `https://`) hệ thống sẽ báo lỗi dòng đó.

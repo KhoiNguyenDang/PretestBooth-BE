@@ -26,6 +26,17 @@ type Difficulty = 'EASY' | 'MEDIUM' | 'HARD';
 export class ProblemsService {
   constructor(private readonly prisma: PrismaService) {}
 
+  private normalizeImportHeaderText(text: string): string {
+    return text
+      .trim()
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/đ/g, 'd')
+      .replace(/\s+/g, '')
+      .replace(/[_-]/g, '');
+  }
+
   private isUuid(value: string): boolean {
     return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
   }
@@ -93,6 +104,42 @@ export class ProblemsService {
       .filter((item) => item.length > 0);
   }
 
+  private parseSpreadsheetRowsWithHeader(sheet: xlsx.WorkSheet, requiredHeaders: string[]) {
+    const rows = xlsx.utils.sheet_to_json<unknown[]>(sheet, {
+      header: 1,
+      raw: false,
+      defval: '',
+    }) as unknown[][];
+
+    const normalizedRequiredHeaders = requiredHeaders.map((header) => this.normalizeImportHeaderText(header));
+    const headerRowIndex = rows.findIndex((row) => {
+      const normalizedHeaders = new Set(
+        (row || []).map((cell) => this.normalizeImportHeaderText(String(cell || ''))).filter(Boolean),
+      );
+      return normalizedRequiredHeaders.every((header) => normalizedHeaders.has(header));
+    });
+
+    if (headerRowIndex === -1) return [];
+
+    const headerRow = rows[headerRowIndex] || [];
+    const headers = headerRow.map((header) => this.normalizeImportHeaderText(String(header || '')));
+    const dataRows: Array<{ rowNumber: number; data: Record<string, unknown> }> = [];
+
+    for (let rowIndex = headerRowIndex + 1; rowIndex < rows.length; rowIndex++) {
+      const row = rows[rowIndex];
+      if (!row || row.every((cell) => String(cell ?? '').trim() === '')) continue;
+
+      const data: Record<string, unknown> = {};
+      headers.forEach((header, colIndex) => {
+        data[header] = row[colIndex] ?? '';
+      });
+
+      dataRows.push({ rowNumber: rowIndex + 1, data });
+    }
+
+    return dataRows;
+  }
+
   async importProblems(file: Express.Multer.File, creatorId: string, userRole: string) {
     if (!['LECTURER', 'ADMIN'].includes(userRole)) {
       throw new ForbiddenException('Chỉ giảng viên và quản trị viên mới có thể import bài tập');
@@ -103,7 +150,7 @@ export class ProblemsService {
     const workbook = xlsx.read(file.buffer, { type: 'buffer' });
     const sheetName = workbook.SheetNames[0];
     const sheet = workbook.Sheets[sheetName];
-    const rows = xlsx.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' });
+    const rows = this.parseSpreadsheetRowsWithHeader(sheet, ['title', 'slug', 'description', 'difficulty']);
 
     if (rows.length === 0) {
       throw new BadRequestException('File không có dữ liệu');
@@ -116,8 +163,7 @@ export class ProblemsService {
       errors: [] as string[],
     };
 
-    for (const [index, row] of rows.entries()) {
-      const rowNum = index + 2;
+    for (const { rowNumber: rowNum, data: row } of rows) {
 
       try {
         const title = String(row.title || '').trim();

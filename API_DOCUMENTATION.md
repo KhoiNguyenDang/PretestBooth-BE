@@ -334,6 +334,52 @@ The system supports three user roles:
 
 ---
 
+## Lecturer Management
+
+These endpoints support the `admin/lecturers` management screen.
+
+### List Lecturers
+
+```http
+GET /users/lecturers
+```
+
+### Update Lecturer
+
+```http
+PATCH /users/lecturers/:id
+```
+
+You can include:
+
+- `email`
+- `name`
+- `password`
+- `isLocked`
+- `lockedReason`
+
+### Lock Lecturer
+
+```http
+POST /users/lecturers/:id/lock
+```
+
+Request body:
+
+```json
+{
+  "reason": "Vi phạm quy định phòng thi"
+}
+```
+
+### Unlock Lecturer
+
+```http
+POST /users/lecturers/:id/unlock
+```
+
+---
+
 ## Notes
 
 - System sends a 6-digit code to the user's email

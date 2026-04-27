@@ -50,6 +50,12 @@ export const UpdateLecturerSchema = z.object({
 
 export type UpdateLecturerDto = z.output<typeof UpdateLecturerSchema>;
 
+export const LockLecturerSchema = z.object({
+  reason: z.string().optional(),
+});
+
+export type LockLecturerDto = z.output<typeof LockLecturerSchema>;
+
 export const UpdateUserSchema = z.object({
   email: z.string().email('Email không hợp lệ').optional(),
   studentCode: z.string().optional(),

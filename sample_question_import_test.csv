@@ -1,4 +1,0 @@
-content,questionType,classification,difficulty,correctAnswer,explanation,subjectId,topicId,image,A,B,C,D,Đáp án đúng
-Java là ngôn ngữ gì?,SINGLE_CHOICE,EXAM,EASY,A,Java là ngôn ngữ lập trình phổ biến,IT01,JAVA_BASIC,java-language.png,Ngôn ngữ lập trình,Hướng đối tượng,Thủ tục,Hàm,A
-Nguyên tắc SOLID gồm những gì?,SINGLE_CHOICE,PRACTICE,MEDIUM,A,SOLID gồm 5 nguyên tắc,SE01,DESIGN_PATTERN,solid-principles.png,Single Responsibility,Data Normalization,Binary Search,Quick Sort,A
-HTTP là viết tắt của gì?,SINGLE_CHOICE,EXAM,EASY,A,HTTP là giao thức truyền tải siêu văn bản,IT02,NETWORK,http-protocol.jpg,Hyper Text Transfer Protocol,High Transfer Protocol,Hyper Tool,Host Transfer,A

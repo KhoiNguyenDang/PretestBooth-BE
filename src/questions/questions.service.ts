@@ -238,6 +238,114 @@ export class QuestionsService {
       .replace(/[^a-z0-9]/g, '');
   }
 
+  private normalizeSpreadsheetHeader(rawValue: unknown): string {
+    if (rawValue === undefined || rawValue === null) return '';
+
+    return String(rawValue)
+      .trim()
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/đ/g, 'd')
+      .replace(/[^a-z0-9]/g, '');
+  }
+
+  private parseSpreadsheetRowsWithHeader(
+    sheet: xlsx.WorkSheet,
+    requiredHeaders: string[],
+  ): Array<{ rowNumber: number; data: Record<string, unknown> }> {
+    const rows = xlsx.utils.sheet_to_json<unknown[]>(sheet, {
+      header: 1,
+      raw: false,
+      defval: '',
+    }) as unknown[][];
+
+    const normalizedRequiredHeaders = requiredHeaders.map((header) =>
+      this.normalizeSpreadsheetHeader(header),
+    );
+
+    const headerRowIndex = rows.findIndex((row) => {
+      const normalizedRowHeaders = new Set(
+        (row || []).map((cell) => this.normalizeSpreadsheetHeader(cell)).filter(Boolean),
+      );
+
+      return normalizedRequiredHeaders.every((header) => normalizedRowHeaders.has(header));
+    });
+
+    if (headerRowIndex === -1) {
+      throw new BadRequestException(
+        `Không tìm thấy dòng tiêu đề hợp lệ trong file import. Hãy đảm bảo file có các cột: ${requiredHeaders.join(
+          ', ',
+        )}`,
+      );
+    }
+
+    const headerRow = rows[headerRowIndex] || [];
+    const dataRows = rows.slice(headerRowIndex + 1);
+    const normalizedHeaders = headerRow.map((cell) => this.normalizeSpreadsheetHeader(cell));
+
+    return dataRows
+      .map((row, index) => {
+        const isEmpty = !row || row.every((cell) => String(cell ?? '').trim() === '');
+        if (isEmpty) return null;
+
+        const data: Record<string, unknown> = {};
+
+        headerRow.forEach((headerCell, columnIndex) => {
+          const originalHeader = String(headerCell ?? '').trim();
+          if (!originalHeader) return;
+
+          const value = row[columnIndex];
+          data[originalHeader] = value;
+
+          const normalizedHeader = normalizedHeaders[columnIndex];
+          if (normalizedHeader) {
+            data[normalizedHeader] = value;
+          }
+        });
+
+        return {
+          rowNumber: headerRowIndex + index + 2,
+          data,
+        };
+      })
+      .filter((item): item is { rowNumber: number; data: Record<string, unknown> } => Boolean(item));
+  }
+
+  private readImportSheetRows(
+    file: ImportedFile,
+    requiredHeaders: string[],
+  ): Array<{ rowNumber: number; data: Record<string, unknown> }> {
+    const ext = file.originalname.split('.').pop()?.toLowerCase();
+
+    if (ext === 'csv') {
+      const content = iconv.decode(file.buffer, 'utf-8');
+      const workbook = xlsx.read(this.stripCsvImportInstructions(content), { type: 'string' });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      return this.parseSpreadsheetRowsWithHeader(sheet, requiredHeaders);
+    }
+
+    const workbook = xlsx.read(file.buffer, { type: 'buffer' });
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    return this.parseSpreadsheetRowsWithHeader(sheet, requiredHeaders);
+  }
+
+  private stripCsvImportInstructions(content: string): string {
+    const lines = content.replace(/^\uFEFF/, '').split(/\r?\n/);
+    let startIndex = 0;
+
+    while (startIndex < lines.length) {
+      const trimmed = lines[startIndex].trim();
+      if (!trimmed || trimmed.startsWith('#')) {
+        startIndex++;
+        continue;
+      }
+      break;
+    }
+
+    return lines.slice(startIndex).join('\n');
+  }
+
   private async assertQuestionBankPermission(
     userId: string,
     userRole: string,
@@ -315,20 +423,13 @@ export class QuestionsService {
       return null;
     };
 
-    let data = [];
-    const ext = spreadsheetFile.originalname.split('.').pop()?.toLowerCase();
-    if (ext === 'csv') {
-      // Đọc CSV chuẩn UTF-8
-      const content = iconv.decode(spreadsheetFile.buffer, 'utf-8');
-      const workbook = xlsx.read(content, { type: 'string' });
-      const sheet = workbook.Sheets[workbook.SheetNames[0]];
-      data = xlsx.utils.sheet_to_json(sheet, { raw: false });
-    } else {
-      // Excel
-      const workbook = xlsx.read(spreadsheetFile.buffer, { type: 'buffer' });
-      const sheet = workbook.Sheets[workbook.SheetNames[0]];
-      data = xlsx.utils.sheet_to_json(sheet, { raw: false });
-    }
+    const data = this.readImportSheetRows(spreadsheetFile, [
+      'content',
+      'questionType',
+      'classification',
+      'difficulty',
+      'subjectId',
+    ]);
 
     const total = data.length;
     let imported = 0;
@@ -340,9 +441,7 @@ export class QuestionsService {
     let topicReferenceLookup: Array<{ id: string; normalized: string; subjectId: string }> | null =
       null;
 
-    for (let index = 0; index < data.length; index++) {
-      const row = data[index];
-      const rowNumber = index + 2;
+    for (const { rowNumber, data: row } of data) {
 
       try {
         const subjectRefRaw = row['subjectId'] || row['Môn'] || row['subjectRef'] || row['subject'];

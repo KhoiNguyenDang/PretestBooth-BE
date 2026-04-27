@@ -26,6 +26,7 @@ import {
   CreateUserSchema,
   CreateLecturerSchema,
   UpdateLecturerSchema,
+  LockLecturerSchema,
   UpdateUserSchema,
   QueryLecturerSchema,
   UpdateLecturerPermissionsSchema,
@@ -39,6 +40,7 @@ import type {
   CreateUserDto,
   CreateLecturerDto,
   UpdateLecturerDto,
+  LockLecturerDto,
   UpdateUserDto,
   QueryLecturerDto,
   UpdateLecturerPermissionsDto,
@@ -101,6 +103,22 @@ export class UsersController {
     @Req() req,
   ) {
     return this.usersService.updateLecturer(id, dto, req.user['sub'], req.user['role']);
+  }
+
+  @Post('lecturers/:id/lock')
+  @Roles('ADMIN', 'LECTURER')
+  lockLecturer(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(LockLecturerSchema)) dto: LockLecturerDto,
+    @Req() req,
+  ) {
+    return this.usersService.lockLecturer(id, req.user['sub'], req.user['role'], dto.reason);
+  }
+
+  @Post('lecturers/:id/unlock')
+  @Roles('ADMIN', 'LECTURER')
+  unlockLecturer(@Param('id') id: string, @Req() req) {
+    return this.usersService.unlockLecturer(id, req.user['sub'], req.user['role']);
   }
 
   @Get('lecturers/:id/permissions')
