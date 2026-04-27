@@ -25,6 +25,7 @@ import {
   QueryUserSchema,
   CreateUserSchema,
   CreateLecturerSchema,
+  UpdateLecturerSchema,
   UpdateUserSchema,
   QueryLecturerSchema,
   UpdateLecturerPermissionsSchema,
@@ -37,6 +38,7 @@ import type {
   QueryUserDto,
   CreateUserDto,
   CreateLecturerDto,
+  UpdateLecturerDto,
   UpdateUserDto,
   QueryLecturerDto,
   UpdateLecturerPermissionsDto,
@@ -89,6 +91,16 @@ export class UsersController {
     @Req() req,
   ) {
     return this.usersService.createLecturer(dto, req.user['sub'], req.user['role']);
+  }
+
+  @Patch('lecturers/:id')
+  @Roles('ADMIN', 'LECTURER')
+  updateLecturer(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(UpdateLecturerSchema)) dto: UpdateLecturerDto,
+    @Req() req,
+  ) {
+    return this.usersService.updateLecturer(id, dto, req.user['sub'], req.user['role']);
   }
 
   @Get('lecturers/:id/permissions')

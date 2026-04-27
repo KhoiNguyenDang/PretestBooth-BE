@@ -13,6 +13,7 @@ import type {
   QueryUserDto,
   CreateUserDto,
   CreateLecturerDto,
+  UpdateLecturerDto,
   UpdateUserDto,
   QueryLecturerDto,
   UpdateLecturerPermissionsDto,
@@ -132,6 +133,8 @@ export class UsersService {
     email: string;
     name: string | null;
     isLocked: boolean;
+    lockedAt: Date | null;
+    lockedReason: string | null;
     createdAt: Date;
     lecturerPermissions: { permission: LecturerPermissionKey }[];
     lecturerRole: {
@@ -155,6 +158,8 @@ export class UsersService {
       name: record.name,
       role: 'LECTURER' as const,
       isLocked: record.isLocked,
+      lockedAt: record.lockedAt,
+      lockedReason: record.lockedReason,
       createdAt: record.createdAt,
       permissions,
       individualPermissions,
@@ -601,6 +606,118 @@ export class UsersService {
     };
   }
 
+  async updateLecturer(
+    lecturerId: string,
+    dto: UpdateLecturerDto,
+    requesterId: string,
+    requesterRole: string,
+  ) {
+    const requesterPermissions = await this.assertLecturerPermissionManagementAccess(
+      requesterId,
+      requesterRole,
+    );
+
+    const lecturer = await this.prisma.user.findUnique({
+      where: { id: lecturerId },
+      select: {
+        id: true,
+        role: true,
+        lecturerRole: {
+          select: {
+            priority: true,
+          },
+        },
+      },
+    });
+
+    if (!lecturer || lecturer.role !== 'LECTURER') {
+      throw new NotFoundException('Giảng viên không tồn tại');
+    }
+
+    if (requesterRole === 'LECTURER') {
+      if (requesterId === lecturerId) {
+        throw new ForbiddenException('Giảng viên không thể tự chỉnh sửa hồ sơ của chính mình');
+      }
+
+      const requester = await this.prisma.user.findUnique({
+        where: { id: requesterId },
+        select: {
+          lecturerRole: {
+            select: {
+              priority: true,
+            },
+          },
+        },
+      });
+
+      if (requester?.lecturerRole) {
+        const requesterPriority = requester.lecturerRole.priority;
+        if (lecturer.lecturerRole && lecturer.lecturerRole.priority <= requesterPriority) {
+          throw new ForbiddenException(
+            'Bạn chỉ có thể chỉnh sửa giảng viên có vai trò thấp hơn vai trò của bạn',
+          );
+        }
+      } else {
+        const topRolePriority = await this.getTopActiveLecturerRolePriority();
+        if (
+          topRolePriority !== null &&
+          lecturer.lecturerRole &&
+          lecturer.lecturerRole.priority <= topRolePriority
+        ) {
+          throw new ForbiddenException(
+            'Bạn không thể chỉnh sửa giảng viên đang có vai trò ưu tiên cao nhất',
+          );
+        }
+      }
+
+      if (!requesterPermissions.includes(LECTURER_ADMIN_PERMISSION)) {
+        throw new ForbiddenException('Bạn chưa được cấp quyền quản trị giảng viên');
+      }
+    }
+
+    if (dto.email) {
+      const normalizedEmail = dto.email.trim().toLowerCase();
+      const existing = await this.prisma.user.findUnique({
+        where: { email: normalizedEmail },
+        select: { id: true },
+      });
+
+      if (existing && existing.id !== lecturerId) {
+        throw new ConflictException('Email đã tồn tại');
+      }
+    }
+
+    const updated = await this.prisma.user.update({
+      where: { id: lecturerId },
+      data: {
+        ...(dto.email !== undefined && { email: dto.email.trim().toLowerCase() }),
+        ...(dto.name !== undefined && { name: dto.name.trim() }),
+        ...(dto.password !== undefined && {
+          password: await bcrypt.hash(dto.password, 10),
+        }),
+        ...(dto.isLocked !== undefined && {
+          isLocked: dto.isLocked,
+          lockedAt: dto.isLocked ? new Date() : null,
+          lockedReason: dto.isLocked ? dto.lockedReason?.trim() || 'Khóa bởi quản trị viên' : null,
+        }),
+      },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        isLocked: true,
+        lockedAt: true,
+        lockedReason: true,
+        createdAt: true,
+      },
+    });
+
+    return {
+      ...updated,
+      message: 'Cập nhật thông tin giảng viên thành công.',
+    };
+  }
+
   async findLecturers(query: QueryLecturerDto, requesterId: string, requesterRole: string) {
     const requesterPermissions = await this.assertLecturerPermissionManagementAccess(
       requesterId,
@@ -629,6 +746,8 @@ export class UsersService {
           email: true,
           name: true,
           isLocked: true,
+          lockedAt: true,
+          lockedReason: true,
           createdAt: true,
           lecturerPermissions: {
             select: { permission: true },
