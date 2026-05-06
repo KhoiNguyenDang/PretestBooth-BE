@@ -1931,13 +1931,20 @@ export class UsersService {
       newPasswordHash = await bcrypt.hash(this.formatDDMM(parsedDob), 10);
     }
 
-    // Dual-write student profile to both User and UserProfile
     const userData = {
       ...(dto.email !== undefined && { email: dto.email }),
       ...(dto.studentCode !== undefined && { studentCode: dto.studentCode || null }),
       ...(dto.name && { name: dto.name }),
+    };
+
+    const userProfileData = {
+      ...(dto.name && { name: dto.name }),
+      ...(dto.studentCode !== undefined && { studentCode: dto.studentCode || null }),
       ...(dto.className !== undefined && { className: dto.className || null }),
       ...(dto.dateOfBirth !== undefined && { dateOfBirth: parsedDob }),
+    };
+
+    const authData = {
       ...(newPasswordHash && { password: newPasswordHash }),
       ...(dto.isLocked !== undefined && {
         isLocked: dto.isLocked,
@@ -1946,18 +1953,39 @@ export class UsersService {
       }),
     };
 
-    // Prepare UserProfile data (only profile-related fields)
-    const userProfileData = {
-      ...(dto.name && { name: dto.name }),
-      ...(dto.className !== undefined && { className: dto.className || null }),
-      ...(dto.dateOfBirth !== undefined && { dateOfBirth: parsedDob }),
-    };
+    const updated = await this.prisma.$transaction(async (tx) => {
+      if (Object.keys(userData).length > 0) {
+        await tx.user.update({
+          where: { id },
+          data: userData,
+        });
+      }
 
-    // Execute dual-write
-    const [updated] = await Promise.all([
-      this.prisma.user.update({
+      if (Object.keys(userProfileData).length > 0) {
+        await tx.userProfile.upsert({
+          where: { userId: id },
+          update: userProfileData,
+          create: {
+            userId: id,
+            ...userProfileData,
+          },
+        });
+      }
+
+      if (Object.keys(authData).length > 0) {
+        await tx.userAuth.upsert({
+          where: { userId: id },
+          update: authData,
+          create: {
+            userId: id,
+            password: newPasswordHash || '',
+            ...authData,
+          },
+        });
+      }
+
+      return tx.user.findUniqueOrThrow({
         where: { id },
-        data: userData,
         select: {
           id: true,
           email: true,
@@ -1972,25 +2000,25 @@ export class UsersService {
           auth: {
             select: {
               isLocked: true,
+              lockedAt: true,
               lockedReason: true,
             },
           },
         },
-      }),
-      // Write to UserProfile if there are profile fields to update
-      Object.keys(userProfileData).length > 0
-        ? this.prisma.userProfile.upsert({
-            where: { userId: id },
-            update: userProfileData,
-            create: {
-              userId: id,
-              ...userProfileData,
-            },
-          })
-        : Promise.resolve(null),
-    ]);
+      });
+    });
 
-    return updated;
+    return {
+      id: updated.id,
+      email: updated.email,
+      studentCode: updated.studentCode,
+      name: updated.name,
+      className: updated.profile?.className ?? null,
+      dateOfBirth: updated.profile?.dateOfBirth ?? null,
+      isLocked: updated.auth?.isLocked ?? false,
+      lockedAt: updated.auth?.lockedAt ?? null,
+      lockedReason: updated.auth?.lockedReason ?? null,
+    };
   }
 
   async remove(id: string, requesterId: string, requesterRole: string) {

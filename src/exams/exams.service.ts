@@ -2693,30 +2693,42 @@ export class ExamsService {
       throw new BadRequestException('Phiên thi chưa được nộp');
     }
 
-    const shortAnswerItemMap = new Map(
+    const manuallyGradableItemMap = new Map(
       session.exam.items
-        .filter(
-          (examItem) =>
-            examItem.section === 'QUESTION' && examItem.question?.questionType === 'SHORT_ANSWER',
-        )
-        .map((examItem) => [examItem.id, examItem.points]),
+        .filter((examItem) => {
+          const isShortAnswer =
+            examItem.section === 'QUESTION' && examItem.question?.questionType === 'SHORT_ANSWER';
+          return isShortAnswer || examItem.section === 'PROBLEM';
+        })
+        .map((examItem) => [
+          examItem.id,
+          {
+            points: examItem.points,
+            action:
+              examItem.section === 'PROBLEM'
+                ? ('REVIEWED_PROBLEM' as const)
+                : ('REVIEWED_SHORT_ANSWER' as const),
+          },
+        ]),
     );
 
-    if (shortAnswerItemMap.size === 0) {
-      throw new BadRequestException('Phiên thi này không có câu tự luận ngắn để chấm thủ công');
+    if (manuallyGradableItemMap.size === 0) {
+      throw new BadRequestException('Phiên thi này không có mục nào có thể chấm thủ công');
     }
 
     // Update grades in a transaction
     const gradingSummary = await this.prisma.$transaction(async (tx) => {
       for (const item of dto.items) {
-        const maxPoints = shortAnswerItemMap.get(item.examItemId);
-        if (maxPoints === undefined) {
-          throw new BadRequestException('Chỉ được phép chỉnh điểm cho câu hỏi SHORT_ANSWER');
+        const gradableItem = manuallyGradableItemMap.get(item.examItemId);
+        if (!gradableItem) {
+          throw new BadRequestException(
+            'Chỉ được phép chỉnh điểm cho câu tự luận ngắn hoặc bài code',
+          );
         }
 
-        if (item.score > maxPoints) {
+        if (item.score > gradableItem.points) {
           throw new BadRequestException(
-            `Điểm câu ${item.examItemId} không được vượt quá ${maxPoints}`,
+            `Điểm câu ${item.examItemId} không được vượt quá ${gradableItem.points}`,
           );
         }
 
@@ -2753,7 +2765,7 @@ export class ExamsService {
           data: {
             sessionId,
             examItemId: item.examItemId,
-            action: 'REVIEWED_SHORT_ANSWER',
+            action: gradableItem.action,
             previousScore: previous.score,
             newScore: item.score,
             previousIsCorrect: previous.isCorrect,
