@@ -56,7 +56,7 @@ export class DashboardService {
 
     const [totalStudents, activeBooths, todayBookings, totalExams, recentEvents] =
       await Promise.all([
-        this.prisma.user.count({ where: { role: 'STUDENT', isLocked: false } }),
+        this.prisma.user.count({ where: { role: 'STUDENT', auth: { isLocked: false } } }),
         this.prisma.booth.count({ where: { status: 'ACTIVE' } }),
         this.prisma.booking.count({ where: { date: today } }),
         this.prisma.examSession.count(),

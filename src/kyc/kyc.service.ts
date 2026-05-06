@@ -151,7 +151,7 @@ export class KycService {
   async register(userId: string, dto: KycRegisterDto) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, email: true, kycStatus: true },
+      select: { id: true, email: true },
     });
 
     if (!user) {
@@ -178,24 +178,6 @@ export class KycService {
 
     if (cardFaceMatchScore < cardThresholdConfig.threshold) {
       await Promise.all([
-        this.prisma.user.update({
-          where: { id: userId },
-          data: {
-            kycStatus: 'REJECTED',
-            kycLastAttemptAt: now,
-            kycFaceImageUrl: faceImageUrl,
-            kycStudentImageUrl: studentImageUrl,
-            kycManualReviewStatus: 'NOT_REQUESTED',
-            kycManualReviewRequestedAt: null,
-            kycManualReviewRequestedReason: null,
-            kycManualReviewReviewedAt: null,
-            kycManualReviewedByUserId: null,
-            kycManualReviewRejectionReason: null,
-            kycManualReviewNotes: null,
-            studentCardImageUrl: cardImageUrl,
-            studentCardFaceMatchScore: cardFaceMatchScore,
-          },
-        }),
         this.prisma.userKyc.upsert({
           where: { userId },
           update: {
@@ -240,34 +222,6 @@ export class KycService {
     }
 
     await Promise.all([
-      this.prisma.user.update({
-        where: { id: userId },
-        data: {
-          kycStatus: 'VERIFIED',
-          kycRegisteredAt: now,
-          kycVerifiedAt: now,
-          kycLastAttemptAt: now,
-          kycFaceImageUrl: faceImageUrl,
-          kycStudentImageUrl: studentImageUrl,
-          kycManualReviewStatus: 'NOT_REQUESTED',
-          kycManualReviewRequestedAt: null,
-          kycManualReviewRequestedReason: null,
-          kycManualReviewReviewedAt: null,
-          kycManualReviewedByUserId: null,
-          kycManualReviewRejectionReason: null,
-          kycManualReviewNotes: null,
-          kycConsentVersion: dto.consentVersion,
-          kycConsentedAt: now,
-          studentCardImageUrl: cardImageUrl,
-          studentCardVerifiedAt: now,
-          studentCardFaceMatchScore: cardFaceMatchScore,
-          faceEmbedding: embeddingResult.embedding as Prisma.InputJsonValue,
-          faceEmbeddingModel: embeddingResult.model,
-          faceEmbeddingVersion: embeddingResult.version,
-          faceEmbeddingNorm: embeddingResult.norm,
-          faceEmbeddingUpdatedAt: now,
-        },
-      }),
       this.prisma.userKyc.upsert({
         where: { userId },
         update: {
@@ -472,19 +426,6 @@ export class KycService {
       },
     });
 
-    await this.prisma.user.update({
-      where: { id: userId },
-      data: {
-        kycManualReviewStatus: 'PENDING',
-        kycManualReviewRequestedAt: now,
-        kycManualReviewRequestedReason: dto.reason?.trim() || null,
-        kycManualReviewReviewedAt: null,
-        kycManualReviewedByUserId: null,
-        kycManualReviewRejectionReason: null,
-        kycManualReviewNotes: null,
-      },
-    });
-
     return {
       kycStatus: updated.kycStatus,
       kycManualReviewStatus: updated.kycManualReviewStatus,
@@ -545,9 +486,9 @@ export class KycService {
               email: true,
               name: true,
               studentCode: true,
-              className: true,
               profile: {
                 select: {
+                  className: true,
                   studentCardImageUrl: true,
                   studentCardFaceMatchScore: true,
                 },
@@ -564,7 +505,7 @@ export class KycService {
         email: item.user.email,
         name: item.user.name,
         studentCode: item.user.studentCode,
-        className: item.user.className,
+        className: item.user.profile?.className,
         kycStatus: item.kycStatus,
         kycLastAttemptAt: item.kycLastAttemptAt,
         kycStudentImageUrl: item.kycStudentImageUrl,
@@ -636,9 +577,9 @@ export class KycService {
               email: true,
               name: true,
               studentCode: true,
-              className: true,
               profile: {
                 select: {
+                  className: true,
                   studentCardFaceMatchScore: true,
                   studentCardVerifiedAt: true,
                 },
@@ -660,7 +601,7 @@ export class KycService {
         email: item.user.email,
         name: item.user.name,
         studentCode: item.user.studentCode,
-        className: item.user.className,
+        className: item.user.profile?.className,
         kycStatus: item.kycStatus,
         kycVerifiedAt: item.kycVerifiedAt,
         kycLastAttemptAt: item.kycLastAttemptAt,
@@ -685,10 +626,6 @@ export class KycService {
         user: { role: 'STUDENT' },
       },
       select: {
-        email: true,
-        name: true,
-        studentCode: true,
-        className: true,
         kycStatus: true,
         kycLastAttemptAt: true,
         kycRegisteredAt: true,
@@ -705,8 +642,12 @@ export class KycService {
         user: {
           select: {
             id: true,
+            email: true,
+            name: true,
+            studentCode: true,
             profile: {
               select: {
+                className: true,
                 studentCardImageUrl: true,
                 studentCardFaceMatchScore: true,
               },
@@ -722,10 +663,10 @@ export class KycService {
 
     return {
       id: student.user.id,
-      email: student.email,
-      name: student.name,
-      studentCode: student.studentCode,
-      className: student.className,
+      email: student.user.email,
+      name: student.user.name,
+      studentCode: student.user.studentCode,
+      className: student.user.profile?.className ?? null,
       kycStatus: student.kycStatus,
       kycLastAttemptAt: student.kycLastAttemptAt,
       kycRegisteredAt: student.kycRegisteredAt,
@@ -793,27 +734,16 @@ export class KycService {
       },
     });
 
-    await Promise.all([
-      this.prisma.user.update({
-        where: { id: student.userId },
-        data: {
-          kycStatus: 'VERIFIED',
-          kycVerifiedAt: now,
-          studentCardVerifiedAt: now,
-          kycManualReviewStatus: 'APPROVED',
-          kycManualReviewReviewedAt: now,
-          kycManualReviewedByUserId: reviewerId,
-          kycManualReviewRejectionReason: null,
-          kycManualReviewNotes: dto.notes?.trim() || null,
-        },
-      }),
-      this.prisma.userProfile.update({
-        where: { userId: student.userId },
-        data: {
-          studentCardVerifiedAt: now,
-        },
-      }),
-    ]);
+    await this.prisma.userProfile.upsert({
+      where: { userId: student.userId },
+      update: {
+        studentCardVerifiedAt: now,
+      },
+      create: {
+        userId: student.userId,
+        studentCardVerifiedAt: now,
+      },
+    });
 
     return {
       message: 'Duyệt KYC thủ công thành công',
@@ -869,18 +799,6 @@ export class KycService {
       },
     });
 
-    await this.prisma.user.update({
-      where: { id: student.userId },
-      data: {
-        kycStatus: 'REJECTED',
-        kycManualReviewStatus: 'REJECTED',
-        kycManualReviewReviewedAt: now,
-        kycManualReviewedByUserId: reviewerId,
-        kycManualReviewRejectionReason: dto.reason.trim(),
-        kycManualReviewNotes: dto.notes?.trim() || null,
-      },
-    });
-
     return {
       message: 'Từ chối KYC thủ công thành công',
       ...updated,
@@ -919,7 +837,6 @@ export class KycService {
       data: {
         kycStatus: 'REJECTED',
         kycVerifiedAt: null,
-        studentCardVerifiedAt: null,
         kycManualReviewStatus: 'NOT_REQUESTED',
         kycManualReviewRequestedAt: null,
         kycManualReviewRequestedReason: null,
@@ -937,20 +854,12 @@ export class KycService {
       },
     });
 
-    await this.prisma.user.update({
-      where: { id: student.userId },
+    await this.prisma.userProfile.update({
+      where: { userId: student.userId },
       data: {
-        kycStatus: 'REJECTED',
-        kycVerifiedAt: null,
         studentCardVerifiedAt: null,
-        kycManualReviewStatus: 'NOT_REQUESTED',
-        kycManualReviewRequestedAt: null,
-        kycManualReviewRequestedReason: null,
-        kycManualReviewReviewedAt: new Date(),
-        kycManualReviewedByUserId: reviewerId,
-        kycManualReviewRejectionReason: dto.reason.trim(),
       },
-    });
+    }).catch(() => { /* profile may not exist */ });
 
     return {
       message: 'Đã hủy trạng thái đã xác thực KYC của sinh viên',

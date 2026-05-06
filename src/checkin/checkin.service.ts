@@ -220,7 +220,7 @@ export class CheckinService {
     const threshold = thresholdConfig.threshold;
 
     const storedEmbedding = this.getStoredEmbedding(
-      bookingUser.user.faceEmbeddingRecord?.faceEmbedding,
+      bookingUser.user.faceEmbeddingRecord?.faceEmbedding ?? null,
     );
     const liveEmbeddingResult = await this.faceRecognitionService.extractEmbedding(dto.image);
     const similarityScore = this.faceRecognitionService.cosineSimilarity(

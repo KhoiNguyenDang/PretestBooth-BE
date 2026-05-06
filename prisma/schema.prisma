@@ -7,41 +7,41 @@ datasource db {
 }
 
 model User {
-  id                      String             @id @default(uuid())
-  email                   String             @unique
-  name                    String?
-  studentCode             String?            @unique
-  role                    Role               @default(STUDENT)
-  createdAt               DateTime           @default(now())
-  updatedAt               DateTime           @updatedAt
-  
+  id          String   @id @default(uuid())
+  email       String   @unique
+  name        String?
+  studentCode String?  @unique
+  role        Role     @default(STUDENT)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
   // Domain-specific relations (optional 1-1)
-  auth                    UserAuth?             @relation("UserAuth")
-  profile                 UserProfile?          @relation("UserProfile")
-  kycProfile              UserKyc?              @relation("UserKyc")
-  faceEmbeddingRecord     UserFaceEmbedding?    @relation("UserFaceEmbedding")
-  lecturerMetadata        LecturerMetadata?     @relation("LecturerMetadata")
-  pointAccount            PointAccount?         @relation("PointAccount")
-  reviewedKycProfiles     UserKyc[]             @relation("UserKycReviewer")
-  assignedLecturerMetadata LecturerMetadata[]   @relation("LecturerMetadataAssigner")
-  
+  auth                     UserAuth?          @relation("UserAuth")
+  profile                  UserProfile?       @relation("UserProfile")
+  kycProfile               UserKyc?           @relation("UserKyc")
+  faceEmbeddingRecord      UserFaceEmbedding? @relation("UserFaceEmbedding")
+  lecturerMetadata         LecturerMetadata?  @relation("LecturerMetadata")
+  pointAccount             PointAccount?      @relation("PointAccount")
+  reviewedKycProfiles      UserKyc[]          @relation("UserKycReviewer")
+  assignedLecturerMetadata LecturerMetadata[] @relation("LecturerMetadataAssigner")
+
   // Existing relations
-  bookings                Booking[]
-  boothStatusLogs         BoothStatusLog[]
-  createdExams            Exam[]             @relation("ExamCreator")
-  examSessions            ExamSession[]
-  pointTransactions       PointTransaction[]
-  bookingCheckinAttempts  BookingCheckinAttempt[]
-  practiceSessions        PracticeSession[]
-  createdProblems         Problem[]          @relation("ProblemCreator")
-  createdQuestions        Question[]         @relation("QuestionCreator")
-  reviewedQuestionSessions QuestionReviewSession[] @relation("QuestionReviewSessionReviewer")
-  questionReviewActions    QuestionReviewAction[]  @relation("QuestionReviewActionReviewer")
-  lecturerPermissions      LecturerPermissionAssignment[] @relation("LecturerPermissionOwner")
+  bookings                   Booking[]
+  boothStatusLogs            BoothStatusLog[]
+  createdExams               Exam[]                         @relation("ExamCreator")
+  examSessions               ExamSession[]
+  pointTransactions          PointTransaction[]
+  bookingCheckinAttempts     BookingCheckinAttempt[]
+  practiceSessions           PracticeSession[]
+  createdProblems            Problem[]                      @relation("ProblemCreator")
+  createdQuestions           Question[]                     @relation("QuestionCreator")
+  reviewedQuestionSessions   QuestionReviewSession[]        @relation("QuestionReviewSessionReviewer")
+  questionReviewActions      QuestionReviewAction[]         @relation("QuestionReviewActionReviewer")
+  lecturerPermissions        LecturerPermissionAssignment[] @relation("LecturerPermissionOwner")
   grantedLecturerPermissions LecturerPermissionAssignment[] @relation("LecturerPermissionGrantor")
-  createdLecturerRoles    LecturerRole[]     @relation("LecturerRoleCreator")
-  proctoringEvents        ProctoringEvent[]
-  submissions             Submission[]
+  createdLecturerRoles       LecturerRole[]                 @relation("LecturerRoleCreator")
+  proctoringEvents           ProctoringEvent[]
+  submissions                Submission[]
 
   @@index([email])
   @@index([studentCode])
@@ -49,21 +49,21 @@ model User {
 }
 
 model UserAuth {
-  id                      String   @id @default(uuid())
-  userId                  String   @unique
+  id                      String    @id @default(uuid())
+  userId                  String    @unique
   password                String
   refreshToken            String?
-  isEmailVerified         Boolean  @default(false)
+  isEmailVerified         Boolean   @default(false)
   emailVerificationToken  String?
   emailVerificationExpiry DateTime?
   resetPasswordCode       String?
   resetPasswordExpiry     DateTime?
-  isLocked                Boolean  @default(false)
+  isLocked                Boolean   @default(false)
   lockedAt                DateTime?
   lockedReason            String?
-  createdAt               DateTime @default(now())
-  updatedAt               DateTime @updatedAt
-  user                    User     @relation("UserAuth", fields: [userId], references: [id], onDelete: Cascade)
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+  user                    User      @relation("UserAuth", fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([isEmailVerified])
@@ -71,18 +71,18 @@ model UserAuth {
 }
 
 model UserProfile {
-  id                        String   @id @default(uuid())
-  userId                    String   @unique
+  id                        String    @id @default(uuid())
+  userId                    String    @unique
   name                      String?
-  studentCode               String?  @unique
+  studentCode               String?   @unique
   dateOfBirth               DateTime? @db.Date
   className                 String?
   studentCardImageUrl       String?
   studentCardVerifiedAt     DateTime?
   studentCardFaceMatchScore Float?
-  createdAt                 DateTime @default(now())
-  updatedAt                 DateTime @updatedAt
-  user                      User     @relation("UserProfile", fields: [userId], references: [id], onDelete: Cascade)
+  createdAt                 DateTime  @default(now())
+  updatedAt                 DateTime  @updatedAt
+  user                      User      @relation("UserProfile", fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([studentCode])
@@ -118,31 +118,31 @@ model UserKyc {
 }
 
 model UserFaceEmbedding {
-  id                      String   @id @default(uuid())
-  userId                  String   @unique
-  faceEmbedding           Json?
-  faceEmbeddingModel      String?
-  faceEmbeddingVersion    String?
-  faceEmbeddingNorm       Float?
-  faceEmbeddingUpdatedAt  DateTime?
-  createdAt               DateTime @default(now())
-  updatedAt               DateTime @updatedAt
-  user                    User     @relation("UserFaceEmbedding", fields: [userId], references: [id], onDelete: Cascade)
+  id                     String    @id @default(uuid())
+  userId                 String    @unique
+  faceEmbedding          Json?
+  faceEmbeddingModel     String?
+  faceEmbeddingVersion   String?
+  faceEmbeddingNorm      Float?
+  faceEmbeddingUpdatedAt DateTime?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+  user                   User      @relation("UserFaceEmbedding", fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
 }
 
 model LecturerMetadata {
-  id                          String   @id @default(uuid())
-  userId                      String   @unique
-  lecturerRoleId              String?
-  lecturerRoleAssignedAt      DateTime?
+  id                           String        @id @default(uuid())
+  userId                       String        @unique
+  lecturerRoleId               String?
+  lecturerRoleAssignedAt       DateTime?
   lecturerRoleAssignedByUserId String?
-  createdAt                   DateTime @default(now())
-  updatedAt                   DateTime @updatedAt
-  user                        User           @relation("LecturerMetadata", fields: [userId], references: [id], onDelete: Cascade)
-  lecturerRole                LecturerRole?  @relation("LecturerMetadataRole", fields: [lecturerRoleId], references: [id], onDelete: SetNull)
-  assignedByUser              User?          @relation("LecturerMetadataAssigner", fields: [lecturerRoleAssignedByUserId], references: [id], onDelete: SetNull)
+  createdAt                    DateTime      @default(now())
+  updatedAt                    DateTime      @updatedAt
+  user                         User          @relation("LecturerMetadata", fields: [userId], references: [id], onDelete: Cascade)
+  lecturerRole                 LecturerRole? @relation("LecturerMetadataRole", fields: [lecturerRoleId], references: [id], onDelete: SetNull)
+  assignedByUser               User?         @relation("LecturerMetadataAssigner", fields: [lecturerRoleAssignedByUserId], references: [id], onDelete: SetNull)
 
   @@index([userId])
   @@index([lecturerRoleId])
@@ -177,17 +177,17 @@ model LecturerPermissionAssignment {
 }
 
 model LecturerRole {
-  id              String                 @id @default(uuid())
-  code            String                 @unique
+  id              String                   @id @default(uuid())
+  code            String                   @unique
   name            String
   description     String?
-  priority        Int                    @unique
-  isActive        Boolean                @default(true)
+  priority        Int                      @unique
+  isActive        Boolean                  @default(true)
   createdByUserId String?
-  createdAt       DateTime               @default(now())
-  updatedAt       DateTime               @updatedAt
-  createdByUser   User?                  @relation("LecturerRoleCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
-  metadataEntries LecturerMetadata[]     @relation("LecturerMetadataRole")
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
+  createdByUser   User?                    @relation("LecturerRoleCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  metadataEntries LecturerMetadata[]       @relation("LecturerMetadataRole")
   permissions     LecturerRolePermission[]
 
   @@index([priority])
@@ -323,32 +323,32 @@ model Topic {
 }
 
 model Question {
-  id             String                @id @default(uuid())
+  id             String                  @id @default(uuid())
   content        String
   imageUrl       String?
-  questionType   QuestionType          @default(SINGLE_CHOICE)
-  classification QuestionClassification @default(EXAM)
-  difficulty     Difficulty            @default(MEDIUM)
+  questionType   QuestionType            @default(SINGLE_CHOICE)
+  classification QuestionClassification  @default(EXAM)
+  difficulty     Difficulty              @default(MEDIUM)
   correctAnswer  String?
   explanation    String?
-  isPublished    Boolean               @default(false)
+  isPublished    Boolean                 @default(false)
   lastReviewedAt DateTime?
   reviewNotes    String?
   qualityScore   Int?
-  usageCount     Int                   @default(0)
+  usageCount     Int                     @default(0)
   estimatedTime  Int?
   subjectId      String
   topicId        String?
   categoryId     String?
   creatorId      String
-  createdAt      DateTime              @default(now())
-  updatedAt      DateTime              @updatedAt
-  examItems      ExamItem[]            @relation("QuestionExamItems")
+  createdAt      DateTime                @default(now())
+  updatedAt      DateTime                @updatedAt
+  examItems      ExamItem[]              @relation("QuestionExamItems")
   practiceItems  PracticeSessionItem[]
-  category       Category?             @relation(fields: [categoryId], references: [id])
-  creator        User                  @relation("QuestionCreator", fields: [creatorId], references: [id])
-  subject        Subject               @relation(fields: [subjectId], references: [id])
-  topic          Topic?                @relation(fields: [topicId], references: [id])
+  category       Category?               @relation(fields: [categoryId], references: [id])
+  creator        User                    @relation("QuestionCreator", fields: [creatorId], references: [id])
+  subject        Subject                 @relation(fields: [subjectId], references: [id])
+  topic          Topic?                  @relation(fields: [topicId], references: [id])
   choices        QuestionChoice[]
   reviewSessions QuestionReviewSession[]
 
@@ -363,21 +363,21 @@ model Question {
 }
 
 model QuestionReviewSession {
-  id           String               @id @default(uuid())
+  id           String                 @id @default(uuid())
   quarter      Int
   year         Int
   academicYear String
   startDate    DateTime
   endDate      DateTime
-  status       QuestionReviewStatus @default(PENDING)
+  status       QuestionReviewStatus   @default(PENDING)
   notes        String?
   reviewedBy   String?
   reviewedAt   DateTime?
   questionId   String
-  createdAt    DateTime             @default(now())
-  updatedAt    DateTime             @updatedAt
-  question     Question             @relation(fields: [questionId], references: [id], onDelete: Cascade)
-  reviewer     User?                @relation("QuestionReviewSessionReviewer", fields: [reviewedBy], references: [id])
+  createdAt    DateTime               @default(now())
+  updatedAt    DateTime               @updatedAt
+  question     Question               @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  reviewer     User?                  @relation("QuestionReviewSessionReviewer", fields: [reviewedBy], references: [id])
   actions      QuestionReviewAction[]
 
   @@unique([quarter, year, questionId])
@@ -387,13 +387,13 @@ model QuestionReviewSession {
 }
 
 model QuestionReviewAction {
-  id         String               @id @default(uuid())
+  id         String                @id @default(uuid())
   sessionId  String
   status     QuestionReviewStatus
   notes      String?
   reviewedBy String
-  reviewedAt DateTime             @default(now())
-  createdAt  DateTime             @default(now())
+  reviewedAt DateTime              @default(now())
+  createdAt  DateTime              @default(now())
   session    QuestionReviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   reviewer   User                  @relation("QuestionReviewActionReviewer", fields: [reviewedBy], references: [id], onDelete: Cascade)
 
@@ -474,35 +474,35 @@ model ExamItem {
 }
 
 model ExamSession {
-  id              String              @id @default(uuid())
-  examId          String
-  userId          String
-  bookingId       String?
-  isPretestSession Boolean            @default(false)
-  pretestAttemptNumber Int?
-  pretestAssignmentMode PretestAssignmentMode?
-  pretestThresholdSource PretestThresholdSource?
-  pretestSourceExamId String?
+  id                          String                  @id @default(uuid())
+  examId                      String
+  userId                      String
+  bookingId                   String?
+  isPretestSession            Boolean                 @default(false)
+  pretestAttemptNumber        Int?
+  pretestAssignmentMode       PretestAssignmentMode?
+  pretestThresholdSource      PretestThresholdSource?
+  pretestSourceExamId         String?
   appliedPassingScoreAbsolute Float?
-  passed          Boolean?
-  seed            Int
-  startedAt       DateTime            @default(now()) @db.Timestamptz(3)
-  finishedAt      DateTime?           @db.Timestamptz(3)
-  score           Float?
-  maxScore        Float?
-  status          ExamSessionStatus   @default(IN_PROGRESS)
-  resultPublicationStatus ResultPublicationStatus @default(PENDING_REVIEW)
-  resultPublishedAt DateTime?         @db.Timestamptz(3)
-  resultLastUpdatedAt DateTime?       @db.Timestamptz(3)
-  resultRevisionCount Int             @default(0)
-  createdAt       DateTime            @default(now()) @db.Timestamptz(3)
-  expiresAt       DateTime            @default(now()) @db.Timestamptz(3)
-  exam            Exam                @relation(fields: [examId], references: [id], onDelete: Cascade)
-  user            User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  booking         Booking?            @relation("ExamSessionBooking", fields: [bookingId], references: [id], onDelete: SetNull)
-  answers         ExamSessionAnswer[]
-  gradeAudits     ExamSessionGradeAudit[]
-  proctoringEvents ProctoringEvent[]
+  passed                      Boolean?
+  seed                        Int
+  startedAt                   DateTime                @default(now()) @db.Timestamptz(3)
+  finishedAt                  DateTime?               @db.Timestamptz(3)
+  score                       Float?
+  maxScore                    Float?
+  status                      ExamSessionStatus       @default(IN_PROGRESS)
+  resultPublicationStatus     ResultPublicationStatus @default(PENDING_REVIEW)
+  resultPublishedAt           DateTime?               @db.Timestamptz(3)
+  resultLastUpdatedAt         DateTime?               @db.Timestamptz(3)
+  resultRevisionCount         Int                     @default(0)
+  createdAt                   DateTime                @default(now()) @db.Timestamptz(3)
+  expiresAt                   DateTime                @default(now()) @db.Timestamptz(3)
+  exam                        Exam                    @relation(fields: [examId], references: [id], onDelete: Cascade)
+  user                        User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  booking                     Booking?                @relation("ExamSessionBooking", fields: [bookingId], references: [id], onDelete: SetNull)
+  answers                     ExamSessionAnswer[]
+  gradeAudits                 ExamSessionGradeAudit[]
+  proctoringEvents            ProctoringEvent[]
 
   @@index([examId, userId])
   @@index([examId])
@@ -516,30 +516,30 @@ model ExamSession {
 }
 
 model ExamSessionAnswer {
-  id                String      @id @default(uuid())
-  sessionId         String
-  examItemId        String
-  selectedChoiceIds String[]
-  textAnswer        String?
-  submissionId      String?
-  sourceCode        String?
-  language          String?
-  languageVersion   String?
-  isCorrect         Boolean?
-  score             Float?
+  id                   String      @id @default(uuid())
+  sessionId            String
+  examItemId           String
+  selectedChoiceIds    String[]
+  textAnswer           String?
+  submissionId         String?
+  sourceCode           String?
+  language             String?
+  languageVersion      String?
+  isCorrect            Boolean?
+  score                Float?
   aiSuggestedIsCorrect Boolean?
-  aiSuggestedScore  Float?
-  aiGradingRationale String?
-  aiGradedAt        DateTime?
-  manualIsCorrect   Boolean?
-  manualScore       Float?
-  reviewerFeedback  String?
-  reviewedByUserId  String?
-  reviewedAt        DateTime?
-  createdAt         DateTime    @default(now())
-  updatedAt         DateTime    @updatedAt
-  examItem          ExamItem    @relation(fields: [examItemId], references: [id], onDelete: Cascade)
-  session           ExamSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  aiSuggestedScore     Float?
+  aiGradingRationale   String?
+  aiGradedAt           DateTime?
+  manualIsCorrect      Boolean?
+  manualScore          Float?
+  reviewerFeedback     String?
+  reviewedByUserId     String?
+  reviewedAt           DateTime?
+  createdAt            DateTime    @default(now())
+  updatedAt            DateTime    @updatedAt
+  examItem             ExamItem    @relation(fields: [examItemId], references: [id], onDelete: Cascade)
+  session              ExamSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@unique([sessionId, examItemId])
   @@index([sessionId])
@@ -549,19 +549,19 @@ model ExamSessionAnswer {
 }
 
 model ExamSessionGradeAudit {
-  id              String           @id @default(uuid())
-  sessionId       String
-  examItemId      String?
-  action          GradeAuditAction
-  previousScore   Float?
-  newScore        Float?
+  id                String           @id @default(uuid())
+  sessionId         String
+  examItemId        String?
+  action            GradeAuditAction
+  previousScore     Float?
+  newScore          Float?
   previousIsCorrect Boolean?
-  newIsCorrect    Boolean?
-  feedback        String?
-  actorUserId     String?
-  actorRole       Role?
-  createdAt       DateTime         @default(now()) @db.Timestamptz(3)
-  session         ExamSession      @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  newIsCorrect      Boolean?
+  feedback          String?
+  actorUserId       String?
+  actorRole         Role?
+  createdAt         DateTime         @default(now()) @db.Timestamptz(3)
+  session           ExamSession      @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@index([sessionId, createdAt])
   @@index([action])
@@ -647,36 +647,36 @@ model SystemSetting {
 }
 
 model Booking {
-  id                String        @id @default(uuid())
-  userId            String
-  boothId           String
-  type              BookingType
-  date              DateTime      @db.Date
-  startTime         DateTime      @db.Timestamptz(3)
-  endTime           DateTime      @db.Timestamptz(3)
-  durationMinutes   Int
-  bufferMinutes     Int           @default(15)
-  status            BookingStatus @default(CONFIRM)
-  checkedInAt       DateTime?     @db.Timestamptz(3)
-  checkedOutAt      DateTime?     @db.Timestamptz(3)
-  checkinStatus         CheckinStatus @default(PENDING)
-  checkinSimilarityScore Float?
-  checkinThreshold      Float         @default(0.6)
-  checkinVerifiedAt     DateTime? @db.Timestamptz(3)
-  checkinAttemptCount   Int           @default(0)
-  fallbackAppliedAt     DateTime?     @db.Timestamptz(3)
+  id                       String        @id @default(uuid())
+  userId                   String
+  boothId                  String
+  type                     BookingType
+  date                     DateTime      @db.Date
+  startTime                DateTime      @db.Timestamptz(3)
+  endTime                  DateTime      @db.Timestamptz(3)
+  durationMinutes          Int
+  bufferMinutes            Int           @default(15)
+  status                   BookingStatus @default(CONFIRM)
+  checkedInAt              DateTime?     @db.Timestamptz(3)
+  checkedOutAt             DateTime?     @db.Timestamptz(3)
+  checkinStatus            CheckinStatus @default(PENDING)
+  checkinSimilarityScore   Float?
+  checkinThreshold         Float         @default(0.6)
+  checkinVerifiedAt        DateTime?     @db.Timestamptz(3)
+  checkinAttemptCount      Int           @default(0)
+  fallbackAppliedAt        DateTime?     @db.Timestamptz(3)
   fallbackEvidenceImageUrl String?
-  
+
   // Relations - exam/practice sessions that reference this booking
-  examSessions      ExamSession[]      @relation("ExamSessionBooking")
-  practiceSessions  PracticeSession[]  @relation("PracticeSessionBooking")
-  checkinAttempts   BookingCheckinAttempt[]
-  
-  createdAt    DateTime      @default(now()) @db.Timestamptz(3)
-  updatedAt    DateTime      @updatedAt @db.Timestamptz(3)
-  
-  booth   Booth @relation(fields: [boothId], references: [id])
-  user    User  @relation(fields: [userId], references: [id])
+  examSessions     ExamSession[]           @relation("ExamSessionBooking")
+  practiceSessions PracticeSession[]       @relation("PracticeSessionBooking")
+  checkinAttempts  BookingCheckinAttempt[]
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  booth Booth @relation(fields: [boothId], references: [id])
+  user  User  @relation(fields: [userId], references: [id])
 
   @@index([userId])
   @@index([boothId, date])
@@ -687,19 +687,19 @@ model Booking {
 }
 
 model BookingCheckinAttempt {
-  id              String   @id @default(uuid())
-  bookingId       String
-  userId          String
-  similarityScore Float
-  threshold       Float    @default(0.6)
-  isMatch         Boolean
-  livenessPassed  Boolean  @default(true)
-  failReason      String?
+  id               String   @id @default(uuid())
+  bookingId        String
+  userId           String
+  similarityScore  Float
+  threshold        Float    @default(0.6)
+  isMatch          Boolean
+  livenessPassed   Boolean  @default(true)
+  failReason       String?
   evidenceImageUrl String?
   verifierDeviceId String?
-  createdAt       DateTime @default(now()) @db.Timestamptz(3)
-  booking         Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt        DateTime @default(now()) @db.Timestamptz(3)
+  booking          Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([bookingId, createdAt])
   @@index([userId, createdAt])
@@ -723,24 +723,24 @@ model PointTransaction {
 }
 
 model ProctoringEvent {
-  id           String      @id @default(uuid())
+  id String @id @default(uuid())
 
-  userId       String?
-  user         User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
-  
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
   // Either examSessionId or practiceSessionId should be set
-  examSessionId    String?
-  examSession      ExamSession? @relation(fields: [examSessionId], references: [id], onDelete: Cascade)
-  
+  examSessionId String?
+  examSession   ExamSession? @relation(fields: [examSessionId], references: [id], onDelete: Cascade)
+
   practiceSessionId String?
   practiceSession   PracticeSession? @relation(fields: [practiceSessionId], references: [id], onDelete: Cascade)
-  
-  eventType    String      // "TAB_SWITCH", "WINDOW_BLUR", "COPY_PASTE", "FULLSCREEN_EXIT"
-  warningLevel Int         @default(1)  // 1 = mild warning, 2 = severe, 3 = exam cancelled
-  metadata     Json?       // Additional event data
-  
-  timestamp    DateTime    @default(now()) @db.Timestamptz(3)
-  
+
+  eventType    String // "TAB_SWITCH", "WINDOW_BLUR", "COPY_PASTE", "FULLSCREEN_EXIT"
+  warningLevel Int    @default(1) // 1 = mild warning, 2 = severe, 3 = exam cancelled
+  metadata     Json? // Additional event data
+
+  timestamp DateTime @default(now()) @db.Timestamptz(3)
+
   @@index([examSessionId])
   @@index([practiceSessionId])
   @@index([userId])
@@ -748,24 +748,24 @@ model ProctoringEvent {
 }
 
 model PracticeSession {
-  id         String                @id @default(uuid())
-  userId     String
-  bookingId  String?
-  duration   Int
-  totalItems Int
-  difficulty Difficulty?
-  subjectId  String?
-  topicId    String?
-  categoryId String?
-  startedAt  DateTime              @default(now()) @db.Timestamptz(3)
-  finishedAt DateTime?             @db.Timestamptz(3)
-  score      Float?
-  maxScore   Float?
-  status     PracticeSessionStatus @default(IN_PROGRESS)
-  createdAt  DateTime              @default(now()) @db.Timestamptz(3)
-  user       User                  @relation(fields: [userId], references: [id])
-  booking    Booking?              @relation("PracticeSessionBooking", fields: [bookingId], references: [id], onDelete: SetNull)
-  items      PracticeSessionItem[]
+  id               String                @id @default(uuid())
+  userId           String
+  bookingId        String?
+  duration         Int
+  totalItems       Int
+  difficulty       Difficulty?
+  subjectId        String?
+  topicId          String?
+  categoryId       String?
+  startedAt        DateTime              @default(now()) @db.Timestamptz(3)
+  finishedAt       DateTime?             @db.Timestamptz(3)
+  score            Float?
+  maxScore         Float?
+  status           PracticeSessionStatus @default(IN_PROGRESS)
+  createdAt        DateTime              @default(now()) @db.Timestamptz(3)
+  user             User                  @relation(fields: [userId], references: [id])
+  booking          Booking?              @relation("PracticeSessionBooking", fields: [bookingId], references: [id], onDelete: SetNull)
+  items            PracticeSessionItem[]
   proctoringEvents ProctoringEvent[]
 
   @@index([userId])

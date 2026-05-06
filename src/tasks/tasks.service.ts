@@ -30,7 +30,7 @@ export class TasksService {
     const students = await this.prisma.user.findMany({
       where: {
         role: 'STUDENT',
-        isLocked: false,
+        auth: { isLocked: false },
         studentCode: { not: null },
       },
     });
@@ -47,9 +47,16 @@ export class TasksService {
 
       // Lock if elapsed time >= 6 years
       if (currentYear - enrollmentYear >= 6) {
-        await this.prisma.user.update({
-          where: { id: student.id },
-          data: {
+        await this.prisma.userAuth.upsert({
+          where: { userId: student.id },
+          update: {
+            isLocked: true,
+            lockedAt: new Date(),
+            lockedReason: `Tài khoản tự động khóa: Sinh viên khóa ${enrollmentYear} đã quá 6 năm (từ ${enrollmentYear} đến ${currentYear})`,
+          },
+          create: {
+            userId: student.id,
+            password: '',
             isLocked: true,
             lockedAt: new Date(),
             lockedReason: `Tài khoản tự động khóa: Sinh viên khóa ${enrollmentYear} đã quá 6 năm (từ ${enrollmentYear} đến ${currentYear})`,

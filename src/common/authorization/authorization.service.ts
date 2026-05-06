@@ -67,7 +67,6 @@ export class AuthorizationService {
         where: { id: lecturerId },
         select: {
           role: true,
-          lecturerRoleId: true,
           lecturerPermissions: {
             select: { permission: true },
             orderBy: { permission: 'asc' },
@@ -78,6 +77,7 @@ export class AuthorizationService {
         where: { userId: lecturerId },
         select: {
           userId: true,
+          lecturerRoleId: true,
           lecturerRole: {
             select: {
               id: true,
@@ -124,9 +124,9 @@ export class AuthorizationService {
       rolePermissions = roleRecord.permissions.map(
         (item) => item.permission as LecturerPermissionKey,
       );
-    } else if (legacyLecturer.lecturerRoleId) {
+    } else if (lecturerMetadata?.lecturerRoleId) {
       const fallbackRoleRows = await this.prisma.lecturerRole.findUnique({
-        where: { id: legacyLecturer.lecturerRoleId },
+        where: { id: lecturerMetadata.lecturerRoleId },
         select: {
           id: true,
           code: true,

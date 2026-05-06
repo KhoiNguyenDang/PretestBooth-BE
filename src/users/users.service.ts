@@ -182,7 +182,7 @@ export class UsersService {
     createdAt: Date;
     updatedAt: Date;
     _count?: {
-      users?: number;
+      metadataEntries?: number;
     };
     permissions?: { permission: LecturerPermissionKey }[];
   }) {
@@ -198,7 +198,7 @@ export class UsersService {
       createdAt: record.createdAt,
       updatedAt: record.updatedAt,
       permissions,
-      memberCount: record._count?.users ?? 0,
+      memberCount: record._count?.metadataEntries ?? 0,
     };
   }
 
@@ -206,23 +206,27 @@ export class UsersService {
     id: string;
     email: string;
     name: string | null;
-    isLocked: boolean;
-    lockedAt: Date | null;
-    lockedReason: string | null;
+    auth?: {
+      isLocked: boolean;
+      lockedAt: Date | null;
+      lockedReason: string | null;
+    } | null;
     createdAt: Date;
     lecturerPermissions: { permission: LecturerPermissionKey }[];
-    lecturerRole: {
-      id: string;
-      code: string;
-      name: string;
-      priority: number;
-      isActive: boolean;
-      permissions: { permission: LecturerPermissionKey }[];
+    lecturerMetadata?: {
+      lecturerRole: {
+        id: string;
+        code: string;
+        name: string;
+        priority: number;
+        isActive: boolean;
+        permissions: { permission: LecturerPermissionKey }[];
+      } | null;
     } | null;
   }) {
     const individualPermissions = record.lecturerPermissions.map((item) => item.permission);
-    const rolePermissions = record.lecturerRole
-      ? record.lecturerRole.permissions.map((item) => item.permission)
+    const rolePermissions = record.lecturerMetadata?.lecturerRole
+      ? record.lecturerMetadata.lecturerRole.permissions.map((item) => item.permission)
       : [];
     const permissions = this.mergePermissions(individualPermissions, rolePermissions);
 
@@ -231,20 +235,20 @@ export class UsersService {
       email: record.email,
       name: record.name,
       role: 'LECTURER' as const,
-      isLocked: record.isLocked,
-      lockedAt: record.lockedAt,
-      lockedReason: record.lockedReason,
+      isLocked: record.auth?.isLocked ?? false,
+      lockedAt: record.auth?.lockedAt ?? null,
+      lockedReason: record.auth?.lockedReason ?? null,
       createdAt: record.createdAt,
       permissions,
       individualPermissions,
       rolePermissions,
-      lecturerRole: record.lecturerRole
+      lecturerRole: record.lecturerMetadata?.lecturerRole
         ? {
-            id: record.lecturerRole.id,
-            code: record.lecturerRole.code,
-            name: record.lecturerRole.name,
-            priority: record.lecturerRole.priority,
-            isActive: record.lecturerRole.isActive,
+            id: record.lecturerMetadata.lecturerRole.id,
+            code: record.lecturerMetadata.lecturerRole.code,
+            name: record.lecturerMetadata.lecturerRole.name,
+            priority: record.lecturerMetadata.lecturerRole.priority,
+            isActive: record.lecturerMetadata.lecturerRole.isActive,
           }
         : null,
       isLecturerAdmin: permissions.includes(LECTURER_ADMIN_PERMISSION),
@@ -275,7 +279,7 @@ export class UsersService {
             select: { permission: true },
             orderBy: { permission: 'asc' },
           },
-          _count: { select: { users: true } },
+          _count: { select: { metadataEntries: true } },
         },
       });
 
@@ -289,12 +293,16 @@ export class UsersService {
     const requester = await this.prisma.user.findUnique({
       where: { id: requesterId },
       select: {
-        lecturerRole: {
-          select: {
-            id: true,
-            priority: true,
+          lecturerMetadata: {
+            select: {
+              lecturerRole: {
+                select: {
+                  id: true,
+                  priority: true,
+                },
+              },
+            },
           },
-        },
       },
     });
 
@@ -302,8 +310,8 @@ export class UsersService {
       isActive: true,
     };
 
-    if (requester?.lecturerRole) {
-      where.priority = { gt: requester.lecturerRole.priority };
+    if (requester?.lecturerMetadata?.lecturerRole) {
+      where.priority = { gt: requester.lecturerMetadata.lecturerRole.priority };
     } else {
       const topRolePriority = await this.getTopActiveLecturerRolePriority();
       if (topRolePriority !== null) {
@@ -319,7 +327,7 @@ export class UsersService {
           select: { permission: true },
           orderBy: { permission: 'asc' },
         },
-        _count: { select: { users: true } },
+        _count: { select: { metadataEntries: true } },
       },
     });
 
@@ -357,12 +365,12 @@ export class UsersService {
 
     // This module is scoped to student data management.
     where.role = role ? (role as Role) : 'STUDENT';
-    if (isLocked !== undefined) where.isLocked = isLocked;
+    if (isLocked !== undefined) where.auth = { isLocked };
     if (normalizedClassName !== undefined) {
-      where.className =
+      where.profile =
         normalizedClassName === null
-          ? null
-          : { contains: normalizedClassName, mode: 'insensitive' };
+          ? { className: null }
+          : { className: { contains: normalizedClassName, mode: 'insensitive' } };
     }
     if (cohort !== undefined) {
       where.studentCode = {
@@ -375,7 +383,7 @@ export class UsersService {
         { email: { contains: search, mode: 'insensitive' } },
         { name: { contains: search, mode: 'insensitive' } },
         { studentCode: { contains: search, mode: 'insensitive' } },
-        { className: { contains: search, mode: 'insensitive' } },
+        { profile: { className: { contains: search, mode: 'insensitive' } } },
       ];
     }
 
@@ -428,7 +436,7 @@ export class UsersService {
       format: query.format,
     });
 
-    const [users, total] = await Promise.all([
+    const [rawUsers, total] = await Promise.all([
       this.prisma.user.findMany({
         where,
         skip,
@@ -439,19 +447,47 @@ export class UsersService {
           email: true,
           name: true,
           studentCode: true,
-          className: true,
           role: true,
-          isEmailVerified: true,
-          isLocked: true,
-          lockedAt: true,
-          lockedReason: true,
-          dateOfBirth: true,
-          totalPoints: true,
           createdAt: true,
+          auth: {
+            select: {
+              isEmailVerified: true,
+              isLocked: true,
+              lockedAt: true,
+              lockedReason: true,
+            },
+          },
+          profile: {
+            select: {
+              className: true,
+              dateOfBirth: true,
+            },
+          },
+          pointAccount: {
+            select: {
+              totalPoints: true,
+            },
+          },
         },
       }),
       this.prisma.user.count({ where }),
     ]);
+
+    const users = rawUsers.map((u) => ({
+      id: u.id,
+      email: u.email,
+      name: u.name,
+      studentCode: u.studentCode,
+      className: u.profile?.className ?? null,
+      role: u.role,
+      isEmailVerified: u.auth?.isEmailVerified ?? false,
+      isLocked: u.auth?.isLocked ?? false,
+      lockedAt: u.auth?.lockedAt ?? null,
+      lockedReason: u.auth?.lockedReason ?? null,
+      dateOfBirth: u.profile?.dateOfBirth ?? null,
+      totalPoints: u.pointAccount?.totalPoints ?? 0,
+      createdAt: u.createdAt,
+    }));
 
     return {
       data: users,
@@ -466,31 +502,43 @@ export class UsersService {
     await this.assertStudentManagementAccess(requesterId, requesterRole);
 
     const where = this.buildStudentWhere(query);
-    const students = await this.prisma.user.findMany({
+    const rawStudents = await this.prisma.user.findMany({
       where,
       orderBy: { createdAt: query.sortOrder || 'desc' },
       select: {
         studentCode: true,
         email: true,
         name: true,
-        className: true,
-        dateOfBirth: true,
-        isLocked: true,
-        lockedReason: true,
-        totalPoints: true,
         createdAt: true,
+        auth: {
+          select: {
+            isLocked: true,
+            lockedReason: true,
+          },
+        },
+        profile: {
+          select: {
+            className: true,
+            dateOfBirth: true,
+          },
+        },
+        pointAccount: {
+          select: {
+            totalPoints: true,
+          },
+        },
       },
     });
 
-    const rows = students.map((student) => ({
+    const rows = rawStudents.map((student) => ({
       studentCode: student.studentCode || '',
       email: student.email,
       name: student.name || '',
-      className: student.className || '',
-      dateOfBirth: student.dateOfBirth ? student.dateOfBirth.toISOString().slice(0, 10) : '',
-      status: student.isLocked ? 'LOCKED' : 'ACTIVE',
-      lockedReason: student.lockedReason || '',
-      totalPoints: student.totalPoints,
+      className: student.profile?.className || '',
+      dateOfBirth: student.profile?.dateOfBirth ? student.profile.dateOfBirth.toISOString().slice(0, 10) : '',
+      status: student.auth?.isLocked ? 'LOCKED' : 'ACTIVE',
+      lockedReason: student.auth?.lockedReason || '',
+      totalPoints: student.pointAccount?.totalPoints ?? 0,
       createdAt: student.createdAt.toISOString(),
     }));
 
@@ -550,26 +598,38 @@ export class UsersService {
    * Get single user
    */
   async findOne(id: string, requesterId: string, requesterRole: string) {
-    const user = await this.prisma.user.findUnique({
+    const rawUser = await this.prisma.user.findUnique({
       where: { id },
       select: {
         id: true,
         email: true,
         name: true,
         studentCode: true,
-        className: true,
         role: true,
-        isEmailVerified: true,
-        isLocked: true,
-        lockedAt: true,
-        lockedReason: true,
-        dateOfBirth: true,
-        totalPoints: true,
         createdAt: true,
+        auth: {
+          select: {
+            isEmailVerified: true,
+            isLocked: true,
+            lockedAt: true,
+            lockedReason: true,
+          },
+        },
+        profile: {
+          select: {
+            className: true,
+            dateOfBirth: true,
+          },
+        },
+        pointAccount: {
+          select: {
+            totalPoints: true,
+          },
+        },
       },
     });
 
-    if (!user) throw new NotFoundException('Người dùng không tồn tại');
+    if (!rawUser) throw new NotFoundException('Người dùng không tồn tại');
 
     if (requesterRole === 'STUDENT' && requesterId !== id) {
       throw new ForbiddenException('Sinh viên chỉ có thể xem thông tin của chính mình');
@@ -579,11 +639,25 @@ export class UsersService {
       await this.assertStudentManagementAccess(requesterId, requesterRole);
     }
 
-    if (['ADMIN', 'LECTURER'].includes(requesterRole) && user.role !== 'STUDENT') {
+    if (['ADMIN', 'LECTURER'].includes(requesterRole) && rawUser.role !== 'STUDENT') {
       throw new ForbiddenException('Chỉ được thao tác với dữ liệu sinh viên');
     }
 
-    return user;
+    return {
+      id: rawUser.id,
+      email: rawUser.email,
+      name: rawUser.name,
+      studentCode: rawUser.studentCode,
+      className: rawUser.profile?.className ?? null,
+      role: rawUser.role,
+      isEmailVerified: rawUser.auth?.isEmailVerified ?? false,
+      isLocked: rawUser.auth?.isLocked ?? false,
+      lockedAt: rawUser.auth?.lockedAt ?? null,
+      lockedReason: rawUser.auth?.lockedReason ?? null,
+      dateOfBirth: rawUser.profile?.dateOfBirth ?? null,
+      totalPoints: rawUser.pointAccount?.totalPoints ?? 0,
+      createdAt: rawUser.createdAt,
+    };
   }
 
   /**
@@ -624,10 +698,23 @@ export class UsersService {
         name: dto.name,
         role: dto.role as Role,
         studentCode: dto.studentCode,
-        className: dto.role === 'STUDENT' ? dto.className || null : null,
-        password: hashedPassword,
-        dateOfBirth: dobDate,
-        isEmailVerified: true, // Created by admin = verified
+        auth: {
+          create: {
+            password: hashedPassword,
+            isEmailVerified: true, // Created by admin = verified
+          },
+        },
+        profile: {
+          create: {
+            name: dto.name,
+            studentCode: dto.studentCode,
+            className: dto.role === 'STUDENT' ? dto.className || null : null,
+            dateOfBirth: dobDate,
+          },
+        },
+        pointAccount: {
+          create: {},
+        },
       },
     });
 
@@ -683,9 +770,18 @@ export class UsersService {
       data: {
         email,
         name: dto.name.trim(),
-        password: hashedPassword,
         role: 'LECTURER',
-        isEmailVerified: true,
+        auth: {
+          create: {
+            password: hashedPassword,
+            isEmailVerified: true,
+          },
+        },
+        profile: {
+          create: {
+            name: dto.name.trim(),
+          },
+        },
       },
       select: {
         id: true,
@@ -703,7 +799,7 @@ export class UsersService {
       create: {
         userId: lecturer.id,
         lecturerRoleId: null,
-        assignedByUserId: null,
+        lecturerRoleAssignedByUserId: null,
       },
     });
 
@@ -733,9 +829,13 @@ export class UsersService {
       select: {
         id: true,
         role: true,
-        lecturerRole: {
+        lecturerMetadata: {
           select: {
-            priority: true,
+            lecturerRole: {
+              select: {
+                priority: true,
+              },
+            },
           },
         },
       },
@@ -753,17 +853,21 @@ export class UsersService {
       const requester = await this.prisma.user.findUnique({
         where: { id: requesterId },
         select: {
-          lecturerRole: {
+          lecturerMetadata: {
             select: {
-              priority: true,
+              lecturerRole: {
+                select: {
+                  priority: true,
+                },
+              },
             },
           },
         },
       });
 
-      if (requester?.lecturerRole) {
-        const requesterPriority = requester.lecturerRole.priority;
-        if (lecturer.lecturerRole && lecturer.lecturerRole.priority <= requesterPriority) {
+      if (requester?.lecturerMetadata?.lecturerRole) {
+        const requesterPriority = requester.lecturerMetadata.lecturerRole.priority;
+        if (lecturer.lecturerMetadata?.lecturerRole && lecturer.lecturerMetadata.lecturerRole.priority <= requesterPriority) {
           throw new ForbiddenException(
             'Bạn chỉ có thể chỉnh sửa giảng viên có vai trò thấp hơn vai trò của bạn',
           );
@@ -772,8 +876,8 @@ export class UsersService {
         const topRolePriority = await this.getTopActiveLecturerRolePriority();
         if (
           topRolePriority !== null &&
-          lecturer.lecturerRole &&
-          lecturer.lecturerRole.priority <= topRolePriority
+          lecturer.lecturerMetadata?.lecturerRole &&
+          lecturer.lecturerMetadata.lecturerRole.priority <= topRolePriority
         ) {
           throw new ForbiddenException(
             'Bạn không thể chỉnh sửa giảng viên đang có vai trò ưu tiên cao nhất',
@@ -798,27 +902,46 @@ export class UsersService {
       }
     }
 
+    if (dto.password !== undefined || dto.isLocked !== undefined) {
+      await this.prisma.userAuth.upsert({
+        where: { userId: lecturerId },
+        update: {
+          ...(dto.password !== undefined && { password: await bcrypt.hash(dto.password, 10) }),
+          ...(dto.isLocked !== undefined && {
+            isLocked: dto.isLocked,
+            lockedAt: dto.isLocked ? new Date() : null,
+            lockedReason: dto.isLocked ? dto.lockedReason?.trim() || 'Khóa bởi quản trị viên' : null,
+          }),
+        },
+        create: {
+          userId: lecturerId,
+          password: dto.password ? await bcrypt.hash(dto.password, 10) : '',
+          ...(dto.isLocked !== undefined && {
+            isLocked: dto.isLocked,
+            lockedAt: dto.isLocked ? new Date() : null,
+            lockedReason: dto.isLocked ? dto.lockedReason?.trim() || 'Khóa bởi quản trị viên' : null,
+          }),
+        },
+      });
+    }
+
     const updated = await this.prisma.user.update({
       where: { id: lecturerId },
       data: {
         ...(dto.email !== undefined && { email: dto.email.trim().toLowerCase() }),
         ...(dto.name !== undefined && { name: dto.name.trim() }),
-        ...(dto.password !== undefined && {
-          password: await bcrypt.hash(dto.password, 10),
-        }),
-        ...(dto.isLocked !== undefined && {
-          isLocked: dto.isLocked,
-          lockedAt: dto.isLocked ? new Date() : null,
-          lockedReason: dto.isLocked ? dto.lockedReason?.trim() || 'Khóa bởi quản trị viên' : null,
-        }),
       },
       select: {
         id: true,
         email: true,
         name: true,
-        isLocked: true,
-        lockedAt: true,
-        lockedReason: true,
+        auth: {
+          select: {
+            isLocked: true,
+            lockedAt: true,
+            lockedReason: true,
+          },
+        },
         createdAt: true,
       },
     });
@@ -830,12 +953,18 @@ export class UsersService {
       create: {
         userId: lecturerId,
         lecturerRoleId: null,
-        assignedByUserId: null,
+        lecturerRoleAssignedByUserId: null,
       },
     });
 
     return {
-      ...updated,
+      id: updated.id,
+      email: updated.email,
+      name: updated.name,
+      isLocked: updated.auth?.isLocked ?? false,
+      lockedAt: updated.auth?.lockedAt ?? null,
+      lockedReason: updated.auth?.lockedReason ?? null,
+      createdAt: updated.createdAt,
       message: 'Cập nhật thông tin giảng viên thành công.',
     };
   }
@@ -856,9 +985,13 @@ export class UsersService {
       select: {
         id: true,
         role: true,
-        lecturerRole: {
+        lecturerMetadata: {
           select: {
-            priority: true,
+            lecturerRole: {
+              select: {
+                priority: true,
+              },
+            },
           },
         },
       },
@@ -876,17 +1009,21 @@ export class UsersService {
       const requester = await this.prisma.user.findUnique({
         where: { id: requesterId },
         select: {
-          lecturerRole: {
+          lecturerMetadata: {
             select: {
-              priority: true,
+              lecturerRole: {
+                select: {
+                  priority: true,
+                },
+              },
             },
           },
         },
       });
 
-      if (requester?.lecturerRole) {
-        const requesterPriority = requester.lecturerRole.priority;
-        if (lecturer.lecturerRole && lecturer.lecturerRole.priority <= requesterPriority) {
+      if (requester?.lecturerMetadata?.lecturerRole) {
+        const requesterPriority = requester.lecturerMetadata.lecturerRole.priority;
+        if (lecturer.lecturerMetadata?.lecturerRole && lecturer.lecturerMetadata.lecturerRole.priority <= requesterPriority) {
           throw new ForbiddenException(
             'Bạn chỉ có thể khóa giảng viên có vai trò thấp hơn vai trò của bạn',
           );
@@ -895,8 +1032,8 @@ export class UsersService {
         const topRolePriority = await this.getTopActiveLecturerRolePriority();
         if (
           topRolePriority !== null &&
-          lecturer.lecturerRole &&
-          lecturer.lecturerRole.priority <= topRolePriority
+          lecturer.lecturerMetadata?.lecturerRole &&
+          lecturer.lecturerMetadata.lecturerRole.priority <= topRolePriority
         ) {
           throw new ForbiddenException(
             'Bạn không thể khóa giảng viên đang có vai trò ưu tiên cao nhất',
@@ -909,27 +1046,49 @@ export class UsersService {
       }
     }
 
-    const updated = await this.prisma.user.update({
-      where: { id: lecturerId },
-      data: {
+    await this.prisma.userAuth.upsert({
+      where: { userId: lecturerId },
+      update: {
         isLocked: true,
         lockedAt: new Date(),
         lockedReason: reason?.trim() || 'Khóa bởi quản trị viên',
       },
+      create: {
+        userId: lecturerId,
+        password: '',
+        isLocked: true,
+        lockedAt: new Date(),
+        lockedReason: reason?.trim() || 'Khóa bởi quản trị viên',
+      },
+    });
+
+    const updated = await this.prisma.user.findUnique({
+      where: { id: lecturerId },
       select: {
         id: true,
         email: true,
         name: true,
         role: true,
-        isLocked: true,
-        lockedAt: true,
-        lockedReason: true,
+        auth: {
+          select: {
+            isLocked: true,
+            lockedAt: true,
+            lockedReason: true,
+          },
+        },
         createdAt: true,
       },
     });
 
     return {
-      ...updated,
+      id: updated!.id,
+      email: updated!.email,
+      name: updated!.name,
+      role: updated!.role,
+      isLocked: updated!.auth?.isLocked ?? true,
+      lockedAt: updated!.auth?.lockedAt ?? null,
+      lockedReason: updated!.auth?.lockedReason ?? null,
+      createdAt: updated!.createdAt,
       message: 'Khóa tài khoản giảng viên thành công.',
     };
   }
@@ -945,9 +1104,13 @@ export class UsersService {
       select: {
         id: true,
         role: true,
-        lecturerRole: {
+        lecturerMetadata: {
           select: {
-            priority: true,
+            lecturerRole: {
+              select: {
+                priority: true,
+              },
+            },
           },
         },
       },
@@ -965,17 +1128,21 @@ export class UsersService {
       const requester = await this.prisma.user.findUnique({
         where: { id: requesterId },
         select: {
-          lecturerRole: {
+          lecturerMetadata: {
             select: {
-              priority: true,
+              lecturerRole: {
+                select: {
+                  priority: true,
+                },
+              },
             },
           },
         },
       });
 
-      if (requester?.lecturerRole) {
-        const requesterPriority = requester.lecturerRole.priority;
-        if (lecturer.lecturerRole && lecturer.lecturerRole.priority <= requesterPriority) {
+      if (requester?.lecturerMetadata?.lecturerRole) {
+        const requesterPriority = requester.lecturerMetadata.lecturerRole.priority;
+        if (lecturer.lecturerMetadata?.lecturerRole && lecturer.lecturerMetadata.lecturerRole.priority <= requesterPriority) {
           throw new ForbiddenException(
             'Bạn chỉ có thể mở khóa giảng viên có vai trò thấp hơn vai trò của bạn',
           );
@@ -984,8 +1151,8 @@ export class UsersService {
         const topRolePriority = await this.getTopActiveLecturerRolePriority();
         if (
           topRolePriority !== null &&
-          lecturer.lecturerRole &&
-          lecturer.lecturerRole.priority <= topRolePriority
+          lecturer.lecturerMetadata?.lecturerRole &&
+          lecturer.lecturerMetadata.lecturerRole.priority <= topRolePriority
         ) {
           throw new ForbiddenException(
             'Bạn không thể mở khóa giảng viên đang có vai trò ưu tiên cao nhất',
@@ -998,27 +1165,47 @@ export class UsersService {
       }
     }
 
-    const updated = await this.prisma.user.update({
-      where: { id: lecturerId },
-      data: {
+    await this.prisma.userAuth.upsert({
+      where: { userId: lecturerId },
+      update: {
         isLocked: false,
         lockedAt: null,
         lockedReason: null,
       },
+      create: {
+        userId: lecturerId,
+        password: '',
+        isLocked: false,
+      },
+    });
+
+    const updated = await this.prisma.user.findUnique({
+      where: { id: lecturerId },
       select: {
         id: true,
         email: true,
         name: true,
         role: true,
-        isLocked: true,
-        lockedAt: true,
-        lockedReason: true,
+        auth: {
+          select: {
+            isLocked: true,
+            lockedAt: true,
+            lockedReason: true,
+          },
+        },
         createdAt: true,
       },
     });
 
     return {
-      ...updated,
+      id: updated!.id,
+      email: updated!.email,
+      name: updated!.name,
+      role: updated!.role,
+      isLocked: updated!.auth?.isLocked ?? false,
+      lockedAt: updated!.auth?.lockedAt ?? null,
+      lockedReason: updated!.auth?.lockedReason ?? null,
+      createdAt: updated!.createdAt,
       message: 'Mở khóa tài khoản giảng viên thành công.',
     };
   }
@@ -1050,24 +1237,32 @@ export class UsersService {
           id: true,
           email: true,
           name: true,
-          isLocked: true,
-          lockedAt: true,
-          lockedReason: true,
+          auth: {
+            select: {
+              isLocked: true,
+              lockedAt: true,
+              lockedReason: true,
+            },
+          },
           createdAt: true,
           lecturerPermissions: {
             select: { permission: true },
             orderBy: { permission: 'asc' },
           },
-          lecturerRole: {
+          lecturerMetadata: {
             select: {
-              id: true,
-              code: true,
-              name: true,
-              priority: true,
-              isActive: true,
-              permissions: {
-                select: { permission: true },
-                orderBy: { permission: 'asc' },
+              lecturerRole: {
+                select: {
+                  id: true,
+                  code: true,
+                  name: true,
+                  priority: true,
+                  isActive: true,
+                  permissions: {
+                    select: { permission: true },
+                    orderBy: { permission: 'asc' },
+                  },
+                },
               },
             },
           },
@@ -1110,7 +1305,11 @@ export class UsersService {
         id: true,
         email: true,
         name: true,
-        isLocked: true,
+        auth: {
+          select: {
+            isLocked: true,
+          },
+        },
         createdAt: true,
         role: true,
         lecturerPermissions: {
@@ -1123,16 +1322,20 @@ export class UsersService {
           },
           orderBy: { permission: 'asc' },
         },
-        lecturerRole: {
+        lecturerMetadata: {
           select: {
-            id: true,
-            code: true,
-            name: true,
-            priority: true,
-            isActive: true,
-            permissions: {
-              select: { permission: true },
-              orderBy: { permission: 'asc' },
+            lecturerRole: {
+              select: {
+                id: true,
+                code: true,
+                name: true,
+                priority: true,
+                isActive: true,
+                permissions: {
+                  select: { permission: true },
+                  orderBy: { permission: 'asc' },
+                },
+              },
             },
           },
         },
@@ -1146,8 +1349,8 @@ export class UsersService {
     const individualPermissions = lecturer.lecturerPermissions.map(
       (item) => item.permission as LecturerPermissionKey,
     );
-    const rolePermissions = lecturer.lecturerRole
-      ? lecturer.lecturerRole.permissions.map((item) => item.permission as LecturerPermissionKey)
+    const rolePermissions = lecturer.lecturerMetadata?.lecturerRole
+      ? lecturer.lecturerMetadata.lecturerRole.permissions.map((item) => item.permission as LecturerPermissionKey)
       : [];
     const permissions = this.mergePermissions(individualPermissions, rolePermissions);
 
@@ -1162,18 +1365,18 @@ export class UsersService {
       email: lecturer.email,
       name: lecturer.name,
       role: lecturer.role,
-      isLocked: lecturer.isLocked,
+      isLocked: lecturer.auth?.isLocked ?? false,
       createdAt: lecturer.createdAt,
       permissions,
       individualPermissions,
       rolePermissions,
-      lecturerRole: lecturer.lecturerRole
+      lecturerRole: lecturer.lecturerMetadata?.lecturerRole
         ? {
-            id: lecturer.lecturerRole.id,
-            code: lecturer.lecturerRole.code,
-            name: lecturer.lecturerRole.name,
-            priority: lecturer.lecturerRole.priority,
-            isActive: lecturer.lecturerRole.isActive,
+            id: lecturer.lecturerMetadata.lecturerRole.id,
+            code: lecturer.lecturerMetadata.lecturerRole.code,
+            name: lecturer.lecturerMetadata.lecturerRole.name,
+            priority: lecturer.lecturerMetadata.lecturerRole.priority,
+            isActive: lecturer.lecturerMetadata.lecturerRole.isActive,
           }
         : null,
       isLecturerAdmin: permissions.includes(LECTURER_ADMIN_PERMISSION),
@@ -1290,16 +1493,20 @@ export class UsersService {
       const requester = await this.prisma.user.findUnique({
         where: { id: requesterId },
         select: {
-          lecturerRole: {
+          lecturerMetadata: {
             select: {
-              priority: true,
+              lecturerRole: {
+                select: {
+                  priority: true,
+                },
+              },
             },
           },
         },
       });
 
-      if (requester?.lecturerRole) {
-        where.priority = { gt: requester.lecturerRole.priority };
+      if (requester?.lecturerMetadata?.lecturerRole) {
+        where.priority = { gt: requester.lecturerMetadata.lecturerRole.priority };
       } else {
         const topRolePriority = await this.getTopActiveLecturerRolePriority();
         if (topRolePriority !== null) {
@@ -1319,7 +1526,7 @@ export class UsersService {
             select: { permission: true },
             orderBy: { permission: 'asc' },
           },
-          _count: { select: { users: true } },
+          _count: { select: { metadataEntries: true } },
         },
       }),
       this.prisma.lecturerRole.count({ where }),
@@ -1349,7 +1556,7 @@ export class UsersService {
           select: { permission: true },
           orderBy: { permission: 'asc' },
         },
-        _count: { select: { users: true } },
+        _count: { select: { metadataEntries: true } },
       },
     });
 
@@ -1402,7 +1609,7 @@ export class UsersService {
             select: { permission: true },
             orderBy: { permission: 'asc' },
           },
-          _count: { select: { users: true } },
+          _count: { select: { metadataEntries: true } },
         },
       });
 
@@ -1479,7 +1686,7 @@ export class UsersService {
           select: { permission: true },
           orderBy: { permission: 'asc' },
         },
-        _count: { select: { users: true } },
+        _count: { select: { metadataEntries: true } },
       },
     });
 
@@ -1495,7 +1702,7 @@ export class UsersService {
     const role = await this.prisma.lecturerRole.findUnique({
       where: { id: roleId },
       include: {
-        _count: { select: { users: true } },
+        _count: { select: { metadataEntries: true } },
       },
     });
 
@@ -1503,7 +1710,7 @@ export class UsersService {
       throw new NotFoundException('Vai trò giảng viên không tồn tại');
     }
 
-    if ((role._count?.users ?? 0) > 0) {
+    if ((role._count?.metadataEntries ?? 0) > 0) {
       throw new BadRequestException(
         'Không thể xóa vai trò vì vẫn còn giảng viên đang được gán vai trò này',
       );
@@ -1533,12 +1740,16 @@ export class UsersService {
       select: {
         id: true,
         role: true,
-        lecturerRole: {
+        lecturerMetadata: {
           select: {
-            id: true,
-            code: true,
-            name: true,
-            priority: true,
+            lecturerRole: {
+              select: {
+                id: true,
+                code: true,
+                name: true,
+                priority: true,
+              },
+            },
           },
         },
       },
@@ -1577,18 +1788,22 @@ export class UsersService {
       const requester = await this.prisma.user.findUnique({
         where: { id: requesterId },
         select: {
-          lecturerRole: {
+          lecturerMetadata: {
             select: {
-              priority: true,
+              lecturerRole: {
+                select: {
+                  priority: true,
+                },
+              },
             },
           },
         },
       });
 
-      if (requester?.lecturerRole) {
-        const requesterPriority = requester.lecturerRole.priority;
+      if (requester?.lecturerMetadata?.lecturerRole) {
+        const requesterPriority = requester.lecturerMetadata.lecturerRole.priority;
 
-        if (lecturer.lecturerRole && lecturer.lecturerRole.priority <= requesterPriority) {
+        if (lecturer.lecturerMetadata?.lecturerRole && lecturer.lecturerMetadata.lecturerRole.priority <= requesterPriority) {
           throw new ForbiddenException(
             'Bạn chỉ có thể quản lý giảng viên có vai trò thấp hơn vai trò của bạn',
           );
@@ -1604,8 +1819,8 @@ export class UsersService {
 
         if (
           topRolePriority !== null &&
-          lecturer.lecturerRole &&
-          lecturer.lecturerRole.priority <= topRolePriority
+          lecturer.lecturerMetadata?.lecturerRole &&
+          lecturer.lecturerMetadata.lecturerRole.priority <= topRolePriority
         ) {
           throw new ForbiddenException(
             'Bạn không thể quản lý giảng viên đang có vai trò ưu tiên cao nhất',
@@ -1624,40 +1839,23 @@ export class UsersService {
       }
     }
 
-    // Dual-write role assignment to both User and LecturerMetadata
-    await Promise.all([
-      this.prisma.user.update({
-        where: { id: lecturerId },
-        data: dto.roleId
-          ? {
-              lecturerRoleId: dto.roleId,
-              lecturerRoleAssignedAt: new Date(),
-              lecturerRoleAssignedByUserId: requesterId,
-            }
-          : {
-              lecturerRoleId: null,
-              lecturerRoleAssignedAt: null,
-              lecturerRoleAssignedByUserId: null,
-            },
-      }),
-      this.prisma.lecturerMetadata.upsert({
-        where: { userId: lecturerId },
-        update: dto.roleId
-          ? {
-              lecturerRoleId: dto.roleId,
-              assignedByUserId: requesterId,
-            }
-          : {
-              lecturerRoleId: null,
-              assignedByUserId: null,
-            },
-        create: {
-          userId: lecturerId,
-          lecturerRoleId: dto.roleId || null,
-          assignedByUserId: dto.roleId ? requesterId : null,
-        },
-      }),
-    ]);
+    await this.prisma.lecturerMetadata.upsert({
+      where: { userId: lecturerId },
+      update: dto.roleId
+        ? {
+            lecturerRoleId: dto.roleId,
+            lecturerRoleAssignedByUserId: requesterId,
+          }
+        : {
+            lecturerRoleId: null,
+            lecturerRoleAssignedByUserId: null,
+          },
+      create: {
+        userId: lecturerId,
+        lecturerRoleId: dto.roleId || null,
+        lecturerRoleAssignedByUserId: dto.roleId ? requesterId : null,
+      },
+    });
 
     const refreshedSnapshot =
       await this.authorizationService.getPermissionSnapshotForLecturer(lecturerId);
@@ -1765,10 +1963,18 @@ export class UsersService {
           email: true,
           studentCode: true,
           name: true,
-          className: true,
-          dateOfBirth: true,
-          isLocked: true,
-          lockedReason: true,
+          profile: {
+            select: {
+              className: true,
+              dateOfBirth: true,
+            },
+          },
+          auth: {
+            select: {
+              isLocked: true,
+              lockedReason: true,
+            },
+          },
         },
       }),
       // Write to UserProfile if there are profile fields to update
@@ -1892,17 +2098,29 @@ export class UsersService {
 
         const hashedPassword = await bcrypt.hash(plainPassword, 10);
 
-        // Try to insert
         await this.prisma.user.create({
           data: {
             studentCode,
             email,
             name,
             role: 'STUDENT',
-            password: hashedPassword,
-            className: className || null,
-            dateOfBirth: !isNaN(dobDate.getTime()) ? dobDate : undefined,
-            isEmailVerified: true, // Imported lists are assumed verified
+            auth: {
+              create: {
+                password: hashedPassword,
+                isEmailVerified: true,
+              },
+            },
+            profile: {
+              create: {
+                name,
+                studentCode,
+                className: className || null,
+                dateOfBirth: !isNaN(dobDate.getTime()) ? dobDate : undefined,
+              },
+            },
+            pointAccount: {
+              create: {},
+            },
           },
         });
 

@@ -27,12 +27,6 @@ export class PointsService {
           examSessionId: refs?.examSessionId || null,
         },
       }),
-      // Dual-write: Update legacy User.totalPoints
-      this.prisma.user.update({
-        where: { id: userId },
-        data: { totalPoints: { increment: points } },
-      }),
-      // Dual-write: Create or update PointAccount
       this.prisma.pointAccount.upsert({
         where: { userId },
         update: { totalPoints: { increment: points } },
@@ -86,7 +80,7 @@ export class PointsService {
   async getLeaderboard(limit = 20) {
     const pointAccounts = await this.prisma.pointAccount.findMany({
       where: {
-        user: { role: 'STUDENT', isLocked: false },
+        user: { role: 'STUDENT', auth: { isLocked: false } },
       },
       orderBy: { totalPoints: 'desc' },
       take: limit,

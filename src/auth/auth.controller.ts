@@ -47,10 +47,19 @@ export class AuthController {
       (process.env.REFRESH_COOKIE_SAMESITE as 'lax' | 'strict' | 'none' | undefined) ||
       (isProd ? 'none' : 'lax');
     const cookieDomain = process.env.REFRESH_COOKIE_DOMAIN;
+    const secureOverride = process.env.REFRESH_COOKIE_SECURE;
+    const secure =
+      secureOverride === 'true'
+        ? true
+        : secureOverride === 'false'
+          ? false
+          : sameSite === 'none'
+            ? true
+            : isProd;
 
     return {
       httpOnly: true,
-      secure: sameSite === 'none' ? true : isProd,
+      secure,
       sameSite,
       path: '/',
       maxAge: 90 * 60 * 1000,

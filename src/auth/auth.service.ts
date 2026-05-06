@@ -42,65 +42,33 @@ export class AuthService {
     private readonly authorizationService: AuthorizationService,
   ) {}
 
-  private async syncUserAuthRecord(
-    user: {
-      id: string;
-      password: string;
-      refreshToken: string | null;
-      isEmailVerified: boolean;
-      emailVerificationToken: string | null;
-      emailVerificationExpiry: Date | null;
-      resetPasswordCode: string | null;
-      resetPasswordExpiry: Date | null;
-      isLocked: boolean;
-      lockedAt: Date | null;
-      lockedReason: string | null;
-    },
-    overrides: Partial<{
-      password: string;
-      refreshToken: string | null;
-      isEmailVerified: boolean;
-      emailVerificationToken: string | null;
-      emailVerificationExpiry: Date | null;
-      resetPasswordCode: string | null;
-      resetPasswordExpiry: Date | null;
-      isLocked: boolean;
-      lockedAt: Date | null;
-      lockedReason: string | null;
-    }> = {},
-  ) {
-    const nextAuthState = {
-      password: overrides.password ?? user.password,
-      refreshToken: overrides.refreshToken ?? user.refreshToken,
-      isEmailVerified: overrides.isEmailVerified ?? user.isEmailVerified,
-      emailVerificationToken: overrides.emailVerificationToken ?? user.emailVerificationToken,
-      emailVerificationExpiry: overrides.emailVerificationExpiry ?? user.emailVerificationExpiry,
-      resetPasswordCode: overrides.resetPasswordCode ?? user.resetPasswordCode,
-      resetPasswordExpiry: overrides.resetPasswordExpiry ?? user.resetPasswordExpiry,
-      isLocked: overrides.isLocked ?? user.isLocked,
-      lockedAt: overrides.lockedAt ?? user.lockedAt,
-      lockedReason: overrides.lockedReason ?? user.lockedReason,
-    };
 
-    await this.prisma.userAuth.upsert({
-      where: { userId: user.id },
-      update: nextAuthState,
-      create: {
-        userId: user.id,
-        ...nextAuthState,
-      },
-    });
-  }
 
   private async buildUserResponse(user: {
     id: string;
     email: string;
     name: string | null;
     role: string;
-    isEmailVerified: boolean;
-    kycStatus: 'NOT_STARTED' | 'PENDING' | 'VERIFIED' | 'REJECTED';
+    isEmailVerified?: boolean;
+    kycStatus?: string;
   }) {
     const permissions = await this.authorizationService.getPermissionsForUser(user.id, user.role);
+
+    let isEmailVerified = user.isEmailVerified;
+    let kycStatus = user.kycStatus;
+
+    if (isEmailVerified === undefined || kycStatus === undefined) {
+      const [auth, kyc] = await Promise.all([
+        isEmailVerified === undefined
+          ? this.prisma.userAuth.findUnique({ where: { userId: user.id }, select: { isEmailVerified: true } })
+          : null,
+        kycStatus === undefined
+          ? this.prisma.userKyc.findUnique({ where: { userId: user.id }, select: { kycStatus: true } })
+          : null,
+      ]);
+      if (isEmailVerified === undefined) isEmailVerified = auth?.isEmailVerified ?? false;
+      if (kycStatus === undefined) kycStatus = kyc?.kycStatus ?? 'NOT_STARTED';
+    }
 
     return new UserResponseDto({
       id: user.id,
@@ -108,8 +76,8 @@ export class AuthService {
       name: user.name || undefined,
       role: user.role,
       permissions,
-      isEmailVerified: user.isEmailVerified,
-      kycStatus: user.kycStatus,
+      isEmailVerified: isEmailVerified!,
+      kycStatus: kycStatus as any,
     });
   }
 
@@ -151,10 +119,7 @@ export class AuthService {
       data: {
         email,
         name: name || null,
-        password: hashedPassword,
         studentCode,
-        emailVerificationToken: verificationToken,
-        emailVerificationExpiry: verificationExpiry,
       },
     });
 
@@ -219,15 +184,9 @@ export class AuthService {
     const tokens = await this.generateTokens(user.id, user.role);
     const hashedRefreshToken = await bcrypt.hash(tokens.refreshToken, 10);
 
-    await this.prisma.user.update({
-      where: { id: user.id },
-      data: {
-        refreshToken: hashedRefreshToken,
-      },
-    });
-
-    await this.syncUserAuthRecord(user, {
-      refreshToken: hashedRefreshToken,
+    await this.prisma.userAuth.update({
+      where: { userId: user.id },
+      data: { refreshToken: hashedRefreshToken },
     });
 
     return new TokenResponseDto({
@@ -305,15 +264,9 @@ export class AuthService {
     });
     const hashedRefreshToken = await bcrypt.hash(tokens.refreshToken, 10);
 
-    await this.prisma.user.update({
-      where: { id: user.id },
-      data: {
-        refreshToken: hashedRefreshToken,
-      },
-    });
-
-    await this.syncUserAuthRecord(user, {
-      refreshToken: hashedRefreshToken,
+    await this.prisma.userAuth.update({
+      where: { userId: user.id },
+      data: { refreshToken: hashedRefreshToken },
     });
 
     return {
@@ -357,13 +310,14 @@ export class AuthService {
   private async validateUserCredentials(email: string, password: string) {
     const user = await this.prisma.user.findUnique({
       where: { email },
+      include: { auth: true },
     });
 
-    if (!user) {
+    if (!user || !user.auth) {
       throw new UnauthorizedException('Sai email hoặc mật khẩu');
     }
 
-    if (user.isLocked) {
+    if (user.auth.isLocked) {
       throw new ForbiddenException('Tài khoản đã bị khóa. Vui lòng liên hệ quản trị viên.');
     }
 
@@ -371,18 +325,13 @@ export class AuthService {
       const enrollmentYear = 2000 + parseInt(user.studentCode.substring(0, 2), 10);
       const currentYear = new Date().getFullYear();
       if (currentYear - enrollmentYear >= 6) {
-        await this.prisma.user.update({
-          where: { id: user.id },
+        await this.prisma.userAuth.update({
+          where: { userId: user.id },
           data: {
             isLocked: true,
             lockedAt: new Date(),
             lockedReason: `Tài khoản tự động khóa: sinh viên khóa ${enrollmentYear} đã quá 6 năm`,
           },
-        });
-        await this.syncUserAuthRecord(user, {
-          isLocked: true,
-          lockedAt: new Date(),
-          lockedReason: `Tài khoản tự động khóa: sinh viên khóa ${enrollmentYear} đã quá 6 năm`,
         });
         throw new ForbiddenException(
           `Tài khoản đã bị khóa tự động. Sinh viên khóa ${enrollmentYear} đã quá thời hạn 6 năm sử dụng hệ thống.`,
@@ -390,12 +339,12 @@ export class AuthService {
       }
     }
 
-    const isValid = await bcrypt.compare(password, user.password);
+    const isValid = await bcrypt.compare(password, user.auth.password);
     if (!isValid) {
       throw new UnauthorizedException('Sai email hoặc mật khẩu');
     }
 
-    if (!user.isEmailVerified) {
+    if (!user.auth.isEmailVerified) {
       throw new ForbiddenException('Vui lòng xác thực email trước khi đăng nhập');
     }
 
@@ -424,13 +373,14 @@ export class AuthService {
 
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
+      include: { auth: true },
     });
 
-    if (!user || !user.refreshToken) {
+    if (!user || !user.auth?.refreshToken) {
       throw new ForbiddenException('Access denied');
     }
 
-    const isValid = await bcrypt.compare(refreshToken, user.refreshToken);
+    const isValid = await bcrypt.compare(refreshToken, user.auth.refreshToken);
 
     if (!isValid) {
       throw new ForbiddenException('Access denied');
@@ -439,37 +389,19 @@ export class AuthService {
     const tokens = await this.generateTokens(user.id, user.role, boothContext);
     const hashedRefreshToken = await bcrypt.hash(tokens.refreshToken, 10);
 
-    await this.prisma.user.update({
-      where: { id: user.id },
-      data: {
-        refreshToken: hashedRefreshToken,
-      },
-    });
-
-    await this.syncUserAuthRecord(user, {
-      refreshToken: hashedRefreshToken,
+    await this.prisma.userAuth.update({
+      where: { userId: user.id },
+      data: { refreshToken: hashedRefreshToken },
     });
 
     return new TokenResponseDto(tokens);
   }
 
   async logout(userId: string) {
-    await this.prisma.user.update({
-      where: { id: userId },
-      data: {
-        refreshToken: null,
-      },
+    await this.prisma.userAuth.update({
+      where: { userId },
+      data: { refreshToken: null },
     });
-
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
-    });
-
-    if (user) {
-      await this.syncUserAuthRecord(user, {
-        refreshToken: null,
-      });
-    }
 
     return new LogoutResponseDto({ message: 'Đăng xuất thành công' });
   }
@@ -496,17 +428,12 @@ export class AuthService {
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
     const hashedCode = await bcrypt.hash(resetCode, 10);
 
-    await this.prisma.user.update({
-      where: { id: user.id },
+    await this.prisma.userAuth.update({
+      where: { userId: user.id },
       data: {
         resetPasswordCode: hashedCode,
         resetPasswordExpiry: expiresAt,
       },
-    });
-
-    await this.syncUserAuthRecord(user, {
-      resetPasswordCode: hashedCode,
-      resetPasswordExpiry: expiresAt,
     });
 
     await this.mailService.sendPasswordResetEmail(email, resetCode);
@@ -515,17 +442,20 @@ export class AuthService {
   }
 
   async resetPassword(email: string, code: string, newPassword: string) {
-    const user = await this.prisma.user.findUnique({ where: { email } });
+    const user = await this.prisma.user.findUnique({
+      where: { email },
+      include: { auth: true },
+    });
 
-    if (!user || !user.resetPasswordCode || !user.resetPasswordExpiry) {
+    if (!user || !user.auth?.resetPasswordCode || !user.auth?.resetPasswordExpiry) {
       throw new BadRequestException('Yêu cầu đặt lại mật khẩu không hợp lệ');
     }
 
-    if (user.resetPasswordExpiry < new Date()) {
+    if (user.auth.resetPasswordExpiry < new Date()) {
       throw new BadRequestException('Mã đặt lại mật khẩu đã hết hạn');
     }
 
-    const isValidCode = await bcrypt.compare(code, user.resetPasswordCode);
+    const isValidCode = await bcrypt.compare(code, user.auth.resetPasswordCode);
 
     if (!isValidCode) {
       throw new BadRequestException('Mã xác nhận không hợp lệ');
@@ -533,8 +463,8 @@ export class AuthService {
 
     const hashedPassword = await bcrypt.hash(newPassword, 10);
 
-    await this.prisma.user.update({
-      where: { id: user.id },
+    await this.prisma.userAuth.update({
+      where: { userId: user.id },
       data: {
         password: hashedPassword,
         resetPasswordCode: null,
@@ -543,35 +473,29 @@ export class AuthService {
       },
     });
 
-    await this.syncUserAuthRecord(user, {
-      password: hashedPassword,
-      resetPasswordCode: null,
-      resetPasswordExpiry: null,
-      refreshToken: null,
-    });
-
     return { message: 'Đặt lại mật khẩu thành công' };
   }
 
   async verifyEmail(token: string) {
-    const user = await this.prisma.user.findFirst({
+    const auth = await this.prisma.userAuth.findFirst({
       where: {
         emailVerificationToken: token,
       },
+      include: { user: true },
     });
 
-    if (!user) {
+    if (!auth) {
       throw new BadRequestException('Liên kết xác thực không hợp lệ');
     }
 
     // Check if token is expired
-    if (user.emailVerificationExpiry && user.emailVerificationExpiry < new Date()) {
+    if (auth.emailVerificationExpiry && auth.emailVerificationExpiry < new Date()) {
       throw new BadRequestException('Liên kết xác thực đã hết hạn');
     }
 
     // Mark email as verified
-    await this.prisma.user.update({
-      where: { id: user.id },
+    await this.prisma.userAuth.update({
+      where: { userId: auth.userId },
       data: {
         isEmailVerified: true,
         emailVerificationToken: null,
@@ -579,31 +503,26 @@ export class AuthService {
       },
     });
 
-    await this.syncUserAuthRecord(user, {
+    return this.buildUserResponse({
+      id: auth.user.id,
+      email: auth.user.email,
+      name: auth.user.name,
+      role: auth.user.role,
       isEmailVerified: true,
-      emailVerificationToken: null,
-      emailVerificationExpiry: null,
-    });
-
-    return new UserResponseDto({
-      id: user.id,
-      email: user.email,
-      role: user.role,
-      isEmailVerified: user.isEmailVerified,
-      kycStatus: user.kycStatus,
     });
   }
 
   async resendVerificationEmail(email: string) {
     const user = await this.prisma.user.findUnique({
       where: { email },
+      include: { auth: true },
     });
 
     if (!user) {
       throw new BadRequestException('Email không được tìm thấy');
     }
 
-    if (user.isEmailVerified) {
+    if (user.auth?.isEmailVerified) {
       throw new BadRequestException('Email đã được xác thực');
     }
 
@@ -611,17 +530,18 @@ export class AuthService {
     const verificationToken = crypto.randomBytes(32).toString('hex');
     const verificationExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
 
-    await this.prisma.user.update({
-      where: { id: user.id },
-      data: {
+    await this.prisma.userAuth.upsert({
+      where: { userId: user.id },
+      update: {
         emailVerificationToken: verificationToken,
         emailVerificationExpiry: verificationExpiry,
       },
-    });
-
-    await this.syncUserAuthRecord(user, {
-      emailVerificationToken: verificationToken,
-      emailVerificationExpiry: verificationExpiry,
+      create: {
+        userId: user.id,
+        password: '',
+        emailVerificationToken: verificationToken,
+        emailVerificationExpiry: verificationExpiry,
+      },
     });
 
     // Send verification email

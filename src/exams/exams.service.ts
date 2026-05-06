@@ -2276,8 +2276,12 @@ export class ExamsService {
         },
         user: {
           select: {
-            kycFaceImageUrl: true,
-            studentCardImageUrl: true,
+            kycProfile: {
+              select: { kycFaceImageUrl: true },
+            },
+            profile: {
+              select: { studentCardImageUrl: true },
+            },
           },
         },
         booking: {
@@ -2331,8 +2335,8 @@ export class ExamsService {
             checkinAttemptCount: session.booking?.checkinAttemptCount ?? 0,
             fallbackAppliedAt: session.booking?.fallbackAppliedAt ?? null,
             fallbackEvidenceImageUrl: session.booking?.fallbackEvidenceImageUrl ?? null,
-            registeredFaceImageUrl: session.user.kycFaceImageUrl ?? null,
-            studentCardImageUrl: session.user.studentCardImageUrl ?? null,
+            registeredFaceImageUrl: session.user.kycProfile?.kycFaceImageUrl ?? null,
+            studentCardImageUrl: session.user.profile?.studentCardImageUrl ?? null,
           })
       : null;
     const detailMessage = canViewItemDetails
