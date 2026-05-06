@@ -22,6 +22,15 @@ export interface LecturerPermissionSnapshot {
   lecturerRole: LecturerRoleSummary | null;
 }
 
+type LecturerRoleWithPermissions = {
+  id: string;
+  code: string;
+  name: string;
+  priority: number;
+  isActive: boolean;
+  permissions: Array<{ permission: string }>;
+};
+
 @Injectable()
 export class AuthorizationService {
   constructor(private readonly prisma: PrismaService) {}
@@ -53,19 +62,40 @@ export class AuthorizationService {
   }
 
   async getPermissionSnapshotForLecturer(lecturerId: string): Promise<LecturerPermissionSnapshot> {
-    const lecturer = await this.prisma.user.findUnique({
-      where: { id: lecturerId },
-      select: {
-        role: true,
-        lecturerRoleId: true,
-        lecturerPermissions: {
-          select: { permission: true },
-          orderBy: { permission: 'asc' },
+    const [legacyLecturer, lecturerMetadata] = await Promise.all([
+      this.prisma.user.findUnique({
+        where: { id: lecturerId },
+        select: {
+          role: true,
+          lecturerRoleId: true,
+          lecturerPermissions: {
+            select: { permission: true },
+            orderBy: { permission: 'asc' },
+          },
         },
-      },
-    });
+      }),
+      this.prisma.lecturerMetadata.findUnique({
+        where: { userId: lecturerId },
+        select: {
+          userId: true,
+          lecturerRole: {
+            select: {
+              id: true,
+              code: true,
+              name: true,
+              priority: true,
+              isActive: true,
+              permissions: {
+                select: { permission: true },
+                orderBy: { permission: 'asc' },
+              },
+            },
+          },
+        },
+      }),
+    ]);
 
-    if (!lecturer || lecturer.role !== 'LECTURER') {
+    if (!legacyLecturer || legacyLecturer.role !== 'LECTURER') {
       return {
         permissions: [],
         individualPermissions: [],
@@ -74,52 +104,53 @@ export class AuthorizationService {
       };
     }
 
-    const individualPermissions = lecturer.lecturerPermissions.map(
+    const individualPermissions = legacyLecturer.lecturerPermissions.map(
       (item) => item.permission as LecturerPermissionKey,
     );
     let lecturerRole: LecturerRoleSummary | null = null;
     let rolePermissions: LecturerPermissionKey[] = [];
 
-    if (lecturer.lecturerRoleId) {
-      const roleRows = await this.prisma.$queryRaw<
-        Array<{
-          id: string;
-          code: string;
-          name: string;
-          priority: number;
-          isActive: boolean;
-        }>
-      >`
-        SELECT
-          "id",
-          "code",
-          "name",
-          "priority",
-          "isActive"
-        FROM "LecturerRole"
-        WHERE "id" = ${lecturer.lecturerRoleId}
-        LIMIT 1
-      `;
+    const roleRecord = lecturerMetadata?.lecturerRole;
 
-      const roleRecord = roleRows[0];
+    if (roleRecord) {
+      lecturerRole = {
+        id: roleRecord.id,
+        code: roleRecord.code,
+        name: roleRecord.name,
+        priority: roleRecord.priority,
+        isActive: roleRecord.isActive,
+      };
 
-      if (roleRecord) {
-        const rolePermissionRows = await this.prisma.$queryRaw<Array<{ permission: string }>>`
-          SELECT "permission"::text AS permission
-          FROM "LecturerRolePermission"
-          WHERE "roleId" = ${roleRecord.id}
-          ORDER BY "permission" ASC
-        `;
+      rolePermissions = roleRecord.permissions.map(
+        (item) => item.permission as LecturerPermissionKey,
+      );
+    } else if (legacyLecturer.lecturerRoleId) {
+      const fallbackRoleRows = await this.prisma.lecturerRole.findUnique({
+        where: { id: legacyLecturer.lecturerRoleId },
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          priority: true,
+          isActive: true,
+          permissions: {
+            select: { permission: true },
+            orderBy: { permission: 'asc' },
+          },
+        },
+      });
 
+      if (fallbackRoleRows) {
+        const roleRecordWithPermissions = fallbackRoleRows as LecturerRoleWithPermissions;
         lecturerRole = {
-          id: roleRecord.id,
-          code: roleRecord.code,
-          name: roleRecord.name,
-          priority: roleRecord.priority,
-          isActive: roleRecord.isActive,
+          id: roleRecordWithPermissions.id,
+          code: roleRecordWithPermissions.code,
+          name: roleRecordWithPermissions.name,
+          priority: roleRecordWithPermissions.priority,
+          isActive: roleRecordWithPermissions.isActive,
         };
 
-        rolePermissions = rolePermissionRows.map(
+        rolePermissions = roleRecordWithPermissions.permissions.map(
           (item) => item.permission as LecturerPermissionKey,
         );
       }

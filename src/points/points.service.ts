@@ -27,9 +27,16 @@ export class PointsService {
           examSessionId: refs?.examSessionId || null,
         },
       }),
+      // Dual-write: Update legacy User.totalPoints
       this.prisma.user.update({
         where: { id: userId },
         data: { totalPoints: { increment: points } },
+      }),
+      // Dual-write: Create or update PointAccount
+      this.prisma.pointAccount.upsert({
+        where: { userId },
+        update: { totalPoints: { increment: points } },
+        create: { userId, totalPoints: points },
       }),
     ]);
 
@@ -40,12 +47,12 @@ export class PointsService {
    * Get user's total points
    */
   async getMyPoints(userId: string) {
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: { totalPoints: true },
+    const pointAccount = await this.prisma.pointAccount.findUnique({
+      where: { userId },
     });
-    if (!user) throw new NotFoundException('Người dùng không tồn tại');
-    return { totalPoints: user.totalPoints };
+
+    if (!pointAccount) throw new NotFoundException('Người dùng không tồn tại');
+    return { totalPoints: pointAccount.totalPoints };
   }
 
   /**
@@ -77,20 +84,32 @@ export class PointsService {
    * Get leaderboard (top students by points)
    */
   async getLeaderboard(limit = 20) {
-    const users = await this.prisma.user.findMany({
-      where: { role: 'STUDENT', isLocked: false },
+    const pointAccounts = await this.prisma.pointAccount.findMany({
+      where: {
+        user: { role: 'STUDENT', isLocked: false },
+      },
       orderBy: { totalPoints: 'desc' },
       take: limit,
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        studentCode: true,
-        totalPoints: true,
+      include: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            studentCode: true,
+          },
+        },
       },
     });
 
-    return users.map((u, index) => ({ rank: index + 1, ...u }));
+    return pointAccounts.map((pa, index) => ({
+      rank: index + 1,
+      id: pa.user.id,
+      name: pa.user.name,
+      email: pa.user.email,
+      studentCode: pa.user.studentCode,
+      totalPoints: pa.totalPoints,
+    }));
   }
 
   /**

@@ -42,6 +42,56 @@ export class AuthService {
     private readonly authorizationService: AuthorizationService,
   ) {}
 
+  private async syncUserAuthRecord(
+    user: {
+      id: string;
+      password: string;
+      refreshToken: string | null;
+      isEmailVerified: boolean;
+      emailVerificationToken: string | null;
+      emailVerificationExpiry: Date | null;
+      resetPasswordCode: string | null;
+      resetPasswordExpiry: Date | null;
+      isLocked: boolean;
+      lockedAt: Date | null;
+      lockedReason: string | null;
+    },
+    overrides: Partial<{
+      password: string;
+      refreshToken: string | null;
+      isEmailVerified: boolean;
+      emailVerificationToken: string | null;
+      emailVerificationExpiry: Date | null;
+      resetPasswordCode: string | null;
+      resetPasswordExpiry: Date | null;
+      isLocked: boolean;
+      lockedAt: Date | null;
+      lockedReason: string | null;
+    }> = {},
+  ) {
+    const nextAuthState = {
+      password: overrides.password ?? user.password,
+      refreshToken: overrides.refreshToken ?? user.refreshToken,
+      isEmailVerified: overrides.isEmailVerified ?? user.isEmailVerified,
+      emailVerificationToken: overrides.emailVerificationToken ?? user.emailVerificationToken,
+      emailVerificationExpiry: overrides.emailVerificationExpiry ?? user.emailVerificationExpiry,
+      resetPasswordCode: overrides.resetPasswordCode ?? user.resetPasswordCode,
+      resetPasswordExpiry: overrides.resetPasswordExpiry ?? user.resetPasswordExpiry,
+      isLocked: overrides.isLocked ?? user.isLocked,
+      lockedAt: overrides.lockedAt ?? user.lockedAt,
+      lockedReason: overrides.lockedReason ?? user.lockedReason,
+    };
+
+    await this.prisma.userAuth.upsert({
+      where: { userId: user.id },
+      update: nextAuthState,
+      create: {
+        userId: user.id,
+        ...nextAuthState,
+      },
+    });
+  }
+
   private async buildUserResponse(user: {
     id: string;
     email: string;
@@ -108,6 +158,30 @@ export class AuthService {
       },
     });
 
+    await Promise.all([
+      this.prisma.userAuth.create({
+        data: {
+          userId: user.id,
+          password: hashedPassword,
+          isEmailVerified: false,
+          emailVerificationToken: verificationToken,
+          emailVerificationExpiry: verificationExpiry,
+        },
+      }),
+      this.prisma.userProfile.create({
+        data: {
+          userId: user.id,
+          name: name || null,
+          studentCode,
+        },
+      }),
+      this.prisma.pointAccount.create({
+        data: {
+          userId: user.id,
+        },
+      }),
+    ]);
+
     // Send verification email
     await this.mailService.sendVerificationEmail(email, verificationToken);
 
@@ -143,12 +217,17 @@ export class AuthService {
     const user = await this.validateUserCredentials(email, password);
 
     const tokens = await this.generateTokens(user.id, user.role);
+    const hashedRefreshToken = await bcrypt.hash(tokens.refreshToken, 10);
 
     await this.prisma.user.update({
       where: { id: user.id },
       data: {
-        refreshToken: await bcrypt.hash(tokens.refreshToken, 10),
+        refreshToken: hashedRefreshToken,
       },
+    });
+
+    await this.syncUserAuthRecord(user, {
+      refreshToken: hashedRefreshToken,
     });
 
     return new TokenResponseDto({
@@ -224,12 +303,17 @@ export class AuthService {
       boothAccessMode: accessMode,
       boothId: booth.id,
     });
+    const hashedRefreshToken = await bcrypt.hash(tokens.refreshToken, 10);
 
     await this.prisma.user.update({
       where: { id: user.id },
       data: {
-        refreshToken: await bcrypt.hash(tokens.refreshToken, 10),
+        refreshToken: hashedRefreshToken,
       },
+    });
+
+    await this.syncUserAuthRecord(user, {
+      refreshToken: hashedRefreshToken,
     });
 
     return {
@@ -295,6 +379,11 @@ export class AuthService {
             lockedReason: `Tài khoản tự động khóa: sinh viên khóa ${enrollmentYear} đã quá 6 năm`,
           },
         });
+        await this.syncUserAuthRecord(user, {
+          isLocked: true,
+          lockedAt: new Date(),
+          lockedReason: `Tài khoản tự động khóa: sinh viên khóa ${enrollmentYear} đã quá 6 năm`,
+        });
         throw new ForbiddenException(
           `Tài khoản đã bị khóa tự động. Sinh viên khóa ${enrollmentYear} đã quá thời hạn 6 năm sử dụng hệ thống.`,
         );
@@ -348,12 +437,17 @@ export class AuthService {
     }
 
     const tokens = await this.generateTokens(user.id, user.role, boothContext);
+    const hashedRefreshToken = await bcrypt.hash(tokens.refreshToken, 10);
 
     await this.prisma.user.update({
       where: { id: user.id },
       data: {
-        refreshToken: await bcrypt.hash(tokens.refreshToken, 10),
+        refreshToken: hashedRefreshToken,
       },
+    });
+
+    await this.syncUserAuthRecord(user, {
+      refreshToken: hashedRefreshToken,
     });
 
     return new TokenResponseDto(tokens);
@@ -366,6 +460,16 @@ export class AuthService {
         refreshToken: null,
       },
     });
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (user) {
+      await this.syncUserAuthRecord(user, {
+        refreshToken: null,
+      });
+    }
 
     return new LogoutResponseDto({ message: 'Đăng xuất thành công' });
   }
@@ -398,6 +502,11 @@ export class AuthService {
         resetPasswordCode: hashedCode,
         resetPasswordExpiry: expiresAt,
       },
+    });
+
+    await this.syncUserAuthRecord(user, {
+      resetPasswordCode: hashedCode,
+      resetPasswordExpiry: expiresAt,
     });
 
     await this.mailService.sendPasswordResetEmail(email, resetCode);
@@ -434,6 +543,13 @@ export class AuthService {
       },
     });
 
+    await this.syncUserAuthRecord(user, {
+      password: hashedPassword,
+      resetPasswordCode: null,
+      resetPasswordExpiry: null,
+      refreshToken: null,
+    });
+
     return { message: 'Đặt lại mật khẩu thành công' };
   }
 
@@ -461,6 +577,12 @@ export class AuthService {
         emailVerificationToken: null,
         emailVerificationExpiry: null,
       },
+    });
+
+    await this.syncUserAuthRecord(user, {
+      isEmailVerified: true,
+      emailVerificationToken: null,
+      emailVerificationExpiry: null,
     });
 
     return new UserResponseDto({
@@ -495,6 +617,11 @@ export class AuthService {
         emailVerificationToken: verificationToken,
         emailVerificationExpiry: verificationExpiry,
       },
+    });
+
+    await this.syncUserAuthRecord(user, {
+      emailVerificationToken: verificationToken,
+      emailVerificationExpiry: verificationExpiry,
     });
 
     // Send verification email

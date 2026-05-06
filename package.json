@@ -20,7 +20,8 @@
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "prisma:generate": "prisma generate",
-    "prisma:seed": "ts-node prisma/seed.ts"
+    "prisma:seed": "ts-node prisma/seed.ts",
+    "prisma:seed:restore-users": "ts-node prisma/seed-restore-users.ts"
   },
   "dependencies": {
     "@google/genai": "^1.48.0",

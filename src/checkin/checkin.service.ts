@@ -191,12 +191,20 @@ export class CheckinService {
       throw new ForbiddenException('Hiện tại không nằm trong khung giờ check-in cho booking này');
     }
 
-    const bookingUser = await this.prisma.user.findUnique({
-      where: { id: booking.userId },
+    const bookingUser = await this.prisma.userKyc.findUnique({
+      where: { userId: booking.userId },
       select: {
-        id: true,
+        userId: true,
         kycStatus: true,
-        faceEmbedding: true,
+        user: {
+          select: {
+            faceEmbeddingRecord: {
+              select: {
+                faceEmbedding: true,
+              },
+            },
+          },
+        },
       },
     });
 
@@ -211,7 +219,9 @@ export class CheckinService {
     const thresholdConfig = await this.getCheckinThresholdConfig();
     const threshold = thresholdConfig.threshold;
 
-    const storedEmbedding = this.getStoredEmbedding(bookingUser.faceEmbedding);
+    const storedEmbedding = this.getStoredEmbedding(
+      bookingUser.user.faceEmbeddingRecord?.faceEmbedding,
+    );
     const liveEmbeddingResult = await this.faceRecognitionService.extractEmbedding(dto.image);
     const similarityScore = this.faceRecognitionService.cosineSimilarity(
       storedEmbedding,

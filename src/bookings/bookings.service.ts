@@ -135,15 +135,28 @@ export class BookingsService {
       throw new ForbiddenException('Chỉ sinh viên mới có thể đặt lịch sử dụng booth');
     }
 
-    // Check if account is locked
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    // Check if account is locked and get auth status
+    const [user, auth, kycProfile, embedding] = await Promise.all([
+      this.prisma.user.findUnique({ where: { id: userId } }),
+      this.prisma.userAuth.findUnique({ where: { userId } }),
+      this.prisma.userKyc.findUnique({ where: { userId } }),
+      this.prisma.userFaceEmbedding.findUnique({ where: { userId } }),
+    ]);
+
     if (!user) throw new NotFoundException('Người dùng không tồn tại');
-    if (user.isLocked) {
+    if (auth?.isLocked) {
       throw new ForbiddenException('Tài khoản đã bị khóa, không thể đặt lịch');
     }
 
-    const hasFaceEmbedding = Array.isArray(user.faceEmbedding) && user.faceEmbedding.length > 0;
-    if (user.kycStatus !== 'VERIFIED' || !hasFaceEmbedding) {
+    // Read KYC status and embedding from domain tables
+    if (!kycProfile || kycProfile.kycStatus !== 'VERIFIED') {
+      throw new ForbiddenException(
+        'Bạn cần hoàn tất xác thực khuôn mặt (KYC) trước khi đặt lịch sử dụng booth',
+      );
+    }
+
+    const hasFaceEmbedding = embedding?.faceEmbedding && Array.isArray(embedding.faceEmbedding) && embedding.faceEmbedding.length > 0;
+    if (!hasFaceEmbedding) {
       throw new ForbiddenException(
         'Bạn cần hoàn tất xác thực khuôn mặt (KYC) trước khi đặt lịch sử dụng booth',
       );

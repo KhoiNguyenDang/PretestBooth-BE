@@ -696,6 +696,17 @@ export class UsersService {
       },
     });
 
+    // Initialize LecturerMetadata for new lecturer
+    await this.prisma.lecturerMetadata.upsert({
+      where: { userId: lecturer.id },
+      update: {},
+      create: {
+        userId: lecturer.id,
+        lecturerRoleId: null,
+        assignedByUserId: null,
+      },
+    });
+
     return {
       id: lecturer.id,
       email: lecturer.email,
@@ -809,6 +820,17 @@ export class UsersService {
         lockedAt: true,
         lockedReason: true,
         createdAt: true,
+      },
+    });
+
+    // Ensure LecturerMetadata exists for this lecturer
+    await this.prisma.lecturerMetadata.upsert({
+      where: { userId: lecturerId },
+      update: {},
+      create: {
+        userId: lecturerId,
+        lecturerRoleId: null,
+        assignedByUserId: null,
       },
     });
 
@@ -1602,20 +1624,40 @@ export class UsersService {
       }
     }
 
-    await this.prisma.user.update({
-      where: { id: lecturerId },
-      data: dto.roleId
-        ? {
-            lecturerRoleId: dto.roleId,
-            lecturerRoleAssignedAt: new Date(),
-            lecturerRoleAssignedByUserId: requesterId,
-          }
-        : {
-            lecturerRoleId: null,
-            lecturerRoleAssignedAt: null,
-            lecturerRoleAssignedByUserId: null,
-          },
-    });
+    // Dual-write role assignment to both User and LecturerMetadata
+    await Promise.all([
+      this.prisma.user.update({
+        where: { id: lecturerId },
+        data: dto.roleId
+          ? {
+              lecturerRoleId: dto.roleId,
+              lecturerRoleAssignedAt: new Date(),
+              lecturerRoleAssignedByUserId: requesterId,
+            }
+          : {
+              lecturerRoleId: null,
+              lecturerRoleAssignedAt: null,
+              lecturerRoleAssignedByUserId: null,
+            },
+      }),
+      this.prisma.lecturerMetadata.upsert({
+        where: { userId: lecturerId },
+        update: dto.roleId
+          ? {
+              lecturerRoleId: dto.roleId,
+              assignedByUserId: requesterId,
+            }
+          : {
+              lecturerRoleId: null,
+              assignedByUserId: null,
+            },
+        create: {
+          userId: lecturerId,
+          lecturerRoleId: dto.roleId || null,
+          assignedByUserId: dto.roleId ? requesterId : null,
+        },
+      }),
+    ]);
 
     const refreshedSnapshot =
       await this.authorizationService.getPermissionSnapshotForLecturer(lecturerId);
@@ -1691,33 +1733,58 @@ export class UsersService {
       newPasswordHash = await bcrypt.hash(this.formatDDMM(parsedDob), 10);
     }
 
-    // Only update allowed fields
-    return this.prisma.user.update({
-      where: { id },
-      data: {
-        ...(dto.email !== undefined && { email: dto.email }),
-        ...(dto.studentCode !== undefined && { studentCode: dto.studentCode || null }),
-        ...(dto.name && { name: dto.name }),
-        ...(dto.className !== undefined && { className: dto.className || null }),
-        ...(dto.dateOfBirth !== undefined && { dateOfBirth: parsedDob }),
-        ...(newPasswordHash && { password: newPasswordHash }),
-        ...(dto.isLocked !== undefined && {
-          isLocked: dto.isLocked,
-          lockedAt: dto.isLocked ? new Date() : null,
-          lockedReason: dto.isLocked ? dto.lockedReason || 'Khóa bởi quản trị viên' : null,
-        }),
-      },
-      select: {
-        id: true,
-        email: true,
-        studentCode: true,
-        name: true,
-        className: true,
-        dateOfBirth: true,
-        isLocked: true,
-        lockedReason: true,
-      },
-    });
+    // Dual-write student profile to both User and UserProfile
+    const userData = {
+      ...(dto.email !== undefined && { email: dto.email }),
+      ...(dto.studentCode !== undefined && { studentCode: dto.studentCode || null }),
+      ...(dto.name && { name: dto.name }),
+      ...(dto.className !== undefined && { className: dto.className || null }),
+      ...(dto.dateOfBirth !== undefined && { dateOfBirth: parsedDob }),
+      ...(newPasswordHash && { password: newPasswordHash }),
+      ...(dto.isLocked !== undefined && {
+        isLocked: dto.isLocked,
+        lockedAt: dto.isLocked ? new Date() : null,
+        lockedReason: dto.isLocked ? dto.lockedReason || 'Khóa bởi quản trị viên' : null,
+      }),
+    };
+
+    // Prepare UserProfile data (only profile-related fields)
+    const userProfileData = {
+      ...(dto.name && { name: dto.name }),
+      ...(dto.className !== undefined && { className: dto.className || null }),
+      ...(dto.dateOfBirth !== undefined && { dateOfBirth: parsedDob }),
+    };
+
+    // Execute dual-write
+    const [updated] = await Promise.all([
+      this.prisma.user.update({
+        where: { id },
+        data: userData,
+        select: {
+          id: true,
+          email: true,
+          studentCode: true,
+          name: true,
+          className: true,
+          dateOfBirth: true,
+          isLocked: true,
+          lockedReason: true,
+        },
+      }),
+      // Write to UserProfile if there are profile fields to update
+      Object.keys(userProfileData).length > 0
+        ? this.prisma.userProfile.upsert({
+            where: { userId: id },
+            update: userProfileData,
+            create: {
+              userId: id,
+              ...userProfileData,
+            },
+          })
+        : Promise.resolve(null),
+    ]);
+
+    return updated;
   }
 
   async remove(id: string, requesterId: string, requesterRole: string) {

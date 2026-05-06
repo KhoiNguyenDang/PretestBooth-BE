@@ -9,8 +9,12 @@ export class DashboardService {
    * Get student-specific dashboard stats
    */
   async getStudentStats(userId: string) {
-    const [totalPoints, completedExams, practiceSessions, upcomingBookings] = await Promise.all([
-      this.prisma.user.findUnique({ where: { id: userId }, select: { totalPoints: true } }),
+    // Fetch points from PointAccount (new table)
+    const pointAccount = await this.prisma.pointAccount.findUnique({
+      where: { userId },
+    });
+
+    const [completedExams, practiceSessions, upcomingBookings] = await Promise.all([
       this.prisma.examSession.count({ where: { userId, status: 'SUBMITTED' } }), // GRADED or SUBMITTED
       this.prisma.practiceSession.count({ where: { userId, status: 'COMPLETED' } }),
       this.prisma.booking.findMany({
@@ -30,7 +34,7 @@ export class DashboardService {
     const accuracy = totalSubs > 0 ? Math.round((acceptedSubs / totalSubs) * 100) : 0;
 
     return {
-      points: totalPoints?.totalPoints || 0,
+      points: pointAccount?.totalPoints || 0,
       completedExams,
       completedPractices: practiceSessions,
       submissionAccuracy: accuracy,
