@@ -2853,6 +2853,187 @@ export class ExamsService {
     return this.getSessionResult(sessionId, userId, userRole);
   }
 
+  async regradeProblemItem(
+    sessionId: string,
+    examItemId: string,
+    userId: string,
+    userRole: string,
+  ): Promise<SessionResultDto> {
+    await this.assertResultReviewPermission(userRole, 'chấm lại bài code');
+
+    const session = await this.prisma.examSession.findUnique({
+      where: { id: sessionId },
+      include: {
+        exam: {
+          include: {
+            items: {
+              where: { id: examItemId },
+              include: {
+                problem: true,
+              },
+            },
+          },
+        },
+        answers: {
+          where: { examItemId },
+        },
+        user: {
+          select: {
+            email: true,
+            name: true,
+          },
+        },
+      },
+    });
+
+    if (!session) throw new NotFoundException('Phiên thi không tồn tại');
+    if (session.status === 'IN_PROGRESS') {
+      throw new BadRequestException('Phiên thi chưa được nộp');
+    }
+
+    const examItem = session.exam.items[0];
+    if (!examItem || examItem.section !== 'PROBLEM' || !examItem.problem) {
+      throw new BadRequestException('Chỉ được chấm lại mục bài code');
+    }
+
+    const answer = session.answers[0];
+    if (!answer) {
+      throw new NotFoundException('Không tìm thấy câu trả lời bài code trong phiên thi');
+    }
+
+    const sourceCode = answer.sourceCode?.trim();
+    if (!sourceCode) {
+      throw new BadRequestException('Bài code này không có mã nguồn để chấm lại');
+    }
+
+    const language =
+      answer.language?.trim() || Object.keys(examItem.problem.starterCode || {})[0] || 'javascript';
+    const languageVersion = answer.languageVersion || '*';
+
+    const previousScore = answer.score;
+    const previousIsCorrect = answer.isCorrect;
+
+    const submission = await this.submissionsService.create(session.userId, {
+      language,
+      version: languageVersion,
+      sourceCode,
+      problemId: examItem.problem.id,
+    });
+
+    const passRate =
+      submission.totalTestCases > 0 ? submission.passedTestCases / submission.totalTestCases : 0;
+    const newScore = Math.round(passRate * examItem.points * 100) / 100;
+    const newIsCorrect = submission.status === 'ACCEPTED';
+
+    const gradingSummary = await this.prisma.$transaction(async (tx) => {
+      await tx.examSessionAnswer.update({
+        where: {
+          sessionId_examItemId: { sessionId, examItemId },
+        },
+        data: {
+          isCorrect: newIsCorrect,
+          score: newScore,
+          submissionId: submission.id,
+          language,
+          languageVersion,
+          manualIsCorrect: null,
+          manualScore: null,
+          reviewerFeedback: null,
+          reviewedByUserId: null,
+          reviewedAt: null,
+        },
+      });
+
+      await tx.examSessionGradeAudit.create({
+        data: {
+          sessionId,
+          examItemId,
+          action: 'AUTO_GRADED',
+          previousScore,
+          newScore,
+          previousIsCorrect,
+          newIsCorrect,
+          feedback: `REJUDGE:${submission.status}`,
+          actorUserId: userId,
+          actorRole: userRole as 'ADMIN' | 'LECTURER',
+        },
+      });
+
+      const allAnswers = await tx.examSessionAnswer.findMany({
+        where: { sessionId },
+      });
+
+      const totalScore = allAnswers.reduce((sum, item) => sum + (item.score || 0), 0);
+      const allGraded = allAnswers.every((item) => item.isCorrect !== null);
+      const appliedPassingScoreAbsolute = (session as any).appliedPassingScoreAbsolute as
+        | number
+        | null
+        | undefined;
+      const passed = this.resolvePassedState(totalScore, appliedPassingScoreAbsolute, allGraded);
+      const scoreChanged = Number(session.score || 0) !== Number(totalScore || 0);
+
+      const resultUpdateData: Prisma.ExamSessionUpdateInput = {
+        score: totalScore,
+        status: allGraded ? 'GRADED' : 'SUBMITTED',
+        passed,
+      };
+
+      if (session.resultPublicationStatus === 'PUBLISHED' && scoreChanged) {
+        resultUpdateData.resultRevisionCount = { increment: 1 };
+        resultUpdateData.resultLastUpdatedAt = new Date();
+      }
+
+      await tx.examSession.update({
+        where: { id: sessionId },
+        data: resultUpdateData,
+      });
+
+      if (session.resultPublicationStatus === 'PUBLISHED' && scoreChanged) {
+        await tx.examSessionGradeAudit.create({
+          data: {
+            sessionId,
+            action: 'RESULT_UPDATED_AFTER_PUBLISH',
+            previousScore: session.score,
+            newScore: totalScore,
+            actorUserId: userId,
+            actorRole: userRole as 'ADMIN' | 'LECTURER',
+          },
+        });
+      }
+
+      return { totalScore, scoreChanged };
+    });
+
+    await this.syncExamCompletionPoints(
+      sessionId,
+      session.userId,
+      gradingSummary.totalScore,
+      session.maxScore,
+    );
+
+    const linkedBooking = session.bookingId
+      ? await this.prisma.booking.findUnique({
+          where: { id: session.bookingId },
+          select: { boothId: true },
+        })
+      : null;
+
+    if (session.resultPublicationStatus === 'PUBLISHED' && gradingSummary.scoreChanged) {
+      await this.notifyResultUpdatedAfterPublish({
+        sessionId,
+        userId: session.userId,
+        boothId: linkedBooking?.boothId,
+        email: session.user.email,
+        studentName: session.user.name,
+        examTitle: session.exam.title,
+        score: gradingSummary.totalScore,
+        maxScore: session.maxScore,
+      });
+    }
+
+    return this.getSessionResult(sessionId, userId, userRole);
+  }
+
   async publishSessionResults(
     sessionId: string,
     userId: string,

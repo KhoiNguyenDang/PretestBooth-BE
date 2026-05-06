@@ -193,6 +193,18 @@ export class ExamsController {
     return this.examsService.gradeSession(sessionId, dto, userId, userRole);
   }
 
+  @Post('sessions/:sessionId/items/:examItemId/regrade')
+  @HttpCode(HttpStatus.OK)
+  regradeProblemItem(
+    @Param('sessionId') sessionId: string,
+    @Param('examItemId') examItemId: string,
+    @Req() req,
+  ) {
+    const userId = req.user['sub'];
+    const userRole = req.user['role'];
+    return this.examsService.regradeProblemItem(sessionId, examItemId, userId, userRole);
+  }
+
   @Post('sessions/:sessionId/publish-results')
   @HttpCode(HttpStatus.OK)
   publishSessionResults(@Param('sessionId') sessionId: string, @Req() req) {
