@@ -1322,9 +1322,10 @@ export class ExamsService {
     const where: Prisma.ExamWhereInput = {};
     const andConditions: Prisma.ExamWhereInput[] = [];
 
-    // Students can view full exam library in the new UX.
+    // Students: only show published exams, and hide pretest exams already done
     if (userRole === 'STUDENT') {
       andConditions.push({ type: { in: ['EXAM', 'PRACTICE'] } });
+      andConditions.push({ isPublished: true });
     } else if (isPublished !== undefined) {
       where.isPublished = isPublished;
     }
@@ -1369,20 +1370,43 @@ export class ExamsService {
 
     const orderBy: Prisma.ExamOrderByWithRelationInput = { [sortBy]: sortOrder };
 
-    const [exams, total] = await Promise.all([
-      this.prisma.exam.findMany({
-        where,
-        skip,
-        take: limit,
-        orderBy,
-        include: {
-          subject: { select: { id: true, name: true } },
-          topic: { select: { id: true, name: true } },
-          _count: { select: { items: true, sessions: true } },
-        },
-      }),
-      this.prisma.exam.count({ where }),
-    ]);
+    let exams = await this.prisma.exam.findMany({
+      where,
+      skip,
+      take: limit,
+      orderBy,
+      include: {
+        subject: { select: { id: true, name: true } },
+        topic: { select: { id: true, name: true } },
+        _count: { select: { items: true, sessions: true } },
+      },
+    });
+    let total = await this.prisma.exam.count({ where });
+
+    // Nếu là sinh viên, loại bỏ các đề pretest đã làm
+    if (userRole === 'STUDENT' && exams.length > 0) {
+      // Lấy danh sách examId là pretest
+      const pretestExamIds = exams
+        .filter((e) => this.isPretestExamListItem(e))
+        .map((e) => e.id);
+      let donePretestExamIds: string[] = [];
+      if (pretestExamIds.length > 0) {
+        // Tìm các examSession của user với examId là pretest, trạng thái SUBMITTED hoặc PASSED
+        const sessions = await this.prisma.examSession.findMany({
+          where: {
+            userId,
+            examId: { in: pretestExamIds },
+            status: { in: ['SUBMITTED', 'GRADED'] },
+          },
+          select: { examId: true },
+        });
+        donePretestExamIds = sessions.map((s) => s.examId);
+      }
+      if (donePretestExamIds.length > 0) {
+        exams = exams.filter((e) => !donePretestExamIds.includes(e.id));
+        total = exams.length;
+      }
+    }
 
     const data = exams.map(
       (e) => {
