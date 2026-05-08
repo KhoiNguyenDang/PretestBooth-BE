@@ -759,13 +759,13 @@ export class BookingsService {
     });
 
     // Get all bookings for this date. Include COMPLETED so availability shows past
-    // bookings (useful for month overview and auditing). We exclude
+    // bookings (useful for month overview and auditing). We still exclude
     // canceled/absent bookings.
     const bookings = await this.prisma.booking.findMany({
       where: {
         startTime: { lt: dayEnd },
         endTime: { gte: dayStart },
-        status: { in: ['CONFIRM', 'CHECKED_IN', 'COMPLETED'] },
+        status: { in: ['CONFIRM', 'CHECKED_IN', 'COMPLETED', 'CANCEL', 'ABSENT'] },
       },
       include: {
         booth: { select: { id: true, name: true } },
@@ -796,18 +796,7 @@ export class BookingsService {
       }
     }
 
-    const uniqueBookedBoothIds = new Set(bookings.map((b) => b.boothId));
-    const totalSlotsBooked = bookings.reduce((sum, b) => sum + Math.ceil(b.durationMinutes / 30), 0);
-
-    return { 
-      date: date.toISOString(), 
-      booths: activeBooths, 
-      slots,
-      dailyStats: {
-        bookedBooths: uniqueBookedBoothIds.size,
-        bookedSlots: totalSlotsBooked
-      }
-    };
+    return { date: date.toISOString(), booths: activeBooths, slots };
   }
 
   /**
