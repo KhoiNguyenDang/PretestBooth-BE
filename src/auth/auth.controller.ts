@@ -241,13 +241,11 @@ export class AuthController {
     });
   }
 
-  @UseGuards(AuthGuard('jwt'))
   @Post('logout')
   @HttpCode(HttpStatus.OK)
   logout(@Req() req, @Res({ passthrough: true }) res: Response) {
-    const userId = req.user['sub'];
     this.clearRefreshTokenCookie(res);
-    return this.authService.logout(userId);
+    return { message: 'Đăng xuất thành công' };
   }
 
   @UseGuards(AuthGuard('jwt'))
