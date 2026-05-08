@@ -1074,6 +1074,25 @@ export class BoothsService {
       return { message: 'Booth hiện không có phiên kiosk đang hoạt động', boothId };
     }
 
+    const activeBooking = await this.prisma.booking.findFirst({
+      where: {
+        boothId: booth.id,
+        status: 'CHECKED_IN',
+      },
+      include: {
+        examSessions: {
+          where: { status: 'IN_PROGRESS' },
+          select: { id: true },
+        },
+        practiceSessions: {
+          where: { status: 'IN_PROGRESS' },
+          select: { id: true },
+        },
+      },
+    });
+
+    const now = new Date();
+
     await this.prisma.$transaction(async (tx) => {
       await tx.booth.update({
         where: { id: booth.id },
@@ -1081,6 +1100,26 @@ export class BoothsService {
           sessionTokenHash: null,
         },
       });
+
+      if (activeBooking) {
+        await tx.booking.update({
+          where: { id: activeBooking.id },
+          data: {
+            status: 'COMPLETED',
+            checkedOutAt: now,
+          },
+        });
+
+        await tx.examSession.updateMany({
+          where: { bookingId: activeBooking.id, status: 'IN_PROGRESS' },
+          data: { status: 'SUBMITTED', finishedAt: now },
+        });
+
+        await tx.practiceSession.updateMany({
+          where: { bookingId: activeBooking.id, status: 'IN_PROGRESS' },
+          data: { status: 'ABANDONED', finishedAt: now },
+        });
+      }
 
       await this.appendBoothActivityLog(
         booth.id,
@@ -1091,7 +1130,45 @@ export class BoothsService {
       );
     });
 
-    const emittedAt = new Date().toISOString();
+    const emittedAt = now.toISOString();
+
+    if (activeBooking) {
+      this.realtimeService.bookingCheckout({
+        bookingId: activeBooking.id,
+        boothId: activeBooking.boothId,
+        userId: activeBooking.userId,
+        status: 'COMPLETED',
+        type: activeBooking.type,
+        startTime: activeBooking.startTime.toISOString(),
+        endTime: activeBooking.endTime.toISOString(),
+        checkedOutAt: emittedAt,
+        emittedAt,
+      });
+
+      for (const examSession of activeBooking.examSessions) {
+        this.realtimeService.sessionTerminated({
+          sessionType: 'EXAM',
+          sessionId: examSession.id,
+          userId: activeBooking.userId,
+          boothId: activeBooking.boothId,
+          status: 'SUBMITTED',
+          reason,
+          emittedAt,
+        });
+      }
+
+      for (const practiceSession of activeBooking.practiceSessions) {
+        this.realtimeService.sessionTerminated({
+          sessionType: 'PRACTICE',
+          sessionId: practiceSession.id,
+          userId: activeBooking.userId,
+          boothId: activeBooking.boothId,
+          status: 'ABANDONED',
+          reason,
+          emittedAt,
+        });
+      }
+    }
 
     this.realtimeService.notify({
       boothId: booth.id,
