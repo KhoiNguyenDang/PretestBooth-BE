@@ -49,8 +49,9 @@ export class BookingsController {
   @Get('availability')
   getAvailability(
     @Query(new ZodValidationPipe(AvailabilityQuerySchema)) query: AvailabilityQueryDto,
+    @Req() req,
   ) {
-    return this.bookingsService.getAvailability(query.date);
+    return this.bookingsService.getAvailability(query.date, req.user['role']);
   }
 
   @Get('monitor/active')

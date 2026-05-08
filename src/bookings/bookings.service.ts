@@ -731,7 +731,7 @@ export class BookingsService {
   /**
    * Get availability for a specific date
    */
-  async getAvailability(dateStr: string) {
+  async getAvailability(dateStr: string, userRole?: string) {
     const policy = await this.boothPoliciesService.getConfig();
     const date = this.normalizeVietnamDayBoundary(new Date(dateStr));
 
@@ -739,14 +739,16 @@ export class BookingsService {
       throw new BadRequestException('Ngay truy van khong hop le');
     }
 
-    const today = this.normalizeVietnamDayBoundary(this.getNowInVietnamConvention());
-    const minBookingDate = this.addDaysVietnam(today, policy.bookingMinDaysInAdvance);
-    const maxBookingDate = this.addDaysVietnam(today, policy.bookingMaxDaysInAdvance);
+    if (userRole === 'STUDENT') {
+      const today = this.normalizeVietnamDayBoundary(this.getNowInVietnamConvention());
+      const minBookingDate = this.addDaysVietnam(today, policy.bookingMinDaysInAdvance);
+      const maxBookingDate = this.addDaysVietnam(today, policy.bookingMaxDaysInAdvance);
 
-    if (date < minBookingDate || date > maxBookingDate) {
-      throw new BadRequestException(
-        `Ngay dat lich phai trong khoang ${policy.bookingMinDaysInAdvance}-${policy.bookingMaxDaysInAdvance} ngay ke tu hom nay`,
-      );
+      if (date < minBookingDate || date > maxBookingDate) {
+        throw new BadRequestException(
+          `Ngay dat lich phai trong khoang ${policy.bookingMinDaysInAdvance}-${policy.bookingMaxDaysInAdvance} ngay ke tu hom nay`,
+        );
+      }
     }
 
     const normalizedDateStr = date.toISOString().slice(0, 10);
@@ -756,12 +758,14 @@ export class BookingsService {
       where: { status: 'ACTIVE' },
     });
 
-    // Get all bookings for this date
+    // Get all bookings for this date. Include COMPLETED so availability shows past
+    // bookings (useful for month overview and auditing). We exclude
+    // canceled/absent bookings.
     const bookings = await this.prisma.booking.findMany({
       where: {
         startTime: { lt: dayEnd },
         endTime: { gte: dayStart },
-        status: { in: ['CONFIRM', 'CHECKED_IN'] },
+        status: { in: ['CONFIRM', 'CHECKED_IN', 'COMPLETED'] },
       },
       include: {
         booth: { select: { id: true, name: true } },
@@ -792,7 +796,18 @@ export class BookingsService {
       }
     }
 
-    return { date: date.toISOString(), booths: activeBooths, slots };
+    const uniqueBookedBoothIds = new Set(bookings.map((b) => b.boothId));
+    const totalSlotsBooked = bookings.reduce((sum, b) => sum + Math.ceil(b.durationMinutes / 30), 0);
+
+    return { 
+      date: date.toISOString(), 
+      booths: activeBooths, 
+      slots,
+      dailyStats: {
+        bookedBooths: uniqueBookedBoothIds.size,
+        bookedSlots: totalSlotsBooked
+      }
+    };
   }
 
   /**
