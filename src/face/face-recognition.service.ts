@@ -38,7 +38,7 @@ export class FaceRecognitionService {
 
     if (!this.useMockEmbedding) {
       throw new InternalServerErrorException(
-        'FACE_EMBEDDING_SERVICE_URL chưa được cấu hình. Vui lòng cấu hình service hoặc bật FACE_EMBEDDING_USE_MOCK=true cho môi trường local.',
+        'Dịch vụ nhận diện khuôn mặt chưa được cấu hình. Vui lòng liên hệ quản trị viên hoặc thử lại sau.',
       );
     }
 
@@ -55,11 +55,10 @@ export class FaceRecognitionService {
 
   cosineSimilarity(vectorA: number[], vectorB: number[]): number {
     if (vectorA.length === 0 || vectorB.length === 0) {
-      throw new BadRequestException('Embedding rỗng, không thể so khớp');
+      throw new BadRequestException('Không nhận diện được khuôn mặt từ ảnh. Vui lòng thử lại hoặc đổi ảnh khác.');
     }
-
     if (vectorA.length !== vectorB.length) {
-      throw new BadRequestException('Hai embedding không cùng số chiều');
+      throw new BadRequestException('Không thể so khớp khuôn mặt. Vui lòng thử lại.');
     }
 
     const normalizedA = this.normalize(vectorA);
@@ -75,19 +74,19 @@ export class FaceRecognitionService {
 
   normalize(vector: number[]): number[] {
     if (!Array.isArray(vector) || vector.length === 0) {
-      throw new BadRequestException('Embedding không hợp lệ');
+      throw new BadRequestException('Không nhận diện được khuôn mặt từ ảnh. Vui lòng thử lại hoặc đổi ảnh khác.');
     }
 
     const sanitized = vector.map((value) => {
       if (!Number.isFinite(value)) {
-        throw new BadRequestException('Embedding chứa giá trị không hợp lệ');
+        throw new BadRequestException('Ảnh khuôn mặt không hợp lệ. Vui lòng thử lại với ảnh khác.');
       }
       return Number(value);
     });
 
     const norm = this.calculateNorm(sanitized);
     if (norm === 0) {
-      throw new BadRequestException('Embedding có chuẩn bằng 0, không thể chuẩn hóa');
+      throw new BadRequestException('Không nhận diện được khuôn mặt từ ảnh. Vui lòng thử lại hoặc đổi ảnh khác.');
     }
 
     return sanitized.map((value) => value / norm);
@@ -99,11 +98,10 @@ export class FaceRecognitionService {
 
   private validateImageInput(imageDataUrl: string) {
     if (!imageDataUrl || typeof imageDataUrl !== 'string') {
-      throw new BadRequestException('Thiếu dữ liệu ảnh khuôn mặt');
+      throw new BadRequestException('Vui lòng chọn hoặc tải lên ảnh khuôn mặt.');
     }
-
     if (!imageDataUrl.startsWith('data:image/')) {
-      throw new BadRequestException('Ảnh khuôn mặt phải ở định dạng data URL');
+      throw new BadRequestException('Ảnh khuôn mặt không đúng định dạng. Vui lòng chọn lại ảnh.');
     }
   }
 
@@ -124,22 +122,19 @@ export class FaceRecognitionService {
         body: JSON.stringify({ image: imageDataUrl }),
       });
     } catch (error) {
-      this.logger.error('Không kết nối được face embedding service', error as Error);
-      throw new InternalServerErrorException('Không thể kết nối dịch vụ trích xuất khuôn mặt');
+      this.logger.error('Không kết nối được dịch vụ nhận diện khuôn mặt', error as Error);
+      throw new InternalServerErrorException('Dịch vụ nhận diện khuôn mặt đang bận hoặc không khả dụng. Vui lòng thử lại sau.');
     }
-
     if (!response.ok) {
       const payload = await response.text();
       this.logger.error(`Face embedding service trả lỗi ${response.status}: ${payload}`);
-      throw new InternalServerErrorException(
-        'Dịch vụ trích xuất khuôn mặt đang tạm thời không khả dụng',
-      );
+      throw new InternalServerErrorException('Dịch vụ nhận diện khuôn mặt đang bận hoặc không khả dụng. Vui lòng thử lại sau.');
     }
 
     const result = (await response.json()) as FaceEmbeddingServiceResponse;
 
     if (!Array.isArray(result.embedding) || result.embedding.length === 0) {
-      throw new InternalServerErrorException('Dữ liệu embedding trả về từ dịch vụ không hợp lệ');
+      throw new InternalServerErrorException('Không nhận diện được khuôn mặt từ ảnh. Vui lòng thử lại hoặc đổi ảnh khác.');
     }
 
     const normalized = this.normalize(result.embedding.map((item) => Number(item)));

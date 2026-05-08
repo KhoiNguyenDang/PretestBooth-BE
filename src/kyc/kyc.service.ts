@@ -200,6 +200,12 @@ export class KycService {
             kycFaceImageUrl: faceImageUrl,
             kycStudentImageUrl: studentImageUrl,
             kycManualReviewStatus: 'NOT_REQUESTED',
+            kycManualReviewRequestedAt: null,
+            kycManualReviewRequestedReason: null,
+            kycManualReviewReviewedAt: null,
+            kycManualReviewedByUserId: null,
+            kycManualReviewRejectionReason: null,
+            kycManualReviewNotes: null,
           },
         }),
         this.prisma.userProfile.upsert({
@@ -215,78 +221,10 @@ export class KycService {
           },
         }),
       ]);
-
       throw new BadRequestException(
-        `Anh the sinh vien khong khop voi khuon mat (similarity=${cardFaceMatchScore.toFixed(4)}, threshold=${cardThresholdConfig.threshold.toFixed(2)}).`,
+        'Ảnh thẻ sinh viên không trùng khớp với khuôn mặt. Vui lòng kiểm tra lại ảnh và thử lại.'
       );
     }
-
-    await Promise.all([
-      this.prisma.userKyc.upsert({
-        where: { userId },
-        update: {
-          kycStatus: 'VERIFIED',
-          kycRegisteredAt: now,
-          kycVerifiedAt: now,
-          kycLastAttemptAt: now,
-          kycFaceImageUrl: faceImageUrl,
-          kycStudentImageUrl: studentImageUrl,
-          kycManualReviewStatus: 'NOT_REQUESTED',
-          kycManualReviewRequestedAt: null,
-          kycManualReviewRequestedReason: null,
-          kycManualReviewReviewedAt: null,
-          kycManualReviewedByUserId: null,
-          kycManualReviewRejectionReason: null,
-          kycManualReviewNotes: null,
-          kycConsentVersion: dto.consentVersion,
-          kycConsentedAt: now,
-        },
-        create: {
-          userId,
-          kycStatus: 'VERIFIED',
-          kycRegisteredAt: now,
-          kycVerifiedAt: now,
-          kycLastAttemptAt: now,
-          kycFaceImageUrl: faceImageUrl,
-          kycStudentImageUrl: studentImageUrl,
-          kycManualReviewStatus: 'NOT_REQUESTED',
-          kycConsentVersion: dto.consentVersion,
-          kycConsentedAt: now,
-        },
-      }),
-      this.prisma.userProfile.upsert({
-        where: { userId },
-        update: {
-          studentCardImageUrl: cardImageUrl,
-          studentCardVerifiedAt: now,
-          studentCardFaceMatchScore: cardFaceMatchScore,
-        },
-        create: {
-          userId,
-          studentCardImageUrl: cardImageUrl,
-          studentCardVerifiedAt: now,
-          studentCardFaceMatchScore: cardFaceMatchScore,
-        },
-      }),
-      this.prisma.userFaceEmbedding.upsert({
-        where: { userId },
-        update: {
-          faceEmbedding: embeddingResult.embedding as Prisma.InputJsonValue,
-          faceEmbeddingModel: embeddingResult.model,
-          faceEmbeddingVersion: embeddingResult.version,
-          faceEmbeddingNorm: embeddingResult.norm,
-          faceEmbeddingUpdatedAt: now,
-        },
-        create: {
-          userId,
-          faceEmbedding: embeddingResult.embedding as Prisma.InputJsonValue,
-          faceEmbeddingModel: embeddingResult.model,
-          faceEmbeddingVersion: embeddingResult.version,
-          faceEmbeddingNorm: embeddingResult.norm,
-          faceEmbeddingUpdatedAt: now,
-        },
-      }),
-    ]);
 
     return {
       userId,
@@ -298,9 +236,6 @@ export class KycService {
       cardVerified: true,
       cardFaceMatchScore,
       cardThreshold: cardThresholdConfig.threshold,
-      studentCardImageUrl: cardImageUrl,
-      studentImageUrl,
-      faceImageUrl,
     };
   }
 
