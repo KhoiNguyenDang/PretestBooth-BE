@@ -483,7 +483,8 @@ export class BoothsService {
             if (cancelled.count > 0) {
               skipped.push({
                 bookingId: candidate.id,
-                reason: 'Booth đích đã có lịch trùng khung giờ. Booking đã được chuyển trạng thái CANCEL',
+                reason:
+                  'Booth đích đã có lịch trùng khung giờ. Booking đã được chuyển trạng thái CANCEL',
                 wasCancelled: true,
                 userId: candidate.userId,
                 studentName,
@@ -601,9 +602,7 @@ export class BoothsService {
         selectedBookingIds
           ? `Chế độ thủ công: ${selectedBookingIds.length} booking được chọn.`
           : 'Chế độ tự động: xử lý toàn bộ booking đủ điều kiện.',
-        dto.includeCheckedIn
-          ? 'Bao gồm booking CHECKED_IN.'
-          : 'Không bao gồm booking CHECKED_IN.',
+        dto.includeCheckedIn ? 'Bao gồm booking CHECKED_IN.' : 'Không bao gồm booking CHECKED_IN.',
         `Ứng viên: ${candidates.length}, chuyển thành công: ${transferred.length}, bỏ qua: ${skipped.length}.`,
       ].join(' ');
 
@@ -682,7 +681,9 @@ export class BoothsService {
     });
 
     if (!transferResult.updatedSourceBooth) {
-      throw new BadRequestException('Không thể cập nhật trạng thái booth nguồn sau khi chuyển lịch');
+      throw new BadRequestException(
+        'Không thể cập nhật trạng thái booth nguồn sau khi chuyển lịch',
+      );
     }
 
     const emittedAt = new Date().toISOString();

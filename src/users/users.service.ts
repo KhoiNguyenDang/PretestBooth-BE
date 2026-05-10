@@ -81,7 +81,7 @@ export class UsersService {
       header: 1,
       raw: false,
       defval: '',
-    }) as unknown[][];
+    });
 
     const normalizedRequiredHeaders = requiredHeaders.map((header) =>
       this.normalizeSpreadsheetHeader(header),
@@ -132,7 +132,9 @@ export class UsersService {
           data,
         };
       })
-      .filter((item): item is { rowNumber: number; data: Record<string, unknown> } => Boolean(item));
+      .filter((item): item is { rowNumber: number; data: Record<string, unknown> } =>
+        Boolean(item),
+      );
   }
 
   private async assertLecturerPermissionManagementAccess(
@@ -293,16 +295,16 @@ export class UsersService {
     const requester = await this.prisma.user.findUnique({
       where: { id: requesterId },
       select: {
-          lecturerMetadata: {
-            select: {
-              lecturerRole: {
-                select: {
-                  id: true,
-                  priority: true,
-                },
+        lecturerMetadata: {
+          select: {
+            lecturerRole: {
+              select: {
+                id: true,
+                priority: true,
               },
             },
           },
+        },
       },
     });
 
@@ -535,7 +537,9 @@ export class UsersService {
       email: student.email,
       name: student.name || '',
       className: student.profile?.className || '',
-      dateOfBirth: student.profile?.dateOfBirth ? student.profile.dateOfBirth.toISOString().slice(0, 10) : '',
+      dateOfBirth: student.profile?.dateOfBirth
+        ? student.profile.dateOfBirth.toISOString().slice(0, 10)
+        : '',
       status: student.auth?.isLocked ? 'LOCKED' : 'ACTIVE',
       lockedReason: student.auth?.lockedReason || '',
       totalPoints: student.pointAccount?.totalPoints ?? 0,
@@ -867,7 +871,10 @@ export class UsersService {
 
       if (requester?.lecturerMetadata?.lecturerRole) {
         const requesterPriority = requester.lecturerMetadata.lecturerRole.priority;
-        if (lecturer.lecturerMetadata?.lecturerRole && lecturer.lecturerMetadata.lecturerRole.priority <= requesterPriority) {
+        if (
+          lecturer.lecturerMetadata?.lecturerRole &&
+          lecturer.lecturerMetadata.lecturerRole.priority <= requesterPriority
+        ) {
           throw new ForbiddenException(
             'Bạn chỉ có thể chỉnh sửa giảng viên có vai trò thấp hơn vai trò của bạn',
           );
@@ -910,7 +917,9 @@ export class UsersService {
           ...(dto.isLocked !== undefined && {
             isLocked: dto.isLocked,
             lockedAt: dto.isLocked ? new Date() : null,
-            lockedReason: dto.isLocked ? dto.lockedReason?.trim() || 'Khóa bởi quản trị viên' : null,
+            lockedReason: dto.isLocked
+              ? dto.lockedReason?.trim() || 'Khóa bởi quản trị viên'
+              : null,
           }),
         },
         create: {
@@ -919,7 +928,9 @@ export class UsersService {
           ...(dto.isLocked !== undefined && {
             isLocked: dto.isLocked,
             lockedAt: dto.isLocked ? new Date() : null,
-            lockedReason: dto.isLocked ? dto.lockedReason?.trim() || 'Khóa bởi quản trị viên' : null,
+            lockedReason: dto.isLocked
+              ? dto.lockedReason?.trim() || 'Khóa bởi quản trị viên'
+              : null,
           }),
         },
       });
@@ -1023,7 +1034,10 @@ export class UsersService {
 
       if (requester?.lecturerMetadata?.lecturerRole) {
         const requesterPriority = requester.lecturerMetadata.lecturerRole.priority;
-        if (lecturer.lecturerMetadata?.lecturerRole && lecturer.lecturerMetadata.lecturerRole.priority <= requesterPriority) {
+        if (
+          lecturer.lecturerMetadata?.lecturerRole &&
+          lecturer.lecturerMetadata.lecturerRole.priority <= requesterPriority
+        ) {
           throw new ForbiddenException(
             'Bạn chỉ có thể khóa giảng viên có vai trò thấp hơn vai trò của bạn',
           );
@@ -1142,7 +1156,10 @@ export class UsersService {
 
       if (requester?.lecturerMetadata?.lecturerRole) {
         const requesterPriority = requester.lecturerMetadata.lecturerRole.priority;
-        if (lecturer.lecturerMetadata?.lecturerRole && lecturer.lecturerMetadata.lecturerRole.priority <= requesterPriority) {
+        if (
+          lecturer.lecturerMetadata?.lecturerRole &&
+          lecturer.lecturerMetadata.lecturerRole.priority <= requesterPriority
+        ) {
           throw new ForbiddenException(
             'Bạn chỉ có thể mở khóa giảng viên có vai trò thấp hơn vai trò của bạn',
           );
@@ -1350,7 +1367,9 @@ export class UsersService {
       (item) => item.permission as LecturerPermissionKey,
     );
     const rolePermissions = lecturer.lecturerMetadata?.lecturerRole
-      ? lecturer.lecturerMetadata.lecturerRole.permissions.map((item) => item.permission as LecturerPermissionKey)
+      ? lecturer.lecturerMetadata.lecturerRole.permissions.map(
+          (item) => item.permission as LecturerPermissionKey,
+        )
       : [];
     const permissions = this.mergePermissions(individualPermissions, rolePermissions);
 
@@ -1803,7 +1822,10 @@ export class UsersService {
       if (requester?.lecturerMetadata?.lecturerRole) {
         const requesterPriority = requester.lecturerMetadata.lecturerRole.priority;
 
-        if (lecturer.lecturerMetadata?.lecturerRole && lecturer.lecturerMetadata.lecturerRole.priority <= requesterPriority) {
+        if (
+          lecturer.lecturerMetadata?.lecturerRole &&
+          lecturer.lecturerMetadata.lecturerRole.priority <= requesterPriority
+        ) {
           throw new ForbiddenException(
             'Bạn chỉ có thể quản lý giảng viên có vai trò thấp hơn vai trò của bạn',
           );
@@ -2064,11 +2086,7 @@ export class UsersService {
     const workbook = xlsx.read(file.buffer, { type: 'buffer' });
     const sheetName = workbook.SheetNames[0];
     const sheet = workbook.Sheets[sheetName];
-    const data = this.parseSpreadsheetRowsWithHeader(sheet, [
-      'studentCode',
-      'email',
-      'name',
-    ]);
+    const data = this.parseSpreadsheetRowsWithHeader(sheet, ['studentCode', 'email', 'name']);
 
     if (data.length === 0) {
       throw new BadRequestException('File không có dữ liệu');
@@ -2084,7 +2102,6 @@ export class UsersService {
     // We process sequentially to catch specific errors, but in production
     // a bulk insert with ON CONFLICT DO NOTHING is faster
     for (const { rowNumber: rowNum, data: rowData } of data) {
-
       try {
         const studentCode = rowData.studentCode?.toString()?.trim();
         const email = rowData.email?.toString()?.trim()?.toLowerCase();

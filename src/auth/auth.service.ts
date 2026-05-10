@@ -42,8 +42,6 @@ export class AuthService {
     private readonly authorizationService: AuthorizationService,
   ) {}
 
-
-
   private async buildUserResponse(user: {
     id: string;
     email: string;
@@ -60,10 +58,16 @@ export class AuthService {
     if (isEmailVerified === undefined || kycStatus === undefined) {
       const [auth, kyc] = await Promise.all([
         isEmailVerified === undefined
-          ? this.prisma.userAuth.findUnique({ where: { userId: user.id }, select: { isEmailVerified: true } })
+          ? this.prisma.userAuth.findUnique({
+              where: { userId: user.id },
+              select: { isEmailVerified: true },
+            })
           : null,
         kycStatus === undefined
-          ? this.prisma.userKyc.findUnique({ where: { userId: user.id }, select: { kycStatus: true } })
+          ? this.prisma.userKyc.findUnique({
+              where: { userId: user.id },
+              select: { kycStatus: true },
+            })
           : null,
       ]);
       if (isEmailVerified === undefined) isEmailVerified = auth?.isEmailVerified ?? false;
@@ -76,7 +80,7 @@ export class AuthService {
       name: user.name || undefined,
       role: user.role,
       permissions,
-      isEmailVerified: isEmailVerified!,
+      isEmailVerified: isEmailVerified,
       kycStatus: kycStatus as any,
     });
   }

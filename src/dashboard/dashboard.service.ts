@@ -48,7 +48,9 @@ export class DashboardService {
    */
   async getAdminStats(userRole: string) {
     if (userRole !== 'ADMIN' && userRole !== 'LECTURER') {
-      throw new ForbiddenException('Chỉ quản trị viên và giảng viên mới xem được thống kê hệ thống');
+      throw new ForbiddenException(
+        'Chỉ quản trị viên và giảng viên mới xem được thống kê hệ thống',
+      );
     }
 
     const today = new Date();

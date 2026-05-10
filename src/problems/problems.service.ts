@@ -109,12 +109,16 @@ export class ProblemsService {
       header: 1,
       raw: false,
       defval: '',
-    }) as unknown[][];
+    });
 
-    const normalizedRequiredHeaders = requiredHeaders.map((header) => this.normalizeImportHeaderText(header));
+    const normalizedRequiredHeaders = requiredHeaders.map((header) =>
+      this.normalizeImportHeaderText(header),
+    );
     const headerRowIndex = rows.findIndex((row) => {
       const normalizedHeaders = new Set(
-        (row || []).map((cell) => this.normalizeImportHeaderText(String(cell || ''))).filter(Boolean),
+        (row || [])
+          .map((cell) => this.normalizeImportHeaderText(String(cell || '')))
+          .filter(Boolean),
       );
       return normalizedRequiredHeaders.every((header) => normalizedHeaders.has(header));
     });
@@ -150,7 +154,12 @@ export class ProblemsService {
     const workbook = xlsx.read(file.buffer, { type: 'buffer' });
     const sheetName = workbook.SheetNames[0];
     const sheet = workbook.Sheets[sheetName];
-    const rows = this.parseSpreadsheetRowsWithHeader(sheet, ['title', 'slug', 'description', 'difficulty']);
+    const rows = this.parseSpreadsheetRowsWithHeader(sheet, [
+      'title',
+      'slug',
+      'description',
+      'difficulty',
+    ]);
 
     if (rows.length === 0) {
       throw new BadRequestException('File không có dữ liệu');
@@ -164,7 +173,6 @@ export class ProblemsService {
     };
 
     for (const { rowNumber: rowNum, data: row } of rows) {
-
       try {
         const title = String(row.title || '').trim();
         const slug = String(row.slug || '')

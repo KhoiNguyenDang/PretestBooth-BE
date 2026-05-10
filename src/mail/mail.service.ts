@@ -172,4 +172,69 @@ export class MailService {
       `,
     });
   }
+
+  async sendKycManualReviewApprovedEmail(params: {
+    email: string;
+    studentName?: string | null;
+    studentCode?: string | null;
+  }): Promise<void> {
+    const displayName = params.studentName?.trim() || params.studentCode || 'Sinh vien';
+    const appUrl = process.env.APP_URL || 'http://localhost:3000';
+    const kycUrl = `${appUrl}/dashboard/kyc`;
+
+    await this.transporter.sendMail({
+      from: process.env.MAIL_FROM || process.env.MAIL_USER,
+      to: params.email,
+      subject: 'Thong bao ket qua eKYC / eKYC review result - Pretest Booth',
+      html: `
+        <h2>Thong bao duyet eKYC thanh cong</h2>
+        <p>Xin chao ${displayName},</p>
+        <p>Ho so eKYC cua ban da duoc giang vien/quan tri vien duyet thanh cong.</p>
+        <p>Ban da co the tiep tuc dat lich booth va su dung he thong.</p>
+
+        <hr />
+
+        <h2>eKYC Approved</h2>
+        <p>Hello ${displayName},</p>
+        <p>Your eKYC profile has been manually approved by a lecturer/admin.</p>
+        <p>You can now continue booking booth sessions and using the system.</p>
+
+        <p><a href="${kycUrl}">${kycUrl}</a></p>
+      `,
+    });
+  }
+
+  async sendKycManualReviewRejectedEmail(params: {
+    email: string;
+    studentName?: string | null;
+    studentCode?: string | null;
+    reason: string;
+  }): Promise<void> {
+    const displayName = params.studentName?.trim() || params.studentCode || 'Sinh vien';
+    const appUrl = process.env.APP_URL || 'http://localhost:3000';
+    const kycUrl = `${appUrl}/dashboard/kyc`;
+
+    await this.transporter.sendMail({
+      from: process.env.MAIL_FROM || process.env.MAIL_USER,
+      to: params.email,
+      subject: 'Thong bao ket qua eKYC / eKYC review result - Pretest Booth',
+      html: `
+        <h2>Thong bao tu choi eKYC thu cong</h2>
+        <p>Xin chao ${displayName},</p>
+        <p>Yeu cau duyet eKYC thu cong cua ban da bi tu choi.</p>
+        <p><strong>Ly do:</strong> ${params.reason}</p>
+        <p>Vui long cap nhat anh/chup lai eKYC va gui lai ho so.</p>
+
+        <hr />
+
+        <h2>eKYC Rejected</h2>
+        <p>Hello ${displayName},</p>
+        <p>Your manual eKYC review request has been rejected.</p>
+        <p><strong>Reason:</strong> ${params.reason}</p>
+        <p>Please update your images/re-capture eKYC and submit again.</p>
+
+        <p><a href="${kycUrl}">${kycUrl}</a></p>
+      `,
+    });
+  }
 }

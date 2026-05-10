@@ -232,9 +232,7 @@ export class CheckinService {
 
     const fallbackPolicyEnabled = booking.type === 'EXAM';
     const fallbackActivated =
-      !matched &&
-      fallbackPolicyEnabled &&
-      attemptNumber > EXAM_FALLBACK_MAX_FAILED_ATTEMPTS;
+      !matched && fallbackPolicyEnabled && attemptNumber > EXAM_FALLBACK_MAX_FAILED_ATTEMPTS;
 
     let evidenceImageUrl: string | null = null;
     if (fallbackActivated) {

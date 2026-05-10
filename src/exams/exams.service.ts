@@ -128,7 +128,11 @@ export class ExamsService {
     );
   }
 
-  private buildFriendlyExamTitle(exam: { title: string; createdAt: Date; description: string | null }) {
+  private buildFriendlyExamTitle(exam: {
+    title: string;
+    createdAt: Date;
+    description: string | null;
+  }) {
     if (!this.isPretestExamListItem(exam)) {
       return exam.title;
     }
@@ -1386,9 +1390,7 @@ export class ExamsService {
     // Nếu là sinh viên, loại bỏ các đề pretest đã làm
     if (userRole === 'STUDENT' && exams.length > 0) {
       // Lấy danh sách examId là pretest
-      const pretestExamIds = exams
-        .filter((e) => this.isPretestExamListItem(e))
-        .map((e) => e.id);
+      const pretestExamIds = exams.filter((e) => this.isPretestExamListItem(e)).map((e) => e.id);
       let donePretestExamIds: string[] = [];
       if (pretestExamIds.length > 0) {
         // Tìm các examSession của user với examId là pretest, trạng thái SUBMITTED hoặc PASSED
@@ -1408,43 +1410,39 @@ export class ExamsService {
       }
     }
 
-    const data = exams.map(
-      (e) => {
-        const isPretestExam = this.isPretestExamListItem(e);
-        const displayTitle = this.buildFriendlyExamTitle(e);
+    const data = exams.map((e) => {
+      const isPretestExam = this.isPretestExamListItem(e);
+      const displayTitle = this.buildFriendlyExamTitle(e);
 
-        return (
-        new ExamListItemDto({
-          id: e.id,
-          title: e.title,
-          displayTitle,
-          isPretestExam,
-          description: e.description,
-          type: e.type,
-          questionCount: e.questionCount,
-          problemCount: e.problemCount,
-          duration: e.duration,
-          difficulty: e.difficulty,
-          isPublished: e.isPublished,
-          visibility: e.visibility,
-          publishAt: e.publishAt,
-          publishedAt: e.publishedAt,
-          allowStudentReviewResults: e.allowStudentReviewResults,
-          passingScoreAbsolute: (e as any).passingScoreAbsolute ?? null,
-          subjectId: e.subjectId,
-          topicId: e.topicId,
-          subject: e.subject,
-          topic: e.topic,
-          creatorId: e.creatorId,
-          totalItems: e._count.items,
-          sessionCount: e._count.sessions,
-          shuffleQuestions: e.shuffleQuestions,
-          shuffleChoices: e.shuffleChoices,
-          createdAt: e.createdAt,
-        })
-        );
-      },
-    );
+      return new ExamListItemDto({
+        id: e.id,
+        title: e.title,
+        displayTitle,
+        isPretestExam,
+        description: e.description,
+        type: e.type,
+        questionCount: e.questionCount,
+        problemCount: e.problemCount,
+        duration: e.duration,
+        difficulty: e.difficulty,
+        isPublished: e.isPublished,
+        visibility: e.visibility,
+        publishAt: e.publishAt,
+        publishedAt: e.publishedAt,
+        allowStudentReviewResults: e.allowStudentReviewResults,
+        passingScoreAbsolute: (e as any).passingScoreAbsolute ?? null,
+        subjectId: e.subjectId,
+        topicId: e.topicId,
+        subject: e.subject,
+        topic: e.topic,
+        creatorId: e.creatorId,
+        totalItems: e._count.items,
+        sessionCount: e._count.sessions,
+        shuffleQuestions: e.shuffleQuestions,
+        shuffleChoices: e.shuffleChoices,
+        createdAt: e.createdAt,
+      });
+    });
 
     return new PaginatedExamsDto({
       data,
@@ -2188,9 +2186,7 @@ export class ExamsService {
           finishedAt: submittedAt,
           score: totalScore,
           passed,
-          resultPublicationStatus: shouldPublishResultImmediately
-            ? 'PUBLISHED'
-            : 'PENDING_REVIEW',
+          resultPublicationStatus: shouldPublishResultImmediately ? 'PUBLISHED' : 'PENDING_REVIEW',
           resultPublishedAt: shouldPublishResultImmediately ? submittedAt : null,
           resultLastUpdatedAt: shouldPublishResultImmediately ? submittedAt : null,
           resultRevisionCount: 0,
@@ -2362,7 +2358,7 @@ export class ExamsService {
             registeredFaceImageUrl: session.user.kycProfile?.kycFaceImageUrl ?? null,
             studentCardImageUrl: session.user.profile?.studentCardImageUrl ?? null,
           })
-      : null;
+        : null;
     const detailMessage = canViewItemDetails
       ? null
       : !isResultPublishedToStudent

@@ -258,7 +258,7 @@ export class QuestionsService {
       header: 1,
       raw: false,
       defval: '',
-    }) as unknown[][];
+    });
 
     const normalizedRequiredHeaders = requiredHeaders.map((header) =>
       this.normalizeSpreadsheetHeader(header),
@@ -309,7 +309,9 @@ export class QuestionsService {
           data,
         };
       })
-      .filter((item): item is { rowNumber: number; data: Record<string, unknown> } => Boolean(item));
+      .filter((item): item is { rowNumber: number; data: Record<string, unknown> } =>
+        Boolean(item),
+      );
   }
 
   private readImportSheetRows(
@@ -442,7 +444,6 @@ export class QuestionsService {
       null;
 
     for (const { rowNumber, data: row } of data) {
-
       try {
         const subjectRefRaw = row['subjectId'] || row['Môn'] || row['subjectRef'] || row['subject'];
         const topicRefRaw = row['topicId'] || row['Chủ đề'] || row['topicRef'] || row['topic'];

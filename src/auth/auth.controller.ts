@@ -68,11 +68,7 @@ export class AuthController {
   }
 
   private setRefreshTokenCookie(res: Response, refreshToken: string) {
-    res.cookie(
-      AuthController.REFRESH_COOKIE_NAME,
-      refreshToken,
-      this.getRefreshCookieOptions(),
-    );
+    res.cookie(AuthController.REFRESH_COOKIE_NAME, refreshToken, this.getRefreshCookieOptions());
   }
 
   private clearRefreshTokenCookie(res: Response) {
@@ -172,11 +168,11 @@ export class AuthController {
   ) {
     return this.authService
       .boothLogin(
-      dto.email,
-      dto.password,
-      dto.boothSessionToken,
-      this.extractBoothSessionBinding(req),
-    )
+        dto.email,
+        dto.password,
+        dto.boothSessionToken,
+        this.extractBoothSessionBinding(req),
+      )
       .then((result) => {
         this.setRefreshTokenCookie(res, result.refreshToken);
 

@@ -3,6 +3,7 @@ import {
   Injectable,
   InternalServerErrorException,
   Logger,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { createHash } from 'crypto';
 
@@ -55,7 +56,9 @@ export class FaceRecognitionService {
 
   cosineSimilarity(vectorA: number[], vectorB: number[]): number {
     if (vectorA.length === 0 || vectorB.length === 0) {
-      throw new BadRequestException('Không nhận diện được khuôn mặt từ ảnh. Vui lòng thử lại hoặc đổi ảnh khác.');
+      throw new BadRequestException(
+        'Không nhận diện được khuôn mặt từ ảnh. Vui lòng thử lại hoặc đổi ảnh khác.',
+      );
     }
     if (vectorA.length !== vectorB.length) {
       throw new BadRequestException('Không thể so khớp khuôn mặt. Vui lòng thử lại.');
@@ -74,7 +77,9 @@ export class FaceRecognitionService {
 
   normalize(vector: number[]): number[] {
     if (!Array.isArray(vector) || vector.length === 0) {
-      throw new BadRequestException('Không nhận diện được khuôn mặt từ ảnh. Vui lòng thử lại hoặc đổi ảnh khác.');
+      throw new BadRequestException(
+        'Không nhận diện được khuôn mặt từ ảnh. Vui lòng thử lại hoặc đổi ảnh khác.',
+      );
     }
 
     const sanitized = vector.map((value) => {
@@ -86,7 +91,9 @@ export class FaceRecognitionService {
 
     const norm = this.calculateNorm(sanitized);
     if (norm === 0) {
-      throw new BadRequestException('Không nhận diện được khuôn mặt từ ảnh. Vui lòng thử lại hoặc đổi ảnh khác.');
+      throw new BadRequestException(
+        'Không nhận diện được khuôn mặt từ ảnh. Vui lòng thử lại hoặc đổi ảnh khác.',
+      );
     }
 
     return sanitized.map((value) => value / norm);
@@ -123,18 +130,39 @@ export class FaceRecognitionService {
       });
     } catch (error) {
       this.logger.error('Không kết nối được dịch vụ nhận diện khuôn mặt', error as Error);
-      throw new InternalServerErrorException('Dịch vụ nhận diện khuôn mặt đang bận hoặc không khả dụng. Vui lòng thử lại sau.');
+      throw new InternalServerErrorException(
+        'Dịch vụ nhận diện khuôn mặt đang bận hoặc không khả dụng. Vui lòng thử lại sau.',
+      );
     }
     if (!response.ok) {
       const payload = await response.text();
       this.logger.error(`Face embedding service trả lỗi ${response.status}: ${payload}`);
-      throw new InternalServerErrorException('Dịch vụ nhận diện khuôn mặt đang bận hoặc không khả dụng. Vui lòng thử lại sau.');
+
+      // Try to parse JSON payload to extract useful error fields
+      let parsed: any = null;
+      try {
+        parsed = JSON.parse(payload);
+      } catch {
+        parsed = null;
+      }
+
+      if (response.status === 422) {
+        const message =
+          (parsed && (parsed.detail || parsed.message || parsed.error)) || payload || 'Không nhận diện được khuôn mặt từ ảnh.';
+        throw new UnprocessableEntityException(message);
+      }
+
+      throw new InternalServerErrorException(
+        'Dịch vụ nhận diện khuôn mặt đang bận hoặc không khả dụng. Vui lòng thử lại sau.',
+      );
     }
 
     const result = (await response.json()) as FaceEmbeddingServiceResponse;
 
     if (!Array.isArray(result.embedding) || result.embedding.length === 0) {
-      throw new InternalServerErrorException('Không nhận diện được khuôn mặt từ ảnh. Vui lòng thử lại hoặc đổi ảnh khác.');
+      throw new InternalServerErrorException(
+        'Không nhận diện được khuôn mặt từ ảnh. Vui lòng thử lại hoặc đổi ảnh khác.',
+      );
     }
 
     const normalized = this.normalize(result.embedding.map((item) => Number(item)));

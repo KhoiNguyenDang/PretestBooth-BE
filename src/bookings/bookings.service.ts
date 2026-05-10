@@ -155,7 +155,10 @@ export class BookingsService {
       );
     }
 
-    const hasFaceEmbedding = embedding?.faceEmbedding && Array.isArray(embedding.faceEmbedding) && embedding.faceEmbedding.length > 0;
+    const hasFaceEmbedding =
+      embedding?.faceEmbedding &&
+      Array.isArray(embedding.faceEmbedding) &&
+      embedding.faceEmbedding.length > 0;
     if (!hasFaceEmbedding) {
       throw new ForbiddenException(
         'Bạn cần hoàn tất xác thực khuôn mặt (KYC) trước khi đặt lịch sử dụng booth',

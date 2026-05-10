@@ -57,7 +57,11 @@ export const QueryVerifiedKycSchema = z.object({
 export type QueryVerifiedKycDto = z.output<typeof QueryVerifiedKycSchema>;
 
 export const CancelVerifiedKycSchema = z.object({
-  reason: z.string().trim().min(5, 'Lý do hủy xác thực phải có ít nhất 5 ký tự').max(500, 'Lý do hủy xác thực tối đa 500 ký tự'),
+  reason: z
+    .string()
+    .trim()
+    .min(5, 'Lý do hủy xác thực phải có ít nhất 5 ký tự')
+    .max(500, 'Lý do hủy xác thực tối đa 500 ký tự'),
 });
 
 export type CancelVerifiedKycDto = z.output<typeof CancelVerifiedKycSchema>;

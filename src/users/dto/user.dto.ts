@@ -43,7 +43,11 @@ export type CreateLecturerDto = z.output<typeof CreateLecturerSchema>;
 export const UpdateLecturerSchema = z.object({
   email: z.string().email('Email không hợp lệ').optional(),
   name: z.string().min(1, 'Tên không được để trống').optional(),
-  password: z.string().min(8, 'Mật khẩu phải có ít nhất 8 ký tự').max(72, 'Mật khẩu không hợp lệ').optional(),
+  password: z
+    .string()
+    .min(8, 'Mật khẩu phải có ít nhất 8 ký tự')
+    .max(72, 'Mật khẩu không hợp lệ')
+    .optional(),
   isLocked: z.boolean().optional(),
   lockedReason: z.string().optional(),
 });
