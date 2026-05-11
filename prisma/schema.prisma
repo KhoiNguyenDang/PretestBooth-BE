@@ -37,7 +37,6 @@ model User {
   createdQuestions           Question[]                     @relation("QuestionCreator")
   reviewedQuestionSessions   QuestionReviewSession[]        @relation("QuestionReviewSessionReviewer")
   questionReviewActions      QuestionReviewAction[]         @relation("QuestionReviewActionReviewer")
-  lecturerPermissions        LecturerPermissionAssignment[] @relation("LecturerPermissionOwner")
   grantedLecturerPermissions LecturerPermissionAssignment[] @relation("LecturerPermissionGrantor")
   createdLecturerRoles       LecturerRole[]                 @relation("LecturerRoleCreator")
   proctoringEvents           ProctoringEvent[]
@@ -155,6 +154,7 @@ model Lecturer {
   user               User          @relation("UserLecturer", fields: [userId], references: [id], onDelete: Cascade)
   lecturerRole       LecturerRole? @relation("LecturerRole", fields: [lecturerRoleId], references: [id], onDelete: SetNull)
   assignedByUser     User?         @relation("LecturerAssigner", fields: [lecturerRoleAssignedByUserId], references: [id], onDelete: SetNull)
+  lecturerPermissions LecturerPermissionAssignment[] @relation("LecturerPermissionOwner")
 
   // Relations from existing User tables
   createdProblems    Problem[]       @relation("ProblemLecturerCreator")
@@ -185,7 +185,7 @@ model LecturerPermissionAssignment {
   grantedByUserId String?
   grantedAt       DateTime           @default(now())
   updatedAt       DateTime           @updatedAt
-  lecturer        User               @relation("LecturerPermissionOwner", fields: [lecturerId], references: [id], onDelete: Cascade)
+  lecturer        Lecturer           @relation("LecturerPermissionOwner", fields: [lecturerId], references: [id], onDelete: Cascade)
   grantedByUser   User?              @relation("LecturerPermissionGrantor", fields: [grantedByUserId], references: [id], onDelete: SetNull)
 
   @@unique([lecturerId, permission])

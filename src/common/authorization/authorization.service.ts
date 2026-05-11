@@ -67,17 +67,17 @@ export class AuthorizationService {
         where: { id: lecturerId },
         select: {
           role: true,
-          lecturerPermissions: {
-            select: { permission: true },
-            orderBy: { permission: 'asc' },
-          },
         },
       }),
-      (this.prisma as any).lecturer.findUnique({
+      this.prisma.lecturer.findUnique({
         where: { userId: lecturerId },
         select: {
           userId: true,
           lecturerRoleId: true,
+          lecturerPermissions: {
+            select: { permission: true },
+            orderBy: { permission: 'asc' },
+          },
           lecturerRole: {
             select: {
               id: true,
@@ -104,9 +104,9 @@ export class AuthorizationService {
       };
     }
 
-    const individualPermissions = legacyLecturer.lecturerPermissions.map(
-      (item) => item.permission as LecturerPermissionKey,
-    );
+    const individualPermissions = ((lecturerProfile?.lecturerPermissions ?? []) as Array<{
+      permission: LecturerPermissionKey;
+    }>).map((item) => item.permission);
     let lecturerRole: LecturerRoleSummary | null = null;
     let rolePermissions: LecturerPermissionKey[] = [];
 

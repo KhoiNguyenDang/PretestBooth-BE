@@ -32,6 +32,12 @@ import {
   type LecturerPermissionKey,
 } from '../common/authorization/authorization.constants';
 
+type UploadFileLike = {
+  originalname?: string | null;
+  mimetype?: string | null;
+  buffer: Buffer;
+};
+
 @Injectable()
 export class UsersService {
   private readonly logger = new Logger(UsersService.name);
@@ -218,8 +224,8 @@ export class UsersService {
       lockedReason: string | null;
     } | null;
     createdAt: Date;
-    lecturerPermissions: { permission: LecturerPermissionKey }[];
     lecturerProfile?: {
+      lecturerPermissions: { permission: LecturerPermissionKey }[];
       lecturerRole: {
         id: string;
         code: string;
@@ -230,7 +236,9 @@ export class UsersService {
       } | null;
     } | null;
   }) {
-    const individualPermissions = record.lecturerPermissions.map((item) => item.permission);
+    const individualPermissions = record.lecturerProfile?.lecturerPermissions.map(
+      (item) => item.permission,
+    ) ?? [];
     const rolePermissions = record.lecturerProfile?.lecturerRole
       ? record.lecturerProfile.lecturerRole.permissions.map((item) => item.permission)
       : [];
@@ -396,7 +404,7 @@ export class UsersService {
     return where;
   }
 
-  private isSupportedImportFile(file: Express.Multer.File) {
+  private isSupportedImportFile(file: UploadFileLike) {
     const originalName = (file.originalname || '').toLowerCase();
     const mimeType = (file.mimetype || '').toLowerCase();
 
@@ -1269,12 +1277,12 @@ export class UsersService {
             },
           },
           createdAt: true,
-          lecturerPermissions: {
-            select: { permission: true },
-            orderBy: { permission: 'asc' },
-          },
           lecturerProfile: {
             select: {
+              lecturerPermissions: {
+                select: { permission: true },
+                orderBy: { permission: 'asc' },
+              },
               lecturerRole: {
                 select: {
                   id: true,
@@ -1336,18 +1344,18 @@ export class UsersService {
         },
         createdAt: true,
         role: true,
-        lecturerPermissions: {
-          select: {
-            permission: true,
-            grantedAt: true,
-            grantedByUser: {
-              select: { id: true, email: true, name: true },
-            },
-          },
-          orderBy: { permission: 'asc' },
-        },
         lecturerProfile: {
           select: {
+            lecturerPermissions: {
+              select: {
+                permission: true,
+                grantedAt: true,
+                grantedByUser: {
+                  select: { id: true, email: true, name: true },
+                },
+              },
+              orderBy: { permission: 'asc' },
+            },
             lecturerRole: {
               select: {
                 id: true,
@@ -1370,9 +1378,9 @@ export class UsersService {
       throw new NotFoundException('Giảng viên không tồn tại');
     }
 
-    const individualPermissions = lecturer.lecturerPermissions.map(
-      (item) => item.permission as LecturerPermissionKey,
-    );
+    const individualPermissions = ((lecturer.lecturerProfile?.lecturerPermissions ?? []) as Array<{
+      permission: LecturerPermissionKey;
+    }>).map((item) => item.permission);
     const rolePermissions = lecturer.lecturerProfile?.lecturerRole
       ? lecturer.lecturerProfile.lecturerRole.permissions.map(
           (item) => item.permission as LecturerPermissionKey,
@@ -1406,7 +1414,7 @@ export class UsersService {
           }
         : null,
       isLecturerAdmin: permissions.includes(LECTURER_ADMIN_PERMISSION),
-      assignments: lecturer.lecturerPermissions,
+      assignments: lecturer.lecturerProfile?.lecturerPermissions ?? [],
       requesterPermissions,
       assignablePermissions:
         requesterRole === 'ADMIN'
@@ -2089,7 +2097,7 @@ export class UsersService {
    * Import students from CSV/Excel
    * Expected columns: studentCode, email, name, className?, dateOfBirth (YYYY-MM-DD or DD/MM/YYYY)
    */
-  async importStudents(file: Express.Multer.File, requesterId: string, requesterRole: string) {
+  async importStudents(file: UploadFileLike, requesterId: string, requesterRole: string) {
     await this.assertStudentManagementAccess(requesterId, requesterRole);
 
     if (!file) throw new BadRequestException('Vui lòng upload file Excel/CSV');
