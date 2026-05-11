@@ -18,6 +18,7 @@ import { AuthorizationService } from '../common/authorization/authorization.serv
 import { RealtimeService } from '../realtime/realtime.service';
 import { GeminiShortAnswerGraderService } from '../common/ai/gemini-short-answer-grader.service';
 import { MailService } from '../mail/mail.service';
+import { LecturerService } from '../lecturers/lecturers.service';
 
 import type { CreateExamDto } from './dto/create-exam.dto';
 import type { UpdateExamDto } from './dto/update-exam.dto';
@@ -94,7 +95,13 @@ export class ExamsService {
     private readonly realtimeService: RealtimeService,
     private readonly geminiShortAnswerGrader: GeminiShortAnswerGraderService,
     private readonly mailService: MailService,
+    private readonly lecturerService: LecturerService,
   ) {}
+
+  private async resolveLecturerIdentity(userId: string) {
+    const lecturer = await this.lecturerService.getLecturerByUserId(userId);
+    return lecturer?.id ?? null;
+  }
 
   private async assertExamManagementPermission(
     userId: string,
@@ -1004,6 +1011,7 @@ export class ExamsService {
    */
   async create(creatorId: string, userRole: string, dto: CreateExamDto): Promise<ExamDetailDto> {
     await this.assertExamManagementPermission(creatorId, userRole, 'tạo đề thi');
+    const lecturerId = userRole === 'LECTURER' ? await this.resolveLecturerIdentity(creatorId) : null;
 
     const selectedSubjectIds = dto.subjectIds?.length
       ? dto.subjectIds
@@ -1247,8 +1255,9 @@ export class ExamsService {
             selectedSubjectIds.length === 1 ? selectedSubjectIds[0] : dto.subjectId || null,
           topicId: dto.topicId || null,
           creatorId,
+          lecturerId,
           type: examType,
-        },
+        } as any,
       });
 
       // Create ExamItems for questions

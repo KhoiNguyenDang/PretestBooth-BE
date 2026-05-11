@@ -10,6 +10,7 @@ import { AuthorizationModule } from '../common/authorization/authorization.modul
 import { RealtimeModule } from '../realtime/realtime.module';
 import { GeminiShortAnswerGraderService } from '../common/ai/gemini-short-answer-grader.service';
 import { MailModule } from '../mail/mail.module';
+import { LecturersModule } from '../lecturers/lecturers.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { MailModule } from '../mail/mail.module';
     AuthorizationModule,
     RealtimeModule,
     MailModule,
+    LecturersModule,
   ],
   controllers: [ExamsController],
   providers: [ExamsService, GeminiShortAnswerGraderService],

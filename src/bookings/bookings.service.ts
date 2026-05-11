@@ -19,6 +19,7 @@ import { RealtimeService } from '../realtime/realtime.service';
 import { PointsService } from '../points/points.service';
 import { AuthorizationService } from '../common/authorization/authorization.service';
 import { BoothPoliciesService } from '../booth-policies/booth-policies.service';
+import { StudentService } from '../students/students.service';
 
 @Injectable()
 export class BookingsService {
@@ -29,7 +30,17 @@ export class BookingsService {
     private readonly pointsService: PointsService,
     private readonly authorizationService: AuthorizationService,
     private readonly boothPoliciesService: BoothPoliciesService,
+    private readonly studentService: StudentService,
   ) {}
+
+  private async getStudentIdentity(userId: string) {
+    const student = await this.studentService.getStudentByUserId(userId);
+    if (!student) {
+      throw new NotFoundException('Sinh viên không tồn tại');
+    }
+
+    return student;
+  }
 
   private async assertMonitoringPermission(userId: string, userRole: string, actionLabel: string) {
     if (userRole === 'ADMIN') {
@@ -134,6 +145,8 @@ export class BookingsService {
     if (userRole !== 'STUDENT') {
       throw new ForbiddenException('Chỉ sinh viên mới có thể đặt lịch sử dụng booth');
     }
+
+    const student = await this.getStudentIdentity(userId);
 
     // Check if account is locked and get auth status
     const [user, auth, kycProfile, embedding] = await Promise.all([
@@ -253,11 +266,11 @@ export class BookingsService {
 
     const conflictingBookings = await this.prisma.booking.findMany({
       where: {
-        userId,
+        studentId: student.id,
         date: bookingDate,
         status: { in: ['CONFIRM', 'CHECKED_IN'] },
         OR: [{ startTime: { lt: gapCheckEnd }, endTime: { gt: gapCheckStart } }],
-      },
+      } as any,
     });
 
     if (conflictingBookings.length > 0) {
@@ -310,9 +323,10 @@ export class BookingsService {
     }
 
     // Create the booking
-    return this.prisma.booking.create({
+    return (this.prisma as any).booking.create({
       data: {
         userId,
+        studentId: student.id,
         boothId: dto.boothId,
         type: dto.type as BookingType,
         date: bookingDate,
@@ -334,11 +348,12 @@ export class BookingsService {
   async findAll(userId: string, userRole: string, query: QueryBookingDto) {
     const { page, limit, status, type, date, sortOrder } = query;
     const skip = (page - 1) * limit;
+    const student = userRole === 'STUDENT' ? await this.getStudentIdentity(userId) : null;
 
-    const where: Prisma.BookingWhereInput = {};
+    const where: any = {};
 
     if (userRole === 'STUDENT') {
-      where.userId = userId;
+      where.studentId = student!.id;
     }
 
     if (status) where.status = status as BookingStatus;
@@ -351,7 +366,7 @@ export class BookingsService {
     }
 
     const [bookings, total] = await Promise.all([
-      this.prisma.booking.findMany({
+      (this.prisma as any).booking.findMany({
         where,
         skip,
         take: limit,
@@ -359,6 +374,7 @@ export class BookingsService {
         include: {
           booth: { select: { id: true, name: true, location: true } },
           user: { select: { id: true, email: true, name: true, studentCode: true } },
+          student: { select: { id: true, studentCode: true, className: true } },
         },
       }),
       this.prisma.booking.count({ where }),
@@ -895,6 +911,7 @@ export class BookingsService {
   }
 
   async createWalkInPracticeForBoothLogin(userId: string, boothId: string) {
+    const student = await this.getStudentIdentity(userId);
     const policy = await this.boothPoliciesService.getConfig();
     if (!policy.walkInPracticeEnabled) {
       throw new ForbiddenException('Tinh nang tan dung booth dang duoc tat');
@@ -917,11 +934,11 @@ export class BookingsService {
 
     const activeCheckedInBooking = await this.prisma.booking.findFirst({
       where: {
-        userId,
+        studentId: student.id,
         status: 'CHECKED_IN',
         checkedOutAt: null,
         endTime: { gte: now },
-      },
+      } as any,
       orderBy: { checkedInAt: 'desc' },
     });
 
@@ -1017,6 +1034,7 @@ export class BookingsService {
     const walkInBooking = await this.prisma.booking.create({
       data: {
         userId,
+        studentId: student.id,
         boothId,
         type: 'PRACTICE',
         date: bookingDate,
@@ -1028,7 +1046,7 @@ export class BookingsService {
         checkedInAt: now,
         checkinStatus: 'PASSED',
         checkinVerifiedAt: now,
-      },
+      } as any,
     });
 
     const emittedAt = new Date().toISOString();
@@ -1068,19 +1086,20 @@ export class BookingsService {
   }
 
   async getPendingCheckInByBooth(userId: string, boothId: string) {
+    const student = await this.getStudentIdentity(userId);
     const now = this.getNowInVietnamConvention();
     const earlyMs = this.getCheckInEarlyMinutes() * 60 * 1000;
     const lateMs = this.getCheckInLateMinutes() * 60 * 1000;
 
-    const candidates = await this.prisma.booking.findMany({
+    const candidates = await (this.prisma as any).booking.findMany({
       where: {
-        userId,
+        studentId: student.id,
         boothId,
         type: { in: ['EXAM', 'PRACTICE'] },
         status: { in: ['CONFIRM', 'CHECKED_IN'] },
         startTime: { lte: new Date(now.getTime() + earlyMs) },
         endTime: { gte: new Date(now.getTime() - lateMs) },
-      },
+      } as any,
       orderBy: { startTime: 'asc' },
     });
 
@@ -1093,9 +1112,9 @@ export class BookingsService {
       )[0];
 
     if (!booking) {
-      const windowBookings = await this.prisma.booking.findMany({
+      const windowBookings = await (this.prisma as any).booking.findMany({
         where: {
-          userId,
+          studentId: student.id,
           type: { in: ['EXAM', 'PRACTICE'] },
           status: { in: ['CONFIRM', 'CHECKED_IN'] },
           startTime: { lte: new Date(now.getTime() + earlyMs) },
@@ -1119,7 +1138,8 @@ export class BookingsService {
           select: { name: true, code: true },
         });
 
-        const bookedBoothLabel = `${nearest.booth.name}${nearest.booth.code ? ` (${nearest.booth.code})` : ''}`;
+        const nearestBooth = (nearest as any).booth;
+        const bookedBoothLabel = `${nearestBooth.name}${nearestBooth.code ? ` (${nearestBooth.code})` : ''}`;
         const currentBoothLabel = currentBooth
           ? `${currentBooth.name}${currentBooth.code ? ` (${currentBooth.code})` : ''}`
           : boothId;
@@ -1131,13 +1151,13 @@ export class BookingsService {
 
       const upcomingSameBooth = await this.prisma.booking.findFirst({
         where: {
-          userId,
+          studentId: student.id,
           boothId,
           type: { in: ['EXAM', 'PRACTICE'] },
           status: 'CONFIRM',
           startTime: { gte: new Date(now.getTime() - earlyMs) },
           endTime: { gte: now },
-        },
+        } as any,
         orderBy: { startTime: 'asc' },
       });
 
@@ -1180,16 +1200,17 @@ export class BookingsService {
    */
   async findActiveCheckedInBooking(userId: string, type: BookingType) {
     await this.autoCheckOutExpiredBookings();
+    const student = await this.getStudentIdentity(userId);
 
     const now = this.getNowInVietnamConvention();
     const booking = await this.prisma.booking.findFirst({
       where: {
-        userId,
+        studentId: student.id,
         type,
         status: 'CHECKED_IN',
         startTime: { lte: now },
         endTime: { gte: now },
-      },
+      } as any,
       orderBy: { startTime: 'asc' },
     });
 
@@ -1205,29 +1226,30 @@ export class BookingsService {
    */
   async requireActiveCheckedInBooking(userId: string, type: BookingType) {
     await this.autoCheckOutExpiredBookings();
+    const student = await this.getStudentIdentity(userId);
 
     const now = this.getNowInVietnamConvention();
     const booking = await this.prisma.booking.findFirst({
       where: {
-        userId,
+        studentId: student.id,
         type,
         status: 'CHECKED_IN',
         startTime: { lte: now },
         endTime: { gte: now },
-      },
+      } as any,
       orderBy: { startTime: 'asc' },
     });
 
     if (!booking) {
       const activeOtherType = await this.prisma.booking.findFirst({
         where: {
-          userId,
+          studentId: student.id,
           status: 'CHECKED_IN',
           checkedOutAt: null,
           type: { not: type },
           startTime: { lte: now },
           endTime: { gte: now },
-        },
+        } as any,
         orderBy: { checkedInAt: 'desc' },
       });
 

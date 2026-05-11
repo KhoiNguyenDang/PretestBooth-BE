@@ -15,6 +15,8 @@ import * as crypto from 'crypto';
 import { BoothsService } from '../booths/booths.service';
 import { BookingsService } from '../bookings/bookings.service';
 import { AuthorizationService } from '../common/authorization/authorization.service';
+import { StudentService } from '../students/students.service';
+import { LecturerService } from '../lecturers/lecturers.service';
 
 type BoothAccessMode = 'SCHEDULED' | 'WALK_IN';
 
@@ -40,7 +42,23 @@ export class AuthService {
     private readonly boothsService: BoothsService,
     private readonly bookingsService: BookingsService,
     private readonly authorizationService: AuthorizationService,
+    private readonly studentService: StudentService,
+    private readonly lecturerService: LecturerService,
   ) {}
+
+  private async resolveRoleIdentity(userId: string, role: string) {
+    if (role === 'STUDENT') {
+      const student = await this.studentService.getStudentByUserId(userId);
+      return { studentId: student?.id ?? null, lecturerId: null };
+    }
+
+    if (role === 'LECTURER') {
+      const lecturer = await this.lecturerService.getLecturerByUserId(userId);
+      return { studentId: null, lecturerId: lecturer?.id ?? null };
+    }
+
+    return { studentId: null, lecturerId: null };
+  }
 
   private async buildUserResponse(user: {
     id: string;
@@ -49,6 +67,8 @@ export class AuthService {
     role: string;
     isEmailVerified?: boolean;
     kycStatus?: string;
+    studentId?: string | null;
+    lecturerId?: string | null;
   }) {
     const permissions = await this.authorizationService.getPermissionsForUser(user.id, user.role);
 
@@ -76,6 +96,8 @@ export class AuthService {
 
     return new UserResponseDto({
       id: user.id,
+      studentId: user.studentId || undefined,
+      lecturerId: user.lecturerId || undefined,
       email: user.email,
       name: user.name || undefined,
       role: user.role,
@@ -157,10 +179,17 @@ export class AuthService {
     return this.buildUserResponse(user);
   }
 
-  private async generateTokens(userId: string, role: string, boothContext?: TokenBoothContext) {
+  private async generateTokens(
+    userId: string,
+    role: string,
+    boothContext?: TokenBoothContext,
+    roleIdentity?: { studentId?: string | null; lecturerId?: string | null },
+  ) {
     const payload = {
       sub: userId,
       role,
+      studentId: roleIdentity?.studentId || null,
+      lecturerId: roleIdentity?.lecturerId || null,
       isActivatedBoothContext: boothContext?.isActivatedBoothContext || false,
       boothAccessMode: boothContext?.boothAccessMode || null,
       boothId: boothContext?.boothId || null,
@@ -184,8 +213,9 @@ export class AuthService {
 
   async login(email: string, password: string) {
     const user = await this.validateUserCredentials(email, password);
+    const roleIdentity = await this.resolveRoleIdentity(user.id, user.role);
 
-    const tokens = await this.generateTokens(user.id, user.role);
+    const tokens = await this.generateTokens(user.id, user.role, undefined, roleIdentity);
     const hashedRefreshToken = await bcrypt.hash(tokens.refreshToken, 10);
 
     await this.prisma.userAuth.update({
@@ -195,7 +225,7 @@ export class AuthService {
 
     return new TokenResponseDto({
       ...tokens,
-      user: await this.buildUserResponse(user),
+      user: await this.buildUserResponse({ ...user, ...roleIdentity }),
     });
   }
 
@@ -210,6 +240,7 @@ export class AuthService {
     boothBinding: BoothSessionBindingContext,
   ) {
     const user = await this.validateUserCredentials(email, password);
+    const roleIdentity = await this.resolveRoleIdentity(user.id, user.role);
 
     if (user.role !== 'STUDENT') {
       throw new ForbiddenException('Booth login chỉ áp dụng cho sinh viên');
@@ -261,11 +292,16 @@ export class AuthService {
       walkInProtection = walkInResult.protection;
     }
 
-    const tokens = await this.generateTokens(user.id, user.role, {
-      isActivatedBoothContext: true,
-      boothAccessMode: accessMode,
-      boothId: booth.id,
-    });
+    const tokens = await this.generateTokens(
+      user.id,
+      user.role,
+      {
+        isActivatedBoothContext: true,
+        boothAccessMode: accessMode,
+        boothId: booth.id,
+      },
+      roleIdentity,
+    );
     const hashedRefreshToken = await bcrypt.hash(tokens.refreshToken, 10);
 
     await this.prisma.userAuth.update({
@@ -276,7 +312,7 @@ export class AuthService {
     return {
       ...new TokenResponseDto({
         ...tokens,
-        user: await this.buildUserResponse(user),
+        user: await this.buildUserResponse({ ...user, ...roleIdentity }),
       }),
       booth: {
         id: booth.id,
@@ -358,12 +394,17 @@ export class AuthService {
   async refresh(refreshToken: string) {
     let userId: string;
     let boothContext: TokenBoothContext | undefined;
+    let roleIdentity: { studentId?: string | null; lecturerId?: string | null } | undefined;
 
     try {
       const payload = this.jwtService.verify(refreshToken, {
         secret: process.env.JWT_REFRESH_SECRET,
       });
       userId = payload.sub;
+      roleIdentity = {
+        studentId: payload?.studentId || null,
+        lecturerId: payload?.lecturerId || null,
+      };
       boothContext = payload?.isActivatedBoothContext
         ? {
             isActivatedBoothContext: true,
@@ -390,7 +431,15 @@ export class AuthService {
       throw new ForbiddenException('Access denied');
     }
 
-    const tokens = await this.generateTokens(user.id, user.role, boothContext);
+    if (!roleIdentity?.studentId && user.role === 'STUDENT') {
+      roleIdentity = await this.resolveRoleIdentity(user.id, user.role);
+    }
+
+    if (!roleIdentity?.lecturerId && user.role === 'LECTURER') {
+      roleIdentity = await this.resolveRoleIdentity(user.id, user.role);
+    }
+
+    const tokens = await this.generateTokens(user.id, user.role, boothContext, roleIdentity);
     const hashedRefreshToken = await bcrypt.hash(tokens.refreshToken, 10);
 
     await this.prisma.userAuth.update({
@@ -418,7 +467,9 @@ export class AuthService {
       throw new NotFoundException('Người dùng không tồn tại');
     }
 
-    return this.buildUserResponse(user);
+    const roleIdentity = await this.resolveRoleIdentity(user.id, user.role);
+
+    return this.buildUserResponse({ ...user, ...roleIdentity });
   }
 
   async forgotPassword(email: string) {
@@ -513,6 +564,7 @@ export class AuthService {
       name: auth.user.name,
       role: auth.user.role,
       isEmailVerified: true,
+      ...(await this.resolveRoleIdentity(auth.user.id, auth.user.role)),
     });
   }
 

@@ -9,6 +9,8 @@ import { MailModule } from '../mail/mail.module';
 import { BoothsModule } from '../booths/booths.module';
 import { BookingsModule } from '../bookings/bookings.module';
 import { AuthorizationModule } from '../common/authorization/authorization.module';
+import { StudentsModule } from '../students/students.module';
+import { LecturersModule } from '../lecturers/lecturers.module';
 
 @Module({
   imports: [
@@ -19,6 +21,8 @@ import { AuthorizationModule } from '../common/authorization/authorization.modul
     BoothsModule,
     BookingsModule,
     AuthorizationModule,
+    StudentsModule,
+    LecturersModule,
   ],
   controllers: [AuthController],
   providers: [AuthService, JwtStrategy],

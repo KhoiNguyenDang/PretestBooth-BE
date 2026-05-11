@@ -40,6 +40,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     return {
       sub: payload.sub,
       role: payload.role,
+      studentId: payload?.studentId || null,
+      lecturerId: payload?.lecturerId || null,
       isActivatedBoothContext,
       boothAccessMode: payload?.boothAccessMode || null,
       boothId,

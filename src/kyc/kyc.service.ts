@@ -154,6 +154,7 @@ export class KycService {
   }
 
   async register(userId: string, dto: KycRegisterDto) {
+    const prismaAny = this.prisma as any;
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: { id: true, email: true },
@@ -183,6 +184,20 @@ export class KycService {
 
     if (cardFaceMatchScore < cardThresholdConfig.threshold) {
       await Promise.all([
+        prismaAny.student.upsert({
+          where: { userId },
+          update: {
+            studentCardImageUrl: cardImageUrl,
+            studentCardFaceMatchScore: cardFaceMatchScore,
+            studentCardVerifiedAt: null,
+          },
+          create: {
+            userId,
+            studentCardImageUrl: cardImageUrl,
+            studentCardFaceMatchScore: cardFaceMatchScore,
+            studentCardVerifiedAt: null,
+          },
+        }),
         this.prisma.userKyc.upsert({
           where: { userId },
           update: {
@@ -240,6 +255,20 @@ export class KycService {
     }
 
     await Promise.all([
+      prismaAny.student.upsert({
+        where: { userId },
+        update: {
+          studentCardImageUrl: cardImageUrl,
+          studentCardFaceMatchScore: cardFaceMatchScore,
+          studentCardVerifiedAt: now,
+        },
+        create: {
+          userId,
+          studentCardImageUrl: cardImageUrl,
+          studentCardFaceMatchScore: cardFaceMatchScore,
+          studentCardVerifiedAt: now,
+        },
+      }),
       this.prisma.userFaceEmbedding.upsert({
         where: { userId },
         update: {
@@ -328,7 +357,7 @@ export class KycService {
   }
 
   async getStatus(userId: string) {
-    const user = await this.prisma.userKyc.findUnique({
+    const user = await (this.prisma as any).userKyc.findUnique({
       where: { userId },
       select: {
         userId: true,
@@ -343,7 +372,7 @@ export class KycService {
         kycManualReviewNotes: true,
         user: {
           select: {
-            profile: {
+            studentProfile: {
               select: {
                 studentCardVerifiedAt: true,
                 studentCardFaceMatchScore: true,
@@ -364,9 +393,11 @@ export class KycService {
       throw new NotFoundException('Người dùng không tồn tại');
     }
 
+    const studentProfile = user.user?.studentProfile || null;
+
     const hasEmbedding =
-      Array.isArray(user.user.faceEmbeddingRecord?.faceEmbedding) &&
-      user.user.faceEmbeddingRecord.faceEmbedding.length > 0;
+      Array.isArray(user.user?.faceEmbeddingRecord?.faceEmbedding) &&
+      user.user?.faceEmbeddingRecord?.faceEmbedding.length > 0;
 
     return {
       kycStatus: user.kycStatus,
@@ -374,14 +405,14 @@ export class KycService {
       kycRegisteredAt: user.kycRegisteredAt,
       kycVerifiedAt: user.kycVerifiedAt,
       kycLastAttemptAt: user.kycLastAttemptAt,
-      faceEmbeddingUpdatedAt: user.user.faceEmbeddingRecord?.faceEmbeddingUpdatedAt ?? null,
+      faceEmbeddingUpdatedAt: user.user?.faceEmbeddingRecord?.faceEmbeddingUpdatedAt ?? null,
       kycManualReviewStatus: user.kycManualReviewStatus,
       kycManualReviewRequestedAt: user.kycManualReviewRequestedAt,
       kycManualReviewReviewedAt: user.kycManualReviewReviewedAt,
       kycManualReviewRejectionReason: user.kycManualReviewRejectionReason,
       kycManualReviewNotes: user.kycManualReviewNotes,
-      cardVerified: Boolean(user.user.profile?.studentCardVerifiedAt),
-      cardFaceMatchScore: user.user.profile?.studentCardFaceMatchScore ?? null,
+      cardVerified: Boolean(studentProfile?.studentCardVerifiedAt),
+      cardFaceMatchScore: studentProfile?.studentCardFaceMatchScore ?? null,
     };
   }
 
@@ -390,7 +421,7 @@ export class KycService {
       throw new ForbiddenException('Chỉ sinh viên mới có thể yêu cầu duyệt KYC thủ công');
     }
 
-    const user = await this.prisma.userKyc.findUnique({
+    const user = await (this.prisma as any).userKyc.findUnique({
       where: { userId },
       select: {
         userId: true,
@@ -399,7 +430,7 @@ export class KycService {
         user: {
           select: {
             role: true,
-            profile: {
+            studentProfile: {
               select: {
                 studentCardImageUrl: true,
               },
@@ -413,7 +444,9 @@ export class KycService {
       throw new NotFoundException('Không tìm thấy hồ sơ sinh viên cần yêu cầu duyệt');
     }
 
-    if (!user.user.profile?.studentCardImageUrl) {
+    const studentProfile = user.user?.studentProfile || null;
+
+    if (!studentProfile?.studentCardImageUrl) {
       throw new BadRequestException('Thiếu dữ liệu ảnh KYC để gửi yêu cầu duyệt thủ công');
     }
 

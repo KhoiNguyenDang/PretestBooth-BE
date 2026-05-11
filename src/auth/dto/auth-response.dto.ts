@@ -6,6 +6,12 @@ export class UserResponseDto {
   id: string;
 
   @Expose()
+  studentId?: string;
+
+  @Expose()
+  lecturerId?: string;
+
+  @Expose()
   email: string;
 
   @Expose()

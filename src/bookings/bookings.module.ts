@@ -7,6 +7,7 @@ import { RealtimeModule } from '../realtime/realtime.module';
 import { PointsModule } from '../points/points.module';
 import { AuthorizationModule } from '../common/authorization/authorization.module';
 import { BoothPoliciesModule } from '../booth-policies/booth-policies.module';
+import { StudentsModule } from '../students/students.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { BoothPoliciesModule } from '../booth-policies/booth-policies.module';
     PointsModule,
     AuthorizationModule,
     BoothPoliciesModule,
+    StudentsModule,
   ],
   controllers: [BookingsController],
   providers: [BookingsService],

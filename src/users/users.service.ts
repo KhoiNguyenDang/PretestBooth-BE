@@ -25,6 +25,8 @@ import type {
 import type { Prisma, Role } from '@prisma/client';
 import { AuthorizationService } from '../common/authorization/authorization.service';
 import { MailService } from '../mail/mail.service';
+import { StudentService } from '../students/students.service';
+import { LecturerService } from '../lecturers/lecturers.service';
 import {
   LECTURER_ADMIN_PERMISSION,
   type LecturerPermissionKey,
@@ -38,6 +40,8 @@ export class UsersService {
     private readonly prisma: PrismaService,
     private readonly authorizationService: AuthorizationService,
     private readonly mailService: MailService,
+    private readonly studentService: StudentService,
+    private readonly lecturerService: LecturerService,
   ) {}
 
   private async assertStudentManagementAccess(requesterId: string, requesterRole: string) {
@@ -360,32 +364,32 @@ export class UsersService {
     return value;
   }
 
-  private buildStudentWhere(query: QueryUserDto): Prisma.UserWhereInput {
+  private buildStudentWhere(query: QueryUserDto): any {
     const { role, search, className, cohort, isLocked } = query;
-    const where: Prisma.UserWhereInput = {};
+    const where: any = {};
     const normalizedClassName = this.normalizeClassNameFilter(className);
 
     // This module is scoped to student data management.
-    where.role = role ? (role as Role) : 'STUDENT';
-    if (isLocked !== undefined) where.auth = { isLocked };
+    where.user = {
+      ...(role ? { role: role as Role } : { role: 'STUDENT' }),
+      ...(isLocked !== undefined ? { auth: { isLocked } } : {}),
+    };
     if (normalizedClassName !== undefined) {
-      where.profile =
+      where.className =
         normalizedClassName === null
-          ? { className: null }
-          : { className: { contains: normalizedClassName, mode: 'insensitive' } };
+          ? null
+          : { contains: normalizedClassName, mode: 'insensitive' };
     }
     if (cohort !== undefined) {
-      where.studentCode = {
-        startsWith: this.getStudentCodePrefixForCohort(cohort),
-      };
+      where.studentCode = { startsWith: this.getStudentCodePrefixForCohort(cohort) };
     }
 
     if (search) {
       where.OR = [
-        { email: { contains: search, mode: 'insensitive' } },
-        { name: { contains: search, mode: 'insensitive' } },
         { studentCode: { contains: search, mode: 'insensitive' } },
-        { profile: { className: { contains: search, mode: 'insensitive' } } },
+        { className: { contains: search, mode: 'insensitive' } },
+        { user: { email: { contains: search, mode: 'insensitive' } } },
+        { user: { name: { contains: search, mode: 'insensitive' } } },
       ];
     }
 
@@ -438,31 +442,28 @@ export class UsersService {
       format: query.format,
     });
 
-    const [rawUsers, total] = await Promise.all([
-      this.prisma.user.findMany({
+    const [rawStudents, total] = await Promise.all([
+      (this.prisma as any).student.findMany({
         where,
         skip,
         take: limit,
         orderBy: { createdAt: sortOrder },
         select: {
           id: true,
-          email: true,
-          name: true,
           studentCode: true,
-          role: true,
+          className: true,
+          dateOfBirth: true,
           createdAt: true,
-          auth: {
+          user: {
             select: {
+              id: true,
+              email: true,
+              name: true,
+              role: true,
               isEmailVerified: true,
               isLocked: true,
               lockedAt: true,
               lockedReason: true,
-            },
-          },
-          profile: {
-            select: {
-              className: true,
-              dateOfBirth: true,
             },
           },
           pointAccount: {
@@ -472,23 +473,24 @@ export class UsersService {
           },
         },
       }),
-      this.prisma.user.count({ where }),
+      (this.prisma as any).student.count({ where }),
     ]);
 
-    const users = rawUsers.map((u) => ({
-      id: u.id,
-      email: u.email,
-      name: u.name,
-      studentCode: u.studentCode,
-      className: u.profile?.className ?? null,
-      role: u.role,
-      isEmailVerified: u.auth?.isEmailVerified ?? false,
-      isLocked: u.auth?.isLocked ?? false,
-      lockedAt: u.auth?.lockedAt ?? null,
-      lockedReason: u.auth?.lockedReason ?? null,
-      dateOfBirth: u.profile?.dateOfBirth ?? null,
-      totalPoints: u.pointAccount?.totalPoints ?? 0,
-      createdAt: u.createdAt,
+    const users = rawStudents.map((student) => ({
+      id: student.user.id,
+      studentId: student.id,
+      email: student.user.email,
+      name: student.user.name,
+      studentCode: student.studentCode,
+      className: student.className ?? null,
+      role: student.user.role,
+      isEmailVerified: student.user.auth?.isEmailVerified ?? false,
+      isLocked: student.user.auth?.isLocked ?? false,
+      lockedAt: student.user.auth?.lockedAt ?? null,
+      lockedReason: student.user.auth?.lockedReason ?? null,
+      dateOfBirth: student.dateOfBirth ?? null,
+      totalPoints: student.pointAccount?.totalPoints ?? 0,
+      createdAt: student.createdAt,
     }));
 
     return {
@@ -504,24 +506,21 @@ export class UsersService {
     await this.assertStudentManagementAccess(requesterId, requesterRole);
 
     const where = this.buildStudentWhere(query);
-    const rawStudents = await this.prisma.user.findMany({
+    const rawStudents = await (this.prisma as any).student.findMany({
       where,
       orderBy: { createdAt: query.sortOrder || 'desc' },
       select: {
+        id: true,
         studentCode: true,
-        email: true,
-        name: true,
+        className: true,
+        dateOfBirth: true,
         createdAt: true,
-        auth: {
+        user: {
           select: {
+            email: true,
+            name: true,
             isLocked: true,
             lockedReason: true,
-          },
-        },
-        profile: {
-          select: {
-            className: true,
-            dateOfBirth: true,
           },
         },
         pointAccount: {
@@ -534,14 +533,14 @@ export class UsersService {
 
     const rows = rawStudents.map((student) => ({
       studentCode: student.studentCode || '',
-      email: student.email,
-      name: student.name || '',
-      className: student.profile?.className || '',
-      dateOfBirth: student.profile?.dateOfBirth
-        ? student.profile.dateOfBirth.toISOString().slice(0, 10)
+      email: student.user.email,
+      name: student.user.name || '',
+      className: student.className || '',
+      dateOfBirth: student.dateOfBirth
+        ? student.dateOfBirth.toISOString().slice(0, 10)
         : '',
-      status: student.auth?.isLocked ? 'LOCKED' : 'ACTIVE',
-      lockedReason: student.auth?.lockedReason || '',
+      status: student.user.isLocked ? 'LOCKED' : 'ACTIVE',
+      lockedReason: student.user.lockedReason || '',
       totalPoints: student.pointAccount?.totalPoints ?? 0,
       createdAt: student.createdAt.toISOString(),
     }));
@@ -602,27 +601,24 @@ export class UsersService {
    * Get single user
    */
   async findOne(id: string, requesterId: string, requesterRole: string) {
-    const rawUser = await this.prisma.user.findUnique({
-      where: { id },
+    const rawStudent = await (this.prisma as any).student.findUnique({
+      where: { userId: id },
       select: {
         id: true,
-        email: true,
-        name: true,
         studentCode: true,
-        role: true,
+        className: true,
+        dateOfBirth: true,
         createdAt: true,
-        auth: {
+        user: {
           select: {
+            id: true,
+            email: true,
+            name: true,
+            role: true,
             isEmailVerified: true,
             isLocked: true,
             lockedAt: true,
             lockedReason: true,
-          },
-        },
-        profile: {
-          select: {
-            className: true,
-            dateOfBirth: true,
           },
         },
         pointAccount: {
@@ -633,7 +629,7 @@ export class UsersService {
       },
     });
 
-    if (!rawUser) throw new NotFoundException('Người dùng không tồn tại');
+    if (!rawStudent) throw new NotFoundException('Người dùng không tồn tại');
 
     if (requesterRole === 'STUDENT' && requesterId !== id) {
       throw new ForbiddenException('Sinh viên chỉ có thể xem thông tin của chính mình');
@@ -643,24 +639,25 @@ export class UsersService {
       await this.assertStudentManagementAccess(requesterId, requesterRole);
     }
 
-    if (['ADMIN', 'LECTURER'].includes(requesterRole) && rawUser.role !== 'STUDENT') {
+    if (['ADMIN', 'LECTURER'].includes(requesterRole) && rawStudent.user.role !== 'STUDENT') {
       throw new ForbiddenException('Chỉ được thao tác với dữ liệu sinh viên');
     }
 
     return {
-      id: rawUser.id,
-      email: rawUser.email,
-      name: rawUser.name,
-      studentCode: rawUser.studentCode,
-      className: rawUser.profile?.className ?? null,
-      role: rawUser.role,
-      isEmailVerified: rawUser.auth?.isEmailVerified ?? false,
-      isLocked: rawUser.auth?.isLocked ?? false,
-      lockedAt: rawUser.auth?.lockedAt ?? null,
-      lockedReason: rawUser.auth?.lockedReason ?? null,
-      dateOfBirth: rawUser.profile?.dateOfBirth ?? null,
-      totalPoints: rawUser.pointAccount?.totalPoints ?? 0,
-      createdAt: rawUser.createdAt,
+      id: rawStudent.user.id,
+      studentId: rawStudent.id,
+      email: rawStudent.user.email,
+      name: rawStudent.user.name,
+      studentCode: rawStudent.studentCode,
+      className: rawStudent.className ?? null,
+      role: rawStudent.user.role,
+      isEmailVerified: rawStudent.user.auth?.isEmailVerified ?? false,
+      isLocked: rawStudent.user.auth?.isLocked ?? false,
+      lockedAt: rawStudent.user.auth?.lockedAt ?? null,
+      lockedReason: rawStudent.user.auth?.lockedReason ?? null,
+      dateOfBirth: rawStudent.dateOfBirth ?? null,
+      totalPoints: rawStudent.pointAccount?.totalPoints ?? 0,
+      createdAt: rawStudent.createdAt,
     };
   }
 

@@ -15,7 +15,11 @@ model User {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  // Domain-specific relations (optional 1-1)
+  // Domain-specific relations (optional 1-1) - Role-specific profiles
+  studentProfile           Student?           @relation("UserStudent")
+  lecturerProfile          Lecturer?          @relation("UserLecturer")
+
+  // Existing identity relations
   auth                     UserAuth?          @relation("UserAuth")
   profile                  UserProfile?       @relation("UserProfile")
   kycProfile               UserKyc?           @relation("UserKyc")
@@ -25,14 +29,14 @@ model User {
   reviewedKycProfiles      UserKyc[]          @relation("UserKycReviewer")
   assignedLecturerMetadata LecturerMetadata[] @relation("LecturerMetadataAssigner")
 
-  // Existing relations
-  bookings                   Booking[]
+  // Cross-role relations (will migrate to Student/Lecturer but kept for backward compat)
+  bookings                   Booking[]                      @relation("UserBooking")
   boothStatusLogs            BoothStatusLog[]
   createdExams               Exam[]                         @relation("ExamCreator")
-  examSessions               ExamSession[]
-  pointTransactions          PointTransaction[]
-  bookingCheckinAttempts     BookingCheckinAttempt[]
-  practiceSessions           PracticeSession[]
+  examSessions               ExamSession[]                  @relation("UserExamSession")
+  pointTransactions          PointTransaction[]             @relation("UserPointTransaction")
+  bookingCheckinAttempts     BookingCheckinAttempt[]         @relation("UserCheckinAttempt")
+  practiceSessions           PracticeSession[]              @relation("UserPracticeSession")
   createdProblems            Problem[]                      @relation("ProblemCreator")
   createdQuestions           Question[]                     @relation("QuestionCreator")
   reviewedQuestionSessions   QuestionReviewSession[]        @relation("QuestionReviewSessionReviewer")
@@ -42,6 +46,9 @@ model User {
   createdLecturerRoles       LecturerRole[]                 @relation("LecturerRoleCreator")
   proctoringEvents           ProctoringEvent[]
   submissions                Submission[]
+  
+  // Cross-role relationsfor lecturers assigning roles
+  assignedLecturerRoles      Lecturer[]                     @relation("LecturerAssigner")
 
   @@index([email])
   @@index([studentCode])
@@ -132,6 +139,57 @@ model UserFaceEmbedding {
   @@index([userId])
 }
 
+// Role-specific tables (Class Table Inheritance pattern)
+model Student {
+  id                        String    @id @default(uuid())
+  userId                    String    @unique
+  studentCode               String?   @unique
+  className                 String?
+  dateOfBirth               DateTime? @db.Date
+  studentCardImageUrl       String?
+  studentCardVerifiedAt     DateTime?
+  studentCardFaceMatchScore Float?
+  createdAt                 DateTime  @default(now())
+  updatedAt                 DateTime  @updatedAt
+
+  user User @relation("UserStudent", fields: [userId], references: [id], onDelete: Cascade)
+
+  // Relations from existing User.bookings, examSessions, etc.
+  bookings              Booking[]
+  examSessions          ExamSession[]
+  submissions           Submission[]
+  practiceSessions      PracticeSession[]
+  checkinAttempts       BookingCheckinAttempt[]
+  pointTransactions     PointTransaction[]        @relation("StudentPointTransaction")
+
+  @@index([userId])
+  @@index([studentCode])
+}
+
+model Lecturer {
+  id                           String    @id @default(uuid())
+  userId                       String    @unique
+  lecturerRoleId               String?
+  lecturerRoleAssignedAt       DateTime?
+  lecturerRoleAssignedByUserId String?
+  createdAt                    DateTime  @default(now())
+  updatedAt                    DateTime  @updatedAt
+
+  user               User          @relation("UserLecturer", fields: [userId], references: [id], onDelete: Cascade)
+  lecturerRole       LecturerRole? @relation("LecturerRole", fields: [lecturerRoleId], references: [id], onDelete: SetNull)
+  assignedByUser     User?         @relation("LecturerAssigner", fields: [lecturerRoleAssignedByUserId], references: [id], onDelete: SetNull)
+
+  // Relations from existing User tables
+  createdProblems    Problem[]       @relation("ProblemLecturerCreator")
+  createdQuestions   Question[]      @relation("QuestionLecturerCreator")
+  createdExams       Exam[]          @relation("ExamLecturerCreator")
+  reviewActions      QuestionReviewAction[]
+
+  @@index([userId])
+  @@index([lecturerRoleId])
+  @@index([lecturerRoleAssignedByUserId])
+}
+
 model LecturerMetadata {
   id                           String        @id @default(uuid())
   userId                       String        @unique
@@ -187,6 +245,7 @@ model LecturerRole {
   createdAt       DateTime                 @default(now())
   updatedAt       DateTime                 @updatedAt
   createdByUser   User?                    @relation("LecturerRoleCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  lecturers       Lecturer[]               @relation("LecturerRole")
   metadataEntries LecturerMetadata[]       @relation("LecturerMetadataRole")
   permissions     LecturerRolePermission[]
 
@@ -230,12 +289,14 @@ model Problem {
   topicId             String?
   categoryId          String?
   creatorId           String
+  lecturerId          String?  // New FK for role-based migration
   createdAt           DateTime              @default(now())
   updatedAt           DateTime              @updatedAt
   examItems           ExamItem[]            @relation("ProblemExamItems")
   practiceItems       PracticeSessionItem[]
   category            Category?             @relation(fields: [categoryId], references: [id])
   creator             User                  @relation("ProblemCreator", fields: [creatorId], references: [id])
+  lecturerCreator     Lecturer?             @relation("ProblemLecturerCreator", fields: [lecturerId], references: [id])
   subject             Subject?              @relation(fields: [subjectId], references: [id])
   topic               Topic?                @relation(fields: [topicId], references: [id])
   submissions         Submission[]
@@ -244,6 +305,7 @@ model Problem {
   @@index([difficulty])
   @@index([isPublished])
   @@index([creatorId])
+  @@index([lecturerId])
   @@index([subjectId])
   @@index([topicId])
   @@index([categoryId])
@@ -283,12 +345,15 @@ model Submission {
   errorMessage    String?
   testCaseResults Json?
   userId          String
+  studentId       String?  // New FK for role-based migration
   problemId       String
   createdAt       DateTime         @default(now())
   problem         Problem          @relation(fields: [problemId], references: [id], onDelete: Cascade)
   user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  student         Student?         @relation(fields: [studentId], references: [id], onDelete: SetNull)
 
   @@index([userId])
+  @@index([studentId])
   @@index([problemId])
   @@index([status])
   @@index([createdAt])
@@ -341,12 +406,14 @@ model Question {
   topicId        String?
   categoryId     String?
   creatorId      String
+  lecturerId     String?  // New FK for role-based migration
   createdAt      DateTime                @default(now())
   updatedAt      DateTime                @updatedAt
   examItems      ExamItem[]              @relation("QuestionExamItems")
   practiceItems  PracticeSessionItem[]
   category       Category?               @relation(fields: [categoryId], references: [id])
   creator        User                    @relation("QuestionCreator", fields: [creatorId], references: [id])
+  lecturerCreator Lecturer?              @relation("QuestionLecturerCreator", fields: [lecturerId], references: [id])
   subject        Subject                 @relation(fields: [subjectId], references: [id])
   topic          Topic?                  @relation(fields: [topicId], references: [id])
   choices        QuestionChoice[]
@@ -360,6 +427,7 @@ model Question {
   @@index([topicId])
   @@index([categoryId])
   @@index([creatorId])
+  @@index([lecturerId])
 }
 
 model QuestionReviewSession {
@@ -392,13 +460,16 @@ model QuestionReviewAction {
   status     QuestionReviewStatus
   notes      String?
   reviewedBy String
+  lecturerId String?  // New FK for role-based migration
   reviewedAt DateTime              @default(now())
   createdAt  DateTime              @default(now())
   session    QuestionReviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   reviewer   User                  @relation("QuestionReviewActionReviewer", fields: [reviewedBy], references: [id], onDelete: Cascade)
+  lecturer   Lecturer?             @relation(fields: [lecturerId], references: [id], onDelete: SetNull)
 
   @@index([sessionId])
   @@index([reviewedBy])
+  @@index([lecturerId])
   @@index([reviewedAt])
 }
 
@@ -432,6 +503,7 @@ model Exam {
   topicId                           String?
   isPublished                       Boolean        @default(false)
   creatorId                         String
+  lecturerId                        String?  // New FK for role-based migration
   createdAt                         DateTime       @default(now())
   updatedAt                         DateTime       @updatedAt
   visibility                        ExamVisibility @default(PRIVATE)
@@ -440,12 +512,14 @@ model Exam {
   allowStudentReviewResults         Boolean        @default(false)
   passingScoreAbsolute              Float?
   creator                           User           @relation("ExamCreator", fields: [creatorId], references: [id])
+  lecturerCreator                   Lecturer?      @relation("ExamLecturerCreator", fields: [lecturerId], references: [id])
   subject                           Subject?       @relation(fields: [subjectId], references: [id])
   topic                             Topic?         @relation(fields: [topicId], references: [id])
   items                             ExamItem[]
   sessions                          ExamSession[]
 
   @@index([creatorId])
+  @@index([lecturerId])
   @@index([subjectId])
   @@index([topicId])
   @@index([isPublished])
@@ -477,6 +551,7 @@ model ExamSession {
   id                          String                  @id @default(uuid())
   examId                      String
   userId                      String
+  studentId                   String?  // New FK for role-based migration
   bookingId                   String?
   isPretestSession            Boolean                 @default(false)
   pretestAttemptNumber        Int?
@@ -498,7 +573,8 @@ model ExamSession {
   createdAt                   DateTime                @default(now()) @db.Timestamptz(3)
   expiresAt                   DateTime                @default(now()) @db.Timestamptz(3)
   exam                        Exam                    @relation(fields: [examId], references: [id], onDelete: Cascade)
-  user                        User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user                        User                    @relation("UserExamSession", fields: [userId], references: [id], onDelete: Cascade)
+  student                     Student?                @relation(fields: [studentId], references: [id], onDelete: SetNull)
   booking                     Booking?                @relation("ExamSessionBooking", fields: [bookingId], references: [id], onDelete: SetNull)
   answers                     ExamSessionAnswer[]
   gradeAudits                 ExamSessionGradeAudit[]
@@ -507,6 +583,7 @@ model ExamSession {
   @@index([examId, userId])
   @@index([examId])
   @@index([userId])
+  @@index([studentId])
   @@index([status])
   @@index([resultPublicationStatus])
   @@index([expiresAt])
@@ -649,6 +726,7 @@ model SystemSetting {
 model Booking {
   id                       String        @id @default(uuid())
   userId                   String
+  studentId                String?  // New FK for role-based migration
   boothId                  String
   type                     BookingType
   date                     DateTime      @db.Date
@@ -675,10 +753,12 @@ model Booking {
   createdAt DateTime @default(now()) @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @db.Timestamptz(3)
 
-  booth Booth @relation(fields: [boothId], references: [id])
-  user  User  @relation(fields: [userId], references: [id])
+  booth   Booth    @relation(fields: [boothId], references: [id])
+  user    User     @relation("UserBooking", fields: [userId], references: [id])
+  student Student? @relation(fields: [studentId], references: [id], onDelete: SetNull)
 
   @@index([userId])
+  @@index([studentId])
   @@index([boothId, date])
   @@index([date, startTime])
   @@index([status])
@@ -690,6 +770,7 @@ model BookingCheckinAttempt {
   id               String   @id @default(uuid())
   bookingId        String
   userId           String
+  studentId        String?  // New FK for role-based migration
   similarityScore  Float
   threshold        Float    @default(0.6)
   isMatch          Boolean
@@ -699,25 +780,30 @@ model BookingCheckinAttempt {
   verifierDeviceId String?
   createdAt        DateTime @default(now()) @db.Timestamptz(3)
   booking          Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
-  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user             User     @relation("UserCheckinAttempt", fields: [userId], references: [id], onDelete: Cascade)
+  student          Student? @relation(fields: [studentId], references: [id], onDelete: SetNull)
 
   @@index([bookingId, createdAt])
   @@index([userId, createdAt])
+  @@index([studentId, createdAt])
   @@index([isMatch])
 }
 
 model PointTransaction {
   id            String    @id @default(uuid())
   userId        String
+  studentId     String?  // New FK for role-based migration
   type          PointType
   points        Int
   reason        String
   bookingId     String?
   examSessionId String?
   createdAt     DateTime  @default(now()) @db.Timestamptz(3)
-  user          User      @relation(fields: [userId], references: [id])
+  user          User      @relation("UserPointTransaction", fields: [userId], references: [id])
+  student       Student?  @relation("StudentPointTransaction", fields: [studentId], references: [id], onDelete: SetNull)
 
   @@index([userId])
+  @@index([studentId])
   @@index([type])
   @@index([createdAt])
 }
@@ -750,6 +836,7 @@ model ProctoringEvent {
 model PracticeSession {
   id               String                @id @default(uuid())
   userId           String
+  studentId        String?  // New FK for role-based migration
   bookingId        String?
   duration         Int
   totalItems       Int
@@ -763,12 +850,14 @@ model PracticeSession {
   maxScore         Float?
   status           PracticeSessionStatus @default(IN_PROGRESS)
   createdAt        DateTime              @default(now()) @db.Timestamptz(3)
-  user             User                  @relation(fields: [userId], references: [id])
+  user             User                  @relation("UserPracticeSession", fields: [userId], references: [id])
+  student          Student?              @relation(fields: [studentId], references: [id], onDelete: SetNull)
   booking          Booking?              @relation("PracticeSessionBooking", fields: [bookingId], references: [id], onDelete: SetNull)
   items            PracticeSessionItem[]
   proctoringEvents ProctoringEvent[]
 
   @@index([userId])
+  @@index([studentId])
   @@index([status])
   @@index([createdAt])
   @@index([bookingId])

@@ -21,6 +21,8 @@ import { RealtimeModule } from './realtime/realtime.module';
 import { KycModule } from './kyc/kyc.module';
 import { CheckinModule } from './checkin/checkin.module';
 import { BoothPoliciesModule } from './booth-policies/booth-policies.module';
+import { StudentsModule } from './students/students.module';
+import { LecturersModule } from './lecturers/lecturers.module';
 
 @Module({
   imports: [
@@ -46,6 +48,8 @@ import { BoothPoliciesModule } from './booth-policies/booth-policies.module';
     RealtimeModule,
     KycModule,
     CheckinModule,
+    StudentsModule,
+    LecturersModule,
   ],
 })
 export class AppModule {}

@@ -22,6 +22,7 @@ import {
 import { Prisma } from '@prisma/client';
 import { AuthorizationService } from '../common/authorization/authorization.service';
 import { CloudinaryService } from '../common/cloudinary/cloudinary.service';
+import { LecturerService } from '../lecturers/lecturers.service';
 import * as path from 'path';
 import * as ExcelJS from 'exceljs';
 import AdmZip = require('adm-zip');
@@ -44,7 +45,17 @@ export class QuestionsService {
     private readonly prisma: PrismaService,
     private readonly authorizationService: AuthorizationService,
     private readonly cloudinaryService: CloudinaryService,
+    private readonly lecturerService: LecturerService,
   ) {}
+
+  private async getLecturerIdentity(userId: string) {
+    const lecturer = await this.lecturerService.getLecturerByUserId(userId);
+    if (!lecturer) {
+      throw new NotFoundException('Giảng viên không tồn tại');
+    }
+
+    return lecturer;
+  }
 
   private looksLikeUrl(value: string): boolean {
     return /^https?:\/\//i.test(value);
@@ -935,6 +946,7 @@ export class QuestionsService {
     dto: CreateQuestionDto,
   ): Promise<QuestionDetailResponseDto> {
     await this.assertQuestionBankPermission(creatorId, userRole, 'tạo câu hỏi');
+    const lecturer = userRole === 'LECTURER' ? await this.getLecturerIdentity(creatorId) : null;
 
     // Validate subject exists
     const subject = await this.prisma.subject.findUnique({ where: { id: dto.subjectId } });
@@ -967,7 +979,8 @@ export class QuestionsService {
           subjectId: dto.subjectId,
           topicId: dto.topicId || null,
           creatorId,
-        },
+          lecturerId: lecturer?.id ?? null,
+        } as any,
       });
 
       // Create choices for SINGLE_CHOICE / MULTIPLE_CHOICE

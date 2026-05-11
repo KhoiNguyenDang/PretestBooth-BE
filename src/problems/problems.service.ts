@@ -19,12 +19,25 @@ import {
   TestCaseResponseDto,
 } from './dto/problem-response.dto';
 import { Prisma } from '@prisma/client';
+import { LecturerService } from '../lecturers/lecturers.service';
 
 type Difficulty = 'EASY' | 'MEDIUM' | 'HARD';
 
 @Injectable()
 export class ProblemsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly lecturerService: LecturerService,
+  ) {}
+
+  private async getLecturerIdentity(userId: string) {
+    const lecturer = await this.lecturerService.getLecturerByUserId(userId);
+    if (!lecturer) {
+      throw new NotFoundException('Giảng viên không tồn tại');
+    }
+
+    return lecturer;
+  }
 
   private normalizeImportHeaderText(text: string): string {
     return text
@@ -149,6 +162,8 @@ export class ProblemsService {
       throw new ForbiddenException('Chỉ giảng viên và quản trị viên mới có thể import bài tập');
     }
 
+    const lecturer = userRole === 'LECTURER' ? await this.getLecturerIdentity(creatorId) : null;
+
     if (!file) throw new BadRequestException('Vui lòng upload file CSV/Excel');
 
     const workbook = xlsx.read(file.buffer, { type: 'buffer' });
@@ -250,7 +265,8 @@ export class ProblemsService {
             subjectId,
             topicId,
             creatorId,
-          },
+            lecturerId: lecturer?.id ?? null,
+          } as any,
         });
 
         result.success++;
@@ -274,6 +290,8 @@ export class ProblemsService {
     if (!['LECTURER', 'ADMIN'].includes(userRole)) {
       throw new ForbiddenException('Chỉ giảng viên và quản trị viên mới có thể tạo bài tập');
     }
+
+    const lecturer = userRole === 'LECTURER' ? await this.getLecturerIdentity(creatorId) : null;
 
     // Check if slug already exists
     const existingProblem = await this.prisma.problem.findUnique({
@@ -305,7 +323,8 @@ export class ProblemsService {
           subjectId: dto.subjectId || null,
           topicId: dto.topicId || null,
           creatorId,
-        },
+          lecturerId: lecturer?.id ?? null,
+        } as any,
       });
 
       // Create inline test cases if provided

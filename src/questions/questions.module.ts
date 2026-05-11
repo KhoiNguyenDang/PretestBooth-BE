@@ -6,9 +6,10 @@ import { QuestionReviewService } from './question-review.service';
 import { QuestionReviewController } from './question-review.controller';
 import { AuthorizationModule } from '../common/authorization/authorization.module';
 import { CloudinaryModule } from '../common/cloudinary/cloudinary.module';
+import { LecturersModule } from '../lecturers/lecturers.module';
 
 @Module({
-  imports: [PrismaModule, AuthorizationModule, CloudinaryModule],
+  imports: [PrismaModule, AuthorizationModule, CloudinaryModule, LecturersModule],
   controllers: [QuestionsController, QuestionReviewController],
   providers: [QuestionsService, QuestionReviewService],
   exports: [QuestionsService, QuestionReviewService],
