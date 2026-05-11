@@ -10,7 +10,6 @@ model User {
   id          String   @id @default(uuid())
   email       String   @unique
   name        String?
-  studentCode String?  @unique
   role        Role     @default(STUDENT)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -21,13 +20,10 @@ model User {
 
   // Existing identity relations
   auth                     UserAuth?          @relation("UserAuth")
-  profile                  UserProfile?       @relation("UserProfile")
   kycProfile               UserKyc?           @relation("UserKyc")
   faceEmbeddingRecord      UserFaceEmbedding? @relation("UserFaceEmbedding")
-  lecturerMetadata         LecturerMetadata?  @relation("LecturerMetadata")
   pointAccount             PointAccount?      @relation("PointAccount")
   reviewedKycProfiles      UserKyc[]          @relation("UserKycReviewer")
-  assignedLecturerMetadata LecturerMetadata[] @relation("LecturerMetadataAssigner")
 
   // Cross-role relations (will migrate to Student/Lecturer but kept for backward compat)
   bookings                   Booking[]                      @relation("UserBooking")
@@ -51,7 +47,6 @@ model User {
   assignedLecturerRoles      Lecturer[]                     @relation("LecturerAssigner")
 
   @@index([email])
-  @@index([studentCode])
   @@index([role])
 }
 
@@ -75,24 +70,6 @@ model UserAuth {
   @@index([userId])
   @@index([isEmailVerified])
   @@index([isLocked])
-}
-
-model UserProfile {
-  id                        String    @id @default(uuid())
-  userId                    String    @unique
-  name                      String?
-  studentCode               String?   @unique
-  dateOfBirth               DateTime? @db.Date
-  className                 String?
-  studentCardImageUrl       String?
-  studentCardVerifiedAt     DateTime?
-  studentCardFaceMatchScore Float?
-  createdAt                 DateTime  @default(now())
-  updatedAt                 DateTime  @updatedAt
-  user                      User      @relation("UserProfile", fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId])
-  @@index([studentCode])
 }
 
 model UserKyc {
@@ -190,23 +167,6 @@ model Lecturer {
   @@index([lecturerRoleAssignedByUserId])
 }
 
-model LecturerMetadata {
-  id                           String        @id @default(uuid())
-  userId                       String        @unique
-  lecturerRoleId               String?
-  lecturerRoleAssignedAt       DateTime?
-  lecturerRoleAssignedByUserId String?
-  createdAt                    DateTime      @default(now())
-  updatedAt                    DateTime      @updatedAt
-  user                         User          @relation("LecturerMetadata", fields: [userId], references: [id], onDelete: Cascade)
-  lecturerRole                 LecturerRole? @relation("LecturerMetadataRole", fields: [lecturerRoleId], references: [id], onDelete: SetNull)
-  assignedByUser               User?         @relation("LecturerMetadataAssigner", fields: [lecturerRoleAssignedByUserId], references: [id], onDelete: SetNull)
-
-  @@index([userId])
-  @@index([lecturerRoleId])
-  @@index([lecturerRoleAssignedByUserId])
-}
-
 model PointAccount {
   id          String   @id @default(uuid())
   userId      String   @unique
@@ -246,7 +206,6 @@ model LecturerRole {
   updatedAt       DateTime                 @updatedAt
   createdByUser   User?                    @relation("LecturerRoleCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
   lecturers       Lecturer[]               @relation("LecturerRole")
-  metadataEntries LecturerMetadata[]       @relation("LecturerMetadataRole")
   permissions     LecturerRolePermission[]
 
   @@index([priority])

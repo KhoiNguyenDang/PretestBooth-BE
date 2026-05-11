@@ -1,3 +1,12 @@
+-- Drop duplicate legacy identity columns and tables removed from Prisma schema
+DROP VIEW IF EXISTS "View_User_Student";
+DROP VIEW IF EXISTS "View_User_Lecturer";
+
+ALTER TABLE "User" DROP COLUMN IF EXISTS "studentCode";
+
+DROP TABLE IF EXISTS "UserProfile";
+DROP TABLE IF EXISTS "LecturerMetadata";
+
 -- Drop legacy auth fields (moved to UserAuth table)
 ALTER TABLE "User" DROP COLUMN IF EXISTS "password";
 ALTER TABLE "User" DROP COLUMN IF EXISTS "refreshToken";
@@ -50,6 +59,7 @@ ALTER TABLE "User" DROP COLUMN IF EXISTS "faceEmbeddingUpdatedAt";
 ALTER TABLE "User" DROP COLUMN IF EXISTS "totalPoints";
 
 -- Drop legacy indexes that reference dropped columns
+DROP INDEX IF EXISTS "User_studentCode_key";
 DROP INDEX IF EXISTS "User_kycStatus_idx";
 DROP INDEX IF EXISTS "User_kycManualReviewStatus_idx";
 DROP INDEX IF EXISTS "User_kycManualReviewRequestedAt_idx";

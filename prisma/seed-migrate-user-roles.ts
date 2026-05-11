@@ -26,7 +26,7 @@ async function migrateUserRolesToSubtables() {
     console.log('📊 Step 1: Migrating STUDENT users...');
     const studentUsers = await prisma.user.findMany({
       where: { role: 'STUDENT' },
-      include: { profile: true },
+      include: { studentProfile: true },
     });
 
     console.log(`   Found ${studentUsers.length} STUDENT users to migrate`);
@@ -39,20 +39,20 @@ async function migrateUserRolesToSubtables() {
           create: {
             id: studentId,
             userId: user.id,
-            studentCode: user.profile?.studentCode || user.studentCode,
-            className: user.profile?.className,
-            dateOfBirth: user.profile?.dateOfBirth,
-            studentCardImageUrl: user.profile?.studentCardImageUrl,
-            studentCardVerifiedAt: user.profile?.studentCardVerifiedAt,
-            studentCardFaceMatchScore: user.profile?.studentCardFaceMatchScore,
+            studentCode: user.studentProfile?.studentCode,
+            className: user.studentProfile?.className,
+            dateOfBirth: user.studentProfile?.dateOfBirth,
+            studentCardImageUrl: user.studentProfile?.studentCardImageUrl,
+            studentCardVerifiedAt: user.studentProfile?.studentCardVerifiedAt,
+            studentCardFaceMatchScore: user.studentProfile?.studentCardFaceMatchScore,
           },
           update: {
-            studentCode: user.profile?.studentCode || user.studentCode,
-            className: user.profile?.className,
-            dateOfBirth: user.profile?.dateOfBirth,
-            studentCardImageUrl: user.profile?.studentCardImageUrl,
-            studentCardVerifiedAt: user.profile?.studentCardVerifiedAt,
-            studentCardFaceMatchScore: user.profile?.studentCardFaceMatchScore,
+            studentCode: user.studentProfile?.studentCode,
+            className: user.studentProfile?.className,
+            dateOfBirth: user.studentProfile?.dateOfBirth,
+            studentCardImageUrl: user.studentProfile?.studentCardImageUrl,
+            studentCardVerifiedAt: user.studentProfile?.studentCardVerifiedAt,
+            studentCardFaceMatchScore: user.studentProfile?.studentCardFaceMatchScore,
           },
         });
       } catch (error) {
@@ -69,14 +69,14 @@ async function migrateUserRolesToSubtables() {
     console.log('📊 Step 2: Migrating LECTURER users...');
     const lecturerUsers = await prisma.user.findMany({
       where: { role: 'LECTURER' },
-      include: { lecturerMetadata: true },
+      include: { lecturerProfile: true },
     });
 
     console.log(`   Found ${lecturerUsers.length} LECTURER users to migrate`);
 
     for (const user of lecturerUsers) {
       const lecturerId = uuidv4();
-      const metadata = user.lecturerMetadata;
+      const metadata = user.lecturerProfile;
 
       try {
         await prismaAny.lecturer.upsert({

@@ -2308,7 +2308,7 @@ export class ExamsService {
             kycProfile: {
               select: { kycFaceImageUrl: true },
             },
-            profile: {
+            studentProfile: {
               select: { studentCardImageUrl: true },
             },
           },
@@ -2365,7 +2365,7 @@ export class ExamsService {
             fallbackAppliedAt: session.booking?.fallbackAppliedAt ?? null,
             fallbackEvidenceImageUrl: session.booking?.fallbackEvidenceImageUrl ?? null,
             registeredFaceImageUrl: session.user.kycProfile?.kycFaceImageUrl ?? null,
-            studentCardImageUrl: session.user.profile?.studentCardImageUrl ?? null,
+            studentCardImageUrl: session.user.studentProfile?.studentCardImageUrl ?? null,
           })
         : null;
     const detailMessage = canViewItemDetails

@@ -242,10 +242,9 @@ async function main() {
         } as any,
       });
 
-      await tx.userProfile.upsert({
+      await tx.student.upsert({
         where: { userId: user.id },
         update: {
-          name: user.name,
           studentCode: user.studentCode,
           dateOfBirth: parseDate(user.dateOfBirth),
           className: user.className,
@@ -257,7 +256,6 @@ async function main() {
         } as any,
         create: {
           userId: user.id,
-          name: user.name,
           studentCode: user.studentCode,
           dateOfBirth: parseDate(user.dateOfBirth),
           className: user.className,
@@ -351,7 +349,7 @@ async function main() {
       });
 
       if (user.lecturerRoleId || user.lecturerRoleAssignedAt || user.lecturerRoleAssignedByUserId) {
-        await tx.lecturerMetadata.upsert({
+        await tx.lecturer.upsert({
           where: { userId: user.id },
           update: {
             lecturerRoleId: user.lecturerRoleId,

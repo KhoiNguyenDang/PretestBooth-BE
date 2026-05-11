@@ -438,7 +438,9 @@ export class SubmissionsService {
                 id: true,
                 name: true,
                 email: true,
-                studentCode: true,
+                studentProfile: {
+                  select: { studentCode: true },
+                },
               },
             },
             problem: {
@@ -472,7 +474,7 @@ export class SubmissionsService {
           userId: row.userId,
           userName: row.user?.name || null,
           userEmail: row.user?.email || null,
-          studentCode: row.user?.studentCode || null,
+          studentCode: row.user?.studentProfile?.studentCode || null,
           status: row.status,
           language: row.language,
           passed: row.status === 'PENDING' ? null : row.status === 'ACCEPTED',
@@ -524,7 +526,9 @@ export class SubmissionsService {
               id: true,
               name: true,
               email: true,
-              studentCode: true,
+              studentProfile: {
+                select: { studentCode: true },
+              },
             },
           },
         },
@@ -550,7 +554,7 @@ export class SubmissionsService {
         userId: row.userId,
         userName: row.user?.name || null,
         userEmail: row.user?.email || null,
-        studentCode: row.user?.studentCode || null,
+        studentCode: row.user?.studentProfile?.studentCode || null,
         status: row.status,
         language: null,
         passed: row.passed,
@@ -653,7 +657,11 @@ export class SubmissionsService {
           select: { id: true, title: true, slug: true, difficulty: true },
         },
         user: {
-          select: { id: true, email: true, studentCode: true },
+          select: {
+            id: true,
+            email: true,
+            studentProfile: { select: { studentCode: true } },
+          },
         },
       },
     });
@@ -671,7 +679,10 @@ export class SubmissionsService {
       ...submission,
       testCaseResults: submission.testCaseResults as TestCaseResultJson[] | null,
       problem: submission.problem,
-      user: submission.user,
+      user: {
+        ...submission.user,
+        studentCode: submission.user.studentProfile?.studentCode ?? null,
+      },
     });
   }
 

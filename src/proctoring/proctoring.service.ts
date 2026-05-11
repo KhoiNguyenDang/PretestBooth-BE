@@ -180,7 +180,16 @@ export class ProctoringService {
 
     let session: any = await this.prisma.examSession.findUnique({
       where: { id: sessionId },
-      select: { status: true, score: true, user: { select: { name: true, studentCode: true } } },
+      select: {
+        status: true,
+        score: true,
+        user: {
+          select: {
+            name: true,
+            studentProfile: { select: { studentCode: true } },
+          },
+        },
+      },
     });
 
     let sessionType = 'EXAM';
@@ -194,7 +203,16 @@ export class ProctoringService {
 
       session = await this.prisma.practiceSession.findUnique({
         where: { id: sessionId },
-        select: { status: true, score: true, user: { select: { name: true, studentCode: true } } },
+        select: {
+          status: true,
+          score: true,
+          user: {
+            select: {
+              name: true,
+              studentProfile: { select: { studentCode: true } },
+            },
+          },
+        },
       });
 
       sessionType = 'PRACTICE';
@@ -203,6 +221,14 @@ export class ProctoringService {
     if (!session) {
       throw new NotFoundException('Phiên làm bài không tồn tại');
     }
+
+    session = {
+      ...session,
+      user: {
+        ...session.user,
+        studentCode: session.user?.studentProfile?.studentCode ?? null,
+      },
+    };
 
     const totalSeverity = events.reduce((sum, e) => sum + e.warningLevel, 0);
 
