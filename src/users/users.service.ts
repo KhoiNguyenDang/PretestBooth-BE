@@ -460,15 +460,19 @@ export class UsersService {
               email: true,
               name: true,
               role: true,
-              isEmailVerified: true,
-              isLocked: true,
-              lockedAt: true,
-              lockedReason: true,
-            },
-          },
-          pointAccount: {
-            select: {
-              totalPoints: true,
+              auth: {
+                select: {
+                  isEmailVerified: true,
+                  isLocked: true,
+                  lockedAt: true,
+                  lockedReason: true,
+                },
+              },
+              pointAccount: {
+                select: {
+                  totalPoints: true,
+                },
+              },
             },
           },
         },
@@ -489,7 +493,7 @@ export class UsersService {
       lockedAt: student.user.auth?.lockedAt ?? null,
       lockedReason: student.user.auth?.lockedReason ?? null,
       dateOfBirth: student.dateOfBirth ?? null,
-      totalPoints: student.pointAccount?.totalPoints ?? 0,
+      totalPoints: student.user.pointAccount?.totalPoints ?? 0,
       createdAt: student.createdAt,
     }));
 
@@ -519,13 +523,17 @@ export class UsersService {
           select: {
             email: true,
             name: true,
-            isLocked: true,
-            lockedReason: true,
-          },
-        },
-        pointAccount: {
-          select: {
-            totalPoints: true,
+            auth: {
+              select: {
+                isLocked: true,
+                lockedReason: true,
+              },
+            },
+            pointAccount: {
+              select: {
+                totalPoints: true,
+              },
+            },
           },
         },
       },
@@ -539,9 +547,9 @@ export class UsersService {
       dateOfBirth: student.dateOfBirth
         ? student.dateOfBirth.toISOString().slice(0, 10)
         : '',
-      status: student.user.isLocked ? 'LOCKED' : 'ACTIVE',
-      lockedReason: student.user.lockedReason || '',
-      totalPoints: student.pointAccount?.totalPoints ?? 0,
+      status: student.user.auth?.isLocked ? 'LOCKED' : 'ACTIVE',
+      lockedReason: student.user.auth?.lockedReason || '',
+      totalPoints: student.user.pointAccount?.totalPoints ?? 0,
       createdAt: student.createdAt.toISOString(),
     }));
 
@@ -615,15 +623,19 @@ export class UsersService {
             email: true,
             name: true,
             role: true,
-            isEmailVerified: true,
-            isLocked: true,
-            lockedAt: true,
-            lockedReason: true,
-          },
-        },
-        pointAccount: {
-          select: {
-            totalPoints: true,
+            auth: {
+              select: {
+                isEmailVerified: true,
+                isLocked: true,
+                lockedAt: true,
+                lockedReason: true,
+              },
+            },
+            pointAccount: {
+              select: {
+                totalPoints: true,
+              },
+            },
           },
         },
       },
@@ -656,7 +668,7 @@ export class UsersService {
       lockedAt: rawStudent.user.auth?.lockedAt ?? null,
       lockedReason: rawStudent.user.auth?.lockedReason ?? null,
       dateOfBirth: rawStudent.dateOfBirth ?? null,
-      totalPoints: rawStudent.pointAccount?.totalPoints ?? 0,
+      totalPoints: rawStudent.user.pointAccount?.totalPoints ?? 0,
       createdAt: rawStudent.createdAt,
     };
   }

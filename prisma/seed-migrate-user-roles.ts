@@ -1,7 +1,11 @@
+import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
+import { PrismaPg } from '@prisma/adapter-pg';
+import { Pool } from 'pg';
 import { v4 as uuidv4 } from 'uuid';
 
-const prisma = new PrismaClient();
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const prisma = new PrismaClient({ adapter: new PrismaPg(pool) });
 const prismaAny = prisma as any;
 
 /**
@@ -30,10 +34,19 @@ async function migrateUserRolesToSubtables() {
     for (const user of studentUsers) {
       const studentId = uuidv4();
       try {
-        await prismaAny.student.create({
-          data: {
+        await prismaAny.student.upsert({
+          where: { userId: user.id },
+          create: {
             id: studentId,
             userId: user.id,
+            studentCode: user.profile?.studentCode || user.studentCode,
+            className: user.profile?.className,
+            dateOfBirth: user.profile?.dateOfBirth,
+            studentCardImageUrl: user.profile?.studentCardImageUrl,
+            studentCardVerifiedAt: user.profile?.studentCardVerifiedAt,
+            studentCardFaceMatchScore: user.profile?.studentCardFaceMatchScore,
+          },
+          update: {
             studentCode: user.profile?.studentCode || user.studentCode,
             className: user.profile?.className,
             dateOfBirth: user.profile?.dateOfBirth,
@@ -66,10 +79,16 @@ async function migrateUserRolesToSubtables() {
       const metadata = user.lecturerMetadata;
 
       try {
-        await prismaAny.lecturer.create({
-          data: {
+        await prismaAny.lecturer.upsert({
+          where: { userId: user.id },
+          create: {
             id: lecturerId,
             userId: user.id,
+            lecturerRoleId: metadata?.lecturerRoleId,
+            lecturerRoleAssignedAt: metadata?.lecturerRoleAssignedAt,
+            lecturerRoleAssignedByUserId: metadata?.lecturerRoleAssignedByUserId,
+          },
+          update: {
             lecturerRoleId: metadata?.lecturerRoleId,
             lecturerRoleAssignedAt: metadata?.lecturerRoleAssignedAt,
             lecturerRoleAssignedByUserId: metadata?.lecturerRoleAssignedByUserId,
@@ -96,11 +115,6 @@ async function migrateUserRolesToSubtables() {
     students.forEach((s) => studentMap.set(s.userId, s.id));
 
     // Backfill Booking.studentId
-    const bookingUpdates = await prismaAny.booking.updateMany({
-      where: { userId: { in: Array.from(studentMap.keys()) }, studentId: null },
-      data: { studentId: null }, // This won't work for batch, need to loop
-    });
-    // Actually, we need to update individually or use raw SQL
     let bookingCount = 0;
     for (const [userId, studentId] of studentMap) {
       const updated = await prismaAny.booking.updateMany({
@@ -235,22 +249,20 @@ async function migrateUserRolesToSubtables() {
     const lecturerCount = await prismaAny.lecturer.count();
     console.log(`   Total Lecturer records: ${lecturerCount}`);
 
-    // Check for Students without userId relation (should be 0)
+    const allUserIds = (await prisma.user.findMany({ select: { id: true } })).map((u) => u.id);
+
+    // Check for Students without valid user relation (should be 0)
     const brokenStudents = await prismaAny.student.count({
       where: {
-        user: {
-          is: null,
-        },
+        userId: { notIn: allUserIds },
       },
     });
     console.log(`   Broken Student relations (should be 0): ${brokenStudents}`);
 
-    // Check for Lecturers without userId relation (should be 0)
+    // Check for Lecturers without valid user relation (should be 0)
     const brokenLecturers = await prismaAny.lecturer.count({
       where: {
-        user: {
-          is: null,
-        },
+        userId: { notIn: allUserIds },
       },
     });
     console.log(`   Broken Lecturer relations (should be 0): ${brokenLecturers}`);
@@ -275,6 +287,7 @@ async function migrateUserRolesToSubtables() {
     process.exit(1);
   } finally {
     await prismaAny.$disconnect();
+    await pool.end();
   }
 }
 
