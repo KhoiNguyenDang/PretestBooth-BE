@@ -1239,7 +1239,6 @@ async function main() {
     where: { email: 'admin@iuh.edu.vn' },
     update: {
       name: 'System Admin',
-      studentCode: '00000000',
       role: 'ADMIN',
       auth: { upsert: { update: { password: adminPasswordHash, isEmailVerified: true, isLocked: false }, create: { password: adminPasswordHash, isEmailVerified: true, isLocked: false } } },
     },
@@ -1247,7 +1246,6 @@ async function main() {
       id: IDS.users.admin,
       email: 'admin@iuh.edu.vn',
       name: 'System Admin',
-      studentCode: '00000000',
       role: 'ADMIN',
       auth: { create: { password: adminPasswordHash, isEmailVerified: true, isLocked: false } },
     },
@@ -1267,19 +1265,18 @@ async function main() {
     where: { email: '12345678.nguyen@teacher.iuh.edu.vn' },
     update: {
       name: 'Nguyen Van Giang Vien',
-      studentCode: '12345678',
+      // migrate studentCode into lecturerProfile (legacy studentCode removed)
       role: 'LECTURER',
       auth: { upsert: { update: { password: lecturerPasswordHash, isEmailVerified: true, isLocked: false }, create: { password: lecturerPasswordHash, isEmailVerified: true, isLocked: false } } },
-      lecturerMetadata: { upsert: { update: { lecturerRoleId: lecturerSuperAdminRole.id, lecturerRoleAssignedByUserId: admin.id }, create: { lecturerRoleId: lecturerSuperAdminRole.id, lecturerRoleAssignedByUserId: admin.id } } },
+      lecturerProfile: { upsert: { update: { lecturerRoleId: lecturerSuperAdminRole.id, lecturerRoleAssignedByUserId: admin.id }, create: { lecturerRoleId: lecturerSuperAdminRole.id, lecturerRoleAssignedByUserId: admin.id } } },
     },
     create: {
       id: IDS.users.lecturerSuperAdmin,
       email: '12345678.nguyen@teacher.iuh.edu.vn',
       name: 'Nguyen Van Giang Vien',
-      studentCode: '12345678',
       role: 'LECTURER',
       auth: { create: { password: lecturerPasswordHash, isEmailVerified: true, isLocked: false } },
-      lecturerMetadata: { create: { lecturerRoleId: lecturerSuperAdminRole.id, lecturerRoleAssignedByUserId: admin.id } },
+      lecturerProfile: { create: { lecturerRoleId: lecturerSuperAdminRole.id, lecturerRoleAssignedByUserId: admin.id } },
     },
   });
 
@@ -1287,19 +1284,17 @@ async function main() {
     where: { email: '23456789.tran@teacher.iuh.edu.vn' },
     update: {
       name: 'Tran Thi Giang Vien',
-      studentCode: '23456789',
       role: 'LECTURER',
       auth: { upsert: { update: { password: lecturerPasswordHash, isEmailVerified: true, isLocked: false }, create: { password: lecturerPasswordHash, isEmailVerified: true, isLocked: false } } },
-      lecturerMetadata: { upsert: { update: { lecturerRoleId: lecturerExamManagerRole.id, lecturerRoleAssignedByUserId: admin.id }, create: { lecturerRoleId: lecturerExamManagerRole.id, lecturerRoleAssignedByUserId: admin.id } } },
+      lecturerProfile: { upsert: { update: { lecturerRoleId: lecturerExamManagerRole.id, lecturerRoleAssignedByUserId: admin.id }, create: { lecturerRoleId: lecturerExamManagerRole.id, lecturerRoleAssignedByUserId: admin.id } } },
     },
     create: {
       id: IDS.users.lecturerExamManager,
       email: '23456789.tran@teacher.iuh.edu.vn',
       name: 'Tran Thi Giang Vien',
-      studentCode: '23456789',
       role: 'LECTURER',
       auth: { create: { password: lecturerPasswordHash, isEmailVerified: true, isLocked: false } },
-      lecturerMetadata: { create: { lecturerRoleId: lecturerExamManagerRole.id, lecturerRoleAssignedByUserId: admin.id } },
+      lecturerProfile: { create: { lecturerRoleId: lecturerExamManagerRole.id, lecturerRoleAssignedByUserId: admin.id } },
     },
   });
 
@@ -1311,10 +1306,11 @@ async function main() {
     where: { email: '22000001@student.iuh.edu.vn' },
     update: {
       name: 'Student Verified',
-      studentCode: '22000001',
+      // studentCode now stored in `studentProfile`
       role: 'STUDENT',
       auth: { upsert: { update: { password: studentPasswordHash, isEmailVerified: true, isLocked: false }, create: { password: studentPasswordHash, isEmailVerified: true, isLocked: false } } },
       profile: { upsert: { update: { className: 'DHKTPM18A', dateOfBirth: new Date('2004-01-15T00:00:00.000Z') }, create: { className: 'DHKTPM18A', dateOfBirth: new Date('2004-01-15T00:00:00.000Z') } } },
+      studentProfile: { upsert: { update: { studentCode: '22000001' }, create: { studentCode: '22000001' } } },
       kycProfile: { upsert: { update: { kycStatus: 'VERIFIED', kycRegisteredAt: daysAgo(30), kycVerifiedAt: daysAgo(29), kycLastAttemptAt: daysAgo(29), kycConsentVersion: 'v1', kycConsentedAt: daysAgo(30) }, create: { kycStatus: 'VERIFIED', kycRegisteredAt: daysAgo(30), kycVerifiedAt: daysAgo(29), kycLastAttemptAt: daysAgo(29), kycConsentVersion: 'v1', kycConsentedAt: daysAgo(30) } } },
       faceEmbeddingRecord: { upsert: { update: { faceEmbedding: verifiedEmbedding, faceEmbeddingModel: 'arcface-r100', faceEmbeddingVersion: 'seed-v1', faceEmbeddingNorm: 1, faceEmbeddingUpdatedAt: daysAgo(29) }, create: { faceEmbedding: verifiedEmbedding, faceEmbeddingModel: 'arcface-r100', faceEmbeddingVersion: 'seed-v1', faceEmbeddingNorm: 1, faceEmbeddingUpdatedAt: daysAgo(29) } } },
     },
@@ -1322,10 +1318,10 @@ async function main() {
       id: IDS.users.studentVerified,
       email: '22000001@student.iuh.edu.vn',
       name: 'Student Verified',
-      studentCode: '22000001',
       role: 'STUDENT',
       auth: { create: { password: studentPasswordHash, isEmailVerified: true, isLocked: false } },
       profile: { create: { className: 'DHKTPM18A', dateOfBirth: new Date('2004-01-15T00:00:00.000Z') } },
+      studentProfile: { create: { studentCode: '22000001' } },
       kycProfile: { create: { kycStatus: 'VERIFIED', kycRegisteredAt: daysAgo(30), kycVerifiedAt: daysAgo(29), kycLastAttemptAt: daysAgo(29), kycConsentVersion: 'v1', kycConsentedAt: daysAgo(30) } },
       faceEmbeddingRecord: { create: { faceEmbedding: verifiedEmbedding, faceEmbeddingModel: 'arcface-r100', faceEmbeddingVersion: 'seed-v1', faceEmbeddingNorm: 1, faceEmbeddingUpdatedAt: daysAgo(29) } },
       pointAccount: { create: {} },
@@ -1336,20 +1332,21 @@ async function main() {
     where: { email: '22000002@student.iuh.edu.vn' },
     update: {
       name: 'Student Pending KYC',
-      studentCode: '22000002',
+      // studentCode now stored in `studentProfile`
       role: 'STUDENT',
       auth: { upsert: { update: { password: studentPasswordHash, isEmailVerified: true, isLocked: false }, create: { password: studentPasswordHash, isEmailVerified: true, isLocked: false } } },
       profile: { upsert: { update: { className: 'DHKTPM18B', dateOfBirth: new Date('2004-05-20T00:00:00.000Z') }, create: { className: 'DHKTPM18B', dateOfBirth: new Date('2004-05-20T00:00:00.000Z') } } },
+      studentProfile: { upsert: { update: { studentCode: '22000002' }, create: { studentCode: '22000002' } } },
       kycProfile: { upsert: { update: { kycStatus: 'NOT_STARTED' }, create: { kycStatus: 'NOT_STARTED' } } },
     },
     create: {
       id: IDS.users.studentPending,
       email: '22000002@student.iuh.edu.vn',
       name: 'Student Pending KYC',
-      studentCode: '22000002',
       role: 'STUDENT',
       auth: { create: { password: studentPasswordHash, isEmailVerified: true, isLocked: false } },
       profile: { create: { className: 'DHKTPM18B', dateOfBirth: new Date('2004-05-20T00:00:00.000Z') } },
+      studentProfile: { create: { studentCode: '22000002' } },
       kycProfile: { create: { kycStatus: 'NOT_STARTED' } },
       pointAccount: { create: {} },
     },

@@ -373,7 +373,7 @@ export class BookingsService {
         orderBy: { startTime: sortOrder },
         include: {
           booth: { select: { id: true, name: true, location: true } },
-          user: { select: { id: true, email: true, name: true, studentCode: true } },
+          user: { select: { id: true, email: true, name: true } },
           student: { select: { id: true, studentCode: true, className: true } },
         },
       }),
@@ -440,7 +440,7 @@ export class BookingsService {
       where.OR = [
         { user: { name: textFilter } },
         { user: { email: textFilter } },
-        { user: { studentCode: textFilter } },
+        { student: { studentCode: textFilter } },
         { booth: { name: textFilter } },
         { booth: { code: textFilter } },
       ];
@@ -460,6 +460,10 @@ export class BookingsService {
               id: true,
               name: true,
               email: true,
+            },
+          },
+          student: {
+            select: {
               studentCode: true,
             },
           },
@@ -534,7 +538,7 @@ export class BookingsService {
         userId: booking.userId,
         studentName: booking.user.name,
         studentEmail: booking.user.email,
-        studentCode: booking.user.studentCode,
+        studentCode: booking.student?.studentCode ?? null,
         bookingType: booking.type,
         status: booking.status,
         checkedInAt: booking.checkedInAt,

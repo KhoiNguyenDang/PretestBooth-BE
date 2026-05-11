@@ -62,7 +62,7 @@ export class AuthorizationService {
   }
 
   async getPermissionSnapshotForLecturer(lecturerId: string): Promise<LecturerPermissionSnapshot> {
-    const [legacyLecturer, lecturerMetadata] = await Promise.all([
+    const [legacyLecturer, lecturerProfile] = await Promise.all([
       this.prisma.user.findUnique({
         where: { id: lecturerId },
         select: {
@@ -73,7 +73,7 @@ export class AuthorizationService {
           },
         },
       }),
-      this.prisma.lecturerMetadata.findUnique({
+      (this.prisma as any).lecturer.findUnique({
         where: { userId: lecturerId },
         select: {
           userId: true,
@@ -110,7 +110,7 @@ export class AuthorizationService {
     let lecturerRole: LecturerRoleSummary | null = null;
     let rolePermissions: LecturerPermissionKey[] = [];
 
-    const roleRecord = lecturerMetadata?.lecturerRole;
+    const roleRecord = lecturerProfile?.lecturerRole;
 
     if (roleRecord) {
       lecturerRole = {
@@ -124,9 +124,9 @@ export class AuthorizationService {
       rolePermissions = roleRecord.permissions.map(
         (item) => item.permission as LecturerPermissionKey,
       );
-    } else if (lecturerMetadata?.lecturerRoleId) {
+    } else if (lecturerProfile?.lecturerRoleId) {
       const fallbackRoleRows = await this.prisma.lecturerRole.findUnique({
-        where: { id: lecturerMetadata.lecturerRoleId },
+        where: { id: lecturerProfile.lecturerRoleId },
         select: {
           id: true,
           code: true,

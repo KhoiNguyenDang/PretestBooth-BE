@@ -90,7 +90,11 @@ export class PointsService {
             id: true,
             name: true,
             email: true,
-            studentCode: true,
+            studentProfile: {
+              select: {
+                studentCode: true,
+              },
+            },
           },
         },
       },
@@ -101,7 +105,7 @@ export class PointsService {
       id: pa.user.id,
       name: pa.user.name,
       email: pa.user.email,
-      studentCode: pa.user.studentCode,
+      studentCode: pa.user.studentProfile?.studentCode ?? null,
       totalPoints: pa.totalPoints,
     }));
   }

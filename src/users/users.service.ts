@@ -188,7 +188,7 @@ export class UsersService {
     createdAt: Date;
     updatedAt: Date;
     _count?: {
-      metadataEntries?: number;
+      lecturers?: number;
     };
     permissions?: { permission: LecturerPermissionKey }[];
   }) {
@@ -204,7 +204,7 @@ export class UsersService {
       createdAt: record.createdAt,
       updatedAt: record.updatedAt,
       permissions,
-      memberCount: record._count?.metadataEntries ?? 0,
+      memberCount: record._count?.lecturers ?? 0,
     };
   }
 
@@ -219,7 +219,7 @@ export class UsersService {
     } | null;
     createdAt: Date;
     lecturerPermissions: { permission: LecturerPermissionKey }[];
-    lecturerMetadata?: {
+    lecturerProfile?: {
       lecturerRole: {
         id: string;
         code: string;
@@ -231,8 +231,8 @@ export class UsersService {
     } | null;
   }) {
     const individualPermissions = record.lecturerPermissions.map((item) => item.permission);
-    const rolePermissions = record.lecturerMetadata?.lecturerRole
-      ? record.lecturerMetadata.lecturerRole.permissions.map((item) => item.permission)
+    const rolePermissions = record.lecturerProfile?.lecturerRole
+      ? record.lecturerProfile.lecturerRole.permissions.map((item) => item.permission)
       : [];
     const permissions = this.mergePermissions(individualPermissions, rolePermissions);
 
@@ -248,13 +248,13 @@ export class UsersService {
       permissions,
       individualPermissions,
       rolePermissions,
-      lecturerRole: record.lecturerMetadata?.lecturerRole
+      lecturerRole: record.lecturerProfile?.lecturerRole
         ? {
-            id: record.lecturerMetadata.lecturerRole.id,
-            code: record.lecturerMetadata.lecturerRole.code,
-            name: record.lecturerMetadata.lecturerRole.name,
-            priority: record.lecturerMetadata.lecturerRole.priority,
-            isActive: record.lecturerMetadata.lecturerRole.isActive,
+            id: record.lecturerProfile.lecturerRole.id,
+            code: record.lecturerProfile.lecturerRole.code,
+            name: record.lecturerProfile.lecturerRole.name,
+            priority: record.lecturerProfile.lecturerRole.priority,
+            isActive: record.lecturerProfile.lecturerRole.isActive,
           }
         : null,
       isLecturerAdmin: permissions.includes(LECTURER_ADMIN_PERMISSION),
@@ -285,7 +285,7 @@ export class UsersService {
             select: { permission: true },
             orderBy: { permission: 'asc' },
           },
-          _count: { select: { metadataEntries: true } },
+          _count: { select: { lecturers: true } },
         },
       });
 
@@ -299,7 +299,7 @@ export class UsersService {
     const requester = await this.prisma.user.findUnique({
       where: { id: requesterId },
       select: {
-        lecturerMetadata: {
+        lecturerProfile: {
           select: {
             lecturerRole: {
               select: {
@@ -316,8 +316,8 @@ export class UsersService {
       isActive: true,
     };
 
-    if (requester?.lecturerMetadata?.lecturerRole) {
-      where.priority = { gt: requester.lecturerMetadata.lecturerRole.priority };
+    if (requester?.lecturerProfile?.lecturerRole) {
+      where.priority = { gt: requester.lecturerProfile.lecturerRole.priority };
     } else {
       const topRolePriority = await this.getTopActiveLecturerRolePriority();
       if (topRolePriority !== null) {
@@ -333,7 +333,7 @@ export class UsersService {
           select: { permission: true },
           orderBy: { permission: 'asc' },
         },
-        _count: { select: { metadataEntries: true } },
+        _count: { select: { lecturers: true } },
       },
     });
 
@@ -683,15 +683,19 @@ export class UsersService {
       throw new BadRequestException('Chỉ được tạo tài khoản với vai trò STUDENT');
     }
 
-    const existing = await this.prisma.user.findFirst({
-      where: {
-        OR: [{ email: dto.email }, ...(dto.studentCode ? [{ studentCode: dto.studentCode }] : [])],
-      },
-    });
+    const existing = await this.prisma.user.findUnique({ where: { email: dto.email } });
+    const existingStudentCode = dto.studentCode
+      ? await (this.prisma as any).student.findUnique({
+          where: { studentCode: dto.studentCode },
+          select: { id: true },
+        })
+      : null;
 
     if (existing) {
       if (existing.email === dto.email) throw new ConflictException('Email đã tồn tại');
-      if (existing.studentCode === dto.studentCode) throw new ConflictException('MSSV đã tồn tại');
+    }
+    if (existingStudentCode) {
+      throw new ConflictException('MSSV đã tồn tại');
     }
 
     // Default password logic based on project spec
@@ -710,19 +714,17 @@ export class UsersService {
         email: dto.email,
         name: dto.name,
         role: dto.role as Role,
-        studentCode: dto.studentCode,
+        studentProfile: {
+          create: {
+            studentCode: dto.studentCode,
+            className: dto.className || null,
+            dateOfBirth: dobDate,
+          },
+        },
         auth: {
           create: {
             password: hashedPassword,
             isEmailVerified: true, // Created by admin = verified
-          },
-        },
-        profile: {
-          create: {
-            name: dto.name,
-            studentCode: dto.studentCode,
-            className: dto.role === 'STUDENT' ? dto.className || null : null,
-            dateOfBirth: dobDate,
           },
         },
         pointAccount: {
@@ -735,7 +737,7 @@ export class UsersService {
       await this.mailService.sendStudentAccountCredentialsEmail({
         email: user.email,
         name: user.name,
-        studentCode: user.studentCode,
+        studentCode: dto.studentCode,
         password: plainPassword,
       });
     } catch (error: unknown) {
@@ -784,15 +786,13 @@ export class UsersService {
         email,
         name: dto.name.trim(),
         role: 'LECTURER',
+        lecturerProfile: {
+          create: {},
+        },
         auth: {
           create: {
             password: hashedPassword,
             isEmailVerified: true,
-          },
-        },
-        profile: {
-          create: {
-            name: dto.name.trim(),
           },
         },
       },
@@ -805,8 +805,7 @@ export class UsersService {
       },
     });
 
-    // Initialize LecturerMetadata for new lecturer
-    await this.prisma.lecturerMetadata.upsert({
+    await (this.prisma as any).lecturer.upsert({
       where: { userId: lecturer.id },
       update: {},
       create: {
@@ -842,7 +841,7 @@ export class UsersService {
       select: {
         id: true,
         role: true,
-        lecturerMetadata: {
+        lecturerProfile: {
           select: {
             lecturerRole: {
               select: {
@@ -866,7 +865,7 @@ export class UsersService {
       const requester = await this.prisma.user.findUnique({
         where: { id: requesterId },
         select: {
-          lecturerMetadata: {
+          lecturerProfile: {
             select: {
               lecturerRole: {
                 select: {
@@ -878,11 +877,11 @@ export class UsersService {
         },
       });
 
-      if (requester?.lecturerMetadata?.lecturerRole) {
-        const requesterPriority = requester.lecturerMetadata.lecturerRole.priority;
+      if (requester?.lecturerProfile?.lecturerRole) {
+        const requesterPriority = requester.lecturerProfile.lecturerRole.priority;
         if (
-          lecturer.lecturerMetadata?.lecturerRole &&
-          lecturer.lecturerMetadata.lecturerRole.priority <= requesterPriority
+          lecturer.lecturerProfile?.lecturerRole &&
+          lecturer.lecturerProfile.lecturerRole.priority <= requesterPriority
         ) {
           throw new ForbiddenException(
             'Bạn chỉ có thể chỉnh sửa giảng viên có vai trò thấp hơn vai trò của bạn',
@@ -892,8 +891,8 @@ export class UsersService {
         const topRolePriority = await this.getTopActiveLecturerRolePriority();
         if (
           topRolePriority !== null &&
-          lecturer.lecturerMetadata?.lecturerRole &&
-          lecturer.lecturerMetadata.lecturerRole.priority <= topRolePriority
+          lecturer.lecturerProfile?.lecturerRole &&
+          lecturer.lecturerProfile.lecturerRole.priority <= topRolePriority
         ) {
           throw new ForbiddenException(
             'Bạn không thể chỉnh sửa giảng viên đang có vai trò ưu tiên cao nhất',
@@ -966,8 +965,7 @@ export class UsersService {
       },
     });
 
-    // Ensure LecturerMetadata exists for this lecturer
-    await this.prisma.lecturerMetadata.upsert({
+    await (this.prisma as any).lecturer.upsert({
       where: { userId: lecturerId },
       update: {},
       create: {
@@ -1005,7 +1003,7 @@ export class UsersService {
       select: {
         id: true,
         role: true,
-        lecturerMetadata: {
+        lecturerProfile: {
           select: {
             lecturerRole: {
               select: {
@@ -1029,7 +1027,7 @@ export class UsersService {
       const requester = await this.prisma.user.findUnique({
         where: { id: requesterId },
         select: {
-          lecturerMetadata: {
+          lecturerProfile: {
             select: {
               lecturerRole: {
                 select: {
@@ -1041,11 +1039,11 @@ export class UsersService {
         },
       });
 
-      if (requester?.lecturerMetadata?.lecturerRole) {
-        const requesterPriority = requester.lecturerMetadata.lecturerRole.priority;
+      if (requester?.lecturerProfile?.lecturerRole) {
+        const requesterPriority = requester.lecturerProfile.lecturerRole.priority;
         if (
-          lecturer.lecturerMetadata?.lecturerRole &&
-          lecturer.lecturerMetadata.lecturerRole.priority <= requesterPriority
+          lecturer.lecturerProfile?.lecturerRole &&
+          lecturer.lecturerProfile.lecturerRole.priority <= requesterPriority
         ) {
           throw new ForbiddenException(
             'Bạn chỉ có thể khóa giảng viên có vai trò thấp hơn vai trò của bạn',
@@ -1055,8 +1053,8 @@ export class UsersService {
         const topRolePriority = await this.getTopActiveLecturerRolePriority();
         if (
           topRolePriority !== null &&
-          lecturer.lecturerMetadata?.lecturerRole &&
-          lecturer.lecturerMetadata.lecturerRole.priority <= topRolePriority
+          lecturer.lecturerProfile?.lecturerRole &&
+          lecturer.lecturerProfile.lecturerRole.priority <= topRolePriority
         ) {
           throw new ForbiddenException(
             'Bạn không thể khóa giảng viên đang có vai trò ưu tiên cao nhất',
@@ -1127,7 +1125,7 @@ export class UsersService {
       select: {
         id: true,
         role: true,
-        lecturerMetadata: {
+        lecturerProfile: {
           select: {
             lecturerRole: {
               select: {
@@ -1151,7 +1149,7 @@ export class UsersService {
       const requester = await this.prisma.user.findUnique({
         where: { id: requesterId },
         select: {
-          lecturerMetadata: {
+          lecturerProfile: {
             select: {
               lecturerRole: {
                 select: {
@@ -1163,11 +1161,11 @@ export class UsersService {
         },
       });
 
-      if (requester?.lecturerMetadata?.lecturerRole) {
-        const requesterPriority = requester.lecturerMetadata.lecturerRole.priority;
+      if (requester?.lecturerProfile?.lecturerRole) {
+        const requesterPriority = requester.lecturerProfile.lecturerRole.priority;
         if (
-          lecturer.lecturerMetadata?.lecturerRole &&
-          lecturer.lecturerMetadata.lecturerRole.priority <= requesterPriority
+          lecturer.lecturerProfile?.lecturerRole &&
+          lecturer.lecturerProfile.lecturerRole.priority <= requesterPriority
         ) {
           throw new ForbiddenException(
             'Bạn chỉ có thể mở khóa giảng viên có vai trò thấp hơn vai trò của bạn',
@@ -1177,8 +1175,8 @@ export class UsersService {
         const topRolePriority = await this.getTopActiveLecturerRolePriority();
         if (
           topRolePriority !== null &&
-          lecturer.lecturerMetadata?.lecturerRole &&
-          lecturer.lecturerMetadata.lecturerRole.priority <= topRolePriority
+          lecturer.lecturerProfile?.lecturerRole &&
+          lecturer.lecturerProfile.lecturerRole.priority <= topRolePriority
         ) {
           throw new ForbiddenException(
             'Bạn không thể mở khóa giảng viên đang có vai trò ưu tiên cao nhất',
@@ -1275,7 +1273,7 @@ export class UsersService {
             select: { permission: true },
             orderBy: { permission: 'asc' },
           },
-          lecturerMetadata: {
+          lecturerProfile: {
             select: {
               lecturerRole: {
                 select: {
@@ -1348,7 +1346,7 @@ export class UsersService {
           },
           orderBy: { permission: 'asc' },
         },
-        lecturerMetadata: {
+        lecturerProfile: {
           select: {
             lecturerRole: {
               select: {
@@ -1375,8 +1373,8 @@ export class UsersService {
     const individualPermissions = lecturer.lecturerPermissions.map(
       (item) => item.permission as LecturerPermissionKey,
     );
-    const rolePermissions = lecturer.lecturerMetadata?.lecturerRole
-      ? lecturer.lecturerMetadata.lecturerRole.permissions.map(
+    const rolePermissions = lecturer.lecturerProfile?.lecturerRole
+      ? lecturer.lecturerProfile.lecturerRole.permissions.map(
           (item) => item.permission as LecturerPermissionKey,
         )
       : [];
@@ -1398,13 +1396,13 @@ export class UsersService {
       permissions,
       individualPermissions,
       rolePermissions,
-      lecturerRole: lecturer.lecturerMetadata?.lecturerRole
+      lecturerRole: lecturer.lecturerProfile?.lecturerRole
         ? {
-            id: lecturer.lecturerMetadata.lecturerRole.id,
-            code: lecturer.lecturerMetadata.lecturerRole.code,
-            name: lecturer.lecturerMetadata.lecturerRole.name,
-            priority: lecturer.lecturerMetadata.lecturerRole.priority,
-            isActive: lecturer.lecturerMetadata.lecturerRole.isActive,
+            id: lecturer.lecturerProfile.lecturerRole.id,
+            code: lecturer.lecturerProfile.lecturerRole.code,
+            name: lecturer.lecturerProfile.lecturerRole.name,
+            priority: lecturer.lecturerProfile.lecturerRole.priority,
+            isActive: lecturer.lecturerProfile.lecturerRole.isActive,
           }
         : null,
       isLecturerAdmin: permissions.includes(LECTURER_ADMIN_PERMISSION),
@@ -1521,7 +1519,7 @@ export class UsersService {
       const requester = await this.prisma.user.findUnique({
         where: { id: requesterId },
         select: {
-          lecturerMetadata: {
+          lecturerProfile: {
             select: {
               lecturerRole: {
                 select: {
@@ -1533,8 +1531,8 @@ export class UsersService {
         },
       });
 
-      if (requester?.lecturerMetadata?.lecturerRole) {
-        where.priority = { gt: requester.lecturerMetadata.lecturerRole.priority };
+      if (requester?.lecturerProfile?.lecturerRole) {
+        where.priority = { gt: requester.lecturerProfile.lecturerRole.priority };
       } else {
         const topRolePriority = await this.getTopActiveLecturerRolePriority();
         if (topRolePriority !== null) {
@@ -1554,7 +1552,7 @@ export class UsersService {
             select: { permission: true },
             orderBy: { permission: 'asc' },
           },
-          _count: { select: { metadataEntries: true } },
+          _count: { select: { lecturers: true } },
         },
       }),
       this.prisma.lecturerRole.count({ where }),
@@ -1584,7 +1582,7 @@ export class UsersService {
           select: { permission: true },
           orderBy: { permission: 'asc' },
         },
-        _count: { select: { metadataEntries: true } },
+        _count: { select: { lecturers: true } },
       },
     });
 
@@ -1637,7 +1635,7 @@ export class UsersService {
             select: { permission: true },
             orderBy: { permission: 'asc' },
           },
-          _count: { select: { metadataEntries: true } },
+          _count: { select: { lecturers: true } },
         },
       });
 
@@ -1714,7 +1712,7 @@ export class UsersService {
           select: { permission: true },
           orderBy: { permission: 'asc' },
         },
-        _count: { select: { metadataEntries: true } },
+        _count: { select: { lecturers: true } },
       },
     });
 
@@ -1730,7 +1728,7 @@ export class UsersService {
     const role = await this.prisma.lecturerRole.findUnique({
       where: { id: roleId },
       include: {
-        _count: { select: { metadataEntries: true } },
+        _count: { select: { lecturers: true } },
       },
     });
 
@@ -1738,7 +1736,7 @@ export class UsersService {
       throw new NotFoundException('Vai trò giảng viên không tồn tại');
     }
 
-    if ((role._count?.metadataEntries ?? 0) > 0) {
+    if ((role._count?.lecturers ?? 0) > 0) {
       throw new BadRequestException(
         'Không thể xóa vai trò vì vẫn còn giảng viên đang được gán vai trò này',
       );
@@ -1768,7 +1766,7 @@ export class UsersService {
       select: {
         id: true,
         role: true,
-        lecturerMetadata: {
+        lecturerProfile: {
           select: {
             lecturerRole: {
               select: {
@@ -1816,7 +1814,7 @@ export class UsersService {
       const requester = await this.prisma.user.findUnique({
         where: { id: requesterId },
         select: {
-          lecturerMetadata: {
+          lecturerProfile: {
             select: {
               lecturerRole: {
                 select: {
@@ -1828,12 +1826,12 @@ export class UsersService {
         },
       });
 
-      if (requester?.lecturerMetadata?.lecturerRole) {
-        const requesterPriority = requester.lecturerMetadata.lecturerRole.priority;
+      if (requester?.lecturerProfile?.lecturerRole) {
+        const requesterPriority = requester.lecturerProfile.lecturerRole.priority;
 
         if (
-          lecturer.lecturerMetadata?.lecturerRole &&
-          lecturer.lecturerMetadata.lecturerRole.priority <= requesterPriority
+          lecturer.lecturerProfile?.lecturerRole &&
+          lecturer.lecturerProfile.lecturerRole.priority <= requesterPriority
         ) {
           throw new ForbiddenException(
             'Bạn chỉ có thể quản lý giảng viên có vai trò thấp hơn vai trò của bạn',
@@ -1850,8 +1848,8 @@ export class UsersService {
 
         if (
           topRolePriority !== null &&
-          lecturer.lecturerMetadata?.lecturerRole &&
-          lecturer.lecturerMetadata.lecturerRole.priority <= topRolePriority
+          lecturer.lecturerProfile?.lecturerRole &&
+          lecturer.lecturerProfile.lecturerRole.priority <= topRolePriority
         ) {
           throw new ForbiddenException(
             'Bạn không thể quản lý giảng viên đang có vai trò ưu tiên cao nhất',
@@ -1870,7 +1868,7 @@ export class UsersService {
       }
     }
 
-    await this.prisma.lecturerMetadata.upsert({
+    await (this.prisma as any).lecturer.upsert({
       where: { userId: lecturerId },
       update: dto.roleId
         ? {
@@ -1938,10 +1936,19 @@ export class UsersService {
       }
     }
 
-    if (dto.studentCode !== undefined && dto.studentCode !== user.studentCode) {
+    const currentStudentProfile =
+      user.role === 'STUDENT'
+        ? await (this.prisma as any).student.findUnique({
+            where: { userId: id },
+            select: { studentCode: true },
+          })
+        : null;
+
+    if (dto.studentCode !== undefined && dto.studentCode !== currentStudentProfile?.studentCode) {
       if (dto.studentCode) {
-        const studentCodeExists = await this.prisma.user.findUnique({
+        const studentCodeExists = await (this.prisma as any).student.findUnique({
           where: { studentCode: dto.studentCode },
+          select: { id: true },
         });
         if (studentCodeExists) {
           throw new ConflictException('MSSV đã tồn tại');
@@ -1964,12 +1971,10 @@ export class UsersService {
 
     const userData = {
       ...(dto.email !== undefined && { email: dto.email }),
-      ...(dto.studentCode !== undefined && { studentCode: dto.studentCode || null }),
       ...(dto.name && { name: dto.name }),
     };
 
-    const userProfileData = {
-      ...(dto.name && { name: dto.name }),
+    const studentProfileData = {
       ...(dto.studentCode !== undefined && { studentCode: dto.studentCode || null }),
       ...(dto.className !== undefined && { className: dto.className || null }),
       ...(dto.dateOfBirth !== undefined && { dateOfBirth: parsedDob }),
@@ -1992,13 +1997,13 @@ export class UsersService {
         });
       }
 
-      if (Object.keys(userProfileData).length > 0) {
-        await tx.userProfile.upsert({
+      if (Object.keys(studentProfileData).length > 0) {
+        await (tx as any).student.upsert({
           where: { userId: id },
-          update: userProfileData,
+          update: studentProfileData,
           create: {
             userId: id,
-            ...userProfileData,
+            ...studentProfileData,
           },
         });
       }
@@ -2020,10 +2025,10 @@ export class UsersService {
         select: {
           id: true,
           email: true,
-          studentCode: true,
           name: true,
-          profile: {
+          studentProfile: {
             select: {
+              studentCode: true,
               className: true,
               dateOfBirth: true,
             },
@@ -2042,10 +2047,10 @@ export class UsersService {
     return {
       id: updated.id,
       email: updated.email,
-      studentCode: updated.studentCode,
+      studentCode: updated.studentProfile?.studentCode ?? null,
       name: updated.name,
-      className: updated.profile?.className ?? null,
-      dateOfBirth: updated.profile?.dateOfBirth ?? null,
+      className: updated.studentProfile?.className ?? null,
+      dateOfBirth: updated.studentProfile?.dateOfBirth ?? null,
       isLocked: updated.auth?.isLocked ?? false,
       lockedAt: updated.auth?.lockedAt ?? null,
       lockedReason: updated.auth?.lockedReason ?? null,
@@ -2154,22 +2159,20 @@ export class UsersService {
 
         await this.prisma.user.create({
           data: {
-            studentCode,
             email,
             name,
             role: 'STUDENT',
+            studentProfile: {
+              create: {
+                studentCode,
+                className: className || null,
+                dateOfBirth: !isNaN(dobDate.getTime()) ? dobDate : undefined,
+              },
+            },
             auth: {
               create: {
                 password: hashedPassword,
                 isEmailVerified: true,
-              },
-            },
-            profile: {
-              create: {
-                name,
-                studentCode,
-                className: className || null,
-                dateOfBirth: !isNaN(dobDate.getTime()) ? dobDate : undefined,
               },
             },
             pointAccount: {

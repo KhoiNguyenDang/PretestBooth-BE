@@ -27,12 +27,9 @@ export class TasksService {
     this.logger.debug('Running account auto-lock cron job...');
 
     const currentYear = new Date().getFullYear();
-    const students = await this.prisma.user.findMany({
-      where: {
-        role: 'STUDENT',
-        auth: { isLocked: false },
-        studentCode: { not: null },
-      },
+    const students = await (this.prisma as any).student.findMany({
+      where: { studentCode: { not: null } },
+      include: { user: { select: { id: true, email: true, name: true } } },
     });
 
     let lockedCount = 0;
@@ -48,14 +45,14 @@ export class TasksService {
       // Lock if elapsed time >= 6 years
       if (currentYear - enrollmentYear >= 6) {
         await this.prisma.userAuth.upsert({
-          where: { userId: student.id },
+          where: { userId: student.userId },
           update: {
             isLocked: true,
             lockedAt: new Date(),
             lockedReason: `Tài khoản tự động khóa: Sinh viên khóa ${enrollmentYear} đã quá 6 năm (từ ${enrollmentYear} đến ${currentYear})`,
           },
           create: {
-            userId: student.id,
+            userId: student.userId,
             password: '',
             isLocked: true,
             lockedAt: new Date(),

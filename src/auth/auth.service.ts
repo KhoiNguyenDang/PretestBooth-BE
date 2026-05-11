@@ -129,8 +129,9 @@ export class AuthService {
     }
 
     // Check if student code is already registered
-    const studentCodeExists = await this.prisma.user.findUnique({
+    const studentCodeExists = await (this.prisma as any).student.findUnique({
       where: { studentCode },
+      select: { id: true },
     });
 
     if (studentCodeExists) {
@@ -145,7 +146,12 @@ export class AuthService {
       data: {
         email,
         name: name || null,
-        studentCode,
+        role: 'STUDENT',
+        studentProfile: {
+          create: {
+            studentCode,
+          },
+        },
       },
     });
 
@@ -157,13 +163,6 @@ export class AuthService {
           isEmailVerified: false,
           emailVerificationToken: verificationToken,
           emailVerificationExpiry: verificationExpiry,
-        },
-      }),
-      this.prisma.userProfile.create({
-        data: {
-          userId: user.id,
-          name: name || null,
-          studentCode,
         },
       }),
       this.prisma.pointAccount.create({
@@ -361,21 +360,26 @@ export class AuthService {
       throw new ForbiddenException('Tài khoản đã bị khóa. Vui lòng liên hệ quản trị viên.');
     }
 
-    if (user.role === 'STUDENT' && user.studentCode) {
-      const enrollmentYear = 2000 + parseInt(user.studentCode.substring(0, 2), 10);
-      const currentYear = new Date().getFullYear();
-      if (currentYear - enrollmentYear >= 6) {
-        await this.prisma.userAuth.update({
-          where: { userId: user.id },
-          data: {
-            isLocked: true,
-            lockedAt: new Date(),
-            lockedReason: `Tài khoản tự động khóa: sinh viên khóa ${enrollmentYear} đã quá 6 năm`,
-          },
-        });
-        throw new ForbiddenException(
-          `Tài khoản đã bị khóa tự động. Sinh viên khóa ${enrollmentYear} đã quá thời hạn 6 năm sử dụng hệ thống.`,
-        );
+    if (user.role === 'STUDENT') {
+      const studentProfile = await this.studentService.getStudentByUserId(user.id);
+      const studentCode = studentProfile?.studentCode;
+
+      if (studentCode) {
+        const enrollmentYear = 2000 + parseInt(studentCode.substring(0, 2), 10);
+        const currentYear = new Date().getFullYear();
+        if (currentYear - enrollmentYear >= 6) {
+          await this.prisma.userAuth.update({
+            where: { userId: user.id },
+            data: {
+              isLocked: true,
+              lockedAt: new Date(),
+              lockedReason: `Tài khoản tự động khóa: sinh viên khóa ${enrollmentYear} đã quá 6 năm`,
+            },
+          });
+          throw new ForbiddenException(
+            `Tài khoản đã bị khóa tự động. Sinh viên khóa ${enrollmentYear} đã quá thời hạn 6 năm sử dụng hệ thống.`,
+          );
+        }
       }
     }
 

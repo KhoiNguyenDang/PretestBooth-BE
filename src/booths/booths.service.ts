@@ -428,9 +428,9 @@ export class BoothsService {
               id: true,
               email: true,
               name: true,
-              studentCode: true,
             },
           },
+          student: { select: { studentCode: true, className: true } },
         },
       });
 
@@ -455,7 +455,12 @@ export class BoothsService {
       }> = [];
 
       for (const candidate of candidates) {
-        const studentName = this.buildStudentLabel(candidate.user);
+        const studentName = this.buildStudentLabel({
+          id: candidate.user.id,
+          email: candidate.user.email,
+          name: candidate.user.name,
+          studentCode: candidate.student?.studentCode ?? null,
+        });
         const conflict = await tx.booking.findFirst({
           where: {
             boothId: targetBooth.id,

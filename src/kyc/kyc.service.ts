@@ -236,7 +236,7 @@ export class KycService {
             kycManualReviewNotes: null,
           },
         }),
-        this.prisma.userProfile.upsert({
+        prismaAny.student.upsert({
           where: { userId },
           update: {
             studentCardImageUrl: cardImageUrl,
@@ -325,7 +325,7 @@ export class KycService {
           kycManualReviewNotes: null,
         },
       }),
-      this.prisma.userProfile.upsert({
+      prismaAny.student.upsert({
         where: { userId },
         update: {
           studentCardImageUrl: cardImageUrl,
@@ -512,7 +512,7 @@ export class KycService {
               OR: [
                 { name: { contains: search, mode: 'insensitive' } },
                 { email: { contains: search, mode: 'insensitive' } },
-                { studentCode: { contains: search, mode: 'insensitive' } },
+                { studentProfile: { is: { studentCode: { contains: search, mode: 'insensitive' } } } },
               ],
             }
           : {}),
@@ -542,9 +542,9 @@ export class KycService {
               id: true,
               email: true,
               name: true,
-              studentCode: true,
-              profile: {
+              studentProfile: {
                 select: {
+                  studentCode: true,
                   className: true,
                   studentCardImageUrl: true,
                   studentCardFaceMatchScore: true,
@@ -561,14 +561,14 @@ export class KycService {
         id: item.user.id,
         email: item.user.email,
         name: item.user.name,
-        studentCode: item.user.studentCode,
-        className: item.user.profile?.className,
+        studentCode: item.user.studentProfile?.studentCode,
+        className: item.user.studentProfile?.className,
         kycStatus: item.kycStatus,
         kycLastAttemptAt: item.kycLastAttemptAt,
         kycStudentImageUrl: item.kycStudentImageUrl,
         kycFaceImageUrl: item.kycFaceImageUrl || item.kycStudentImageUrl,
-        studentCardImageUrl: item.user.profile?.studentCardImageUrl ?? null,
-        studentCardFaceMatchScore: item.user.profile?.studentCardFaceMatchScore ?? null,
+        studentCardImageUrl: item.user.studentProfile?.studentCardImageUrl ?? null,
+        studentCardFaceMatchScore: item.user.studentProfile?.studentCardFaceMatchScore ?? null,
         kycManualReviewStatus: item.kycManualReviewStatus,
         kycManualReviewRequestedAt: item.kycManualReviewRequestedAt,
         kycManualReviewRequestedReason: item.kycManualReviewRequestedReason,
@@ -597,7 +597,7 @@ export class KycService {
               OR: [
                 { name: { contains: search, mode: 'insensitive' } },
                 { email: { contains: search, mode: 'insensitive' } },
-                { studentCode: { contains: search, mode: 'insensitive' } },
+                { studentProfile: { is: { studentCode: { contains: search, mode: 'insensitive' } } } },
               ],
             }
           : {}),
@@ -629,9 +629,9 @@ export class KycService {
               id: true,
               email: true,
               name: true,
-              studentCode: true,
-              profile: {
+              studentProfile: {
                 select: {
+                  studentCode: true,
                   className: true,
                   studentCardFaceMatchScore: true,
                   studentCardVerifiedAt: true,
@@ -653,14 +653,14 @@ export class KycService {
         id: item.user.id,
         email: item.user.email,
         name: item.user.name,
-        studentCode: item.user.studentCode,
-        className: item.user.profile?.className,
+        studentCode: item.user.studentProfile?.studentCode,
+        className: item.user.studentProfile?.className,
         kycStatus: item.kycStatus,
         kycVerifiedAt: item.kycVerifiedAt,
         kycLastAttemptAt: item.kycLastAttemptAt,
         kycManualReviewStatus: item.kycManualReviewStatus,
-        studentCardFaceMatchScore: item.user.profile?.studentCardFaceMatchScore ?? null,
-        studentCardVerifiedAt: item.user.profile?.studentCardVerifiedAt ?? null,
+        studentCardFaceMatchScore: item.user.studentProfile?.studentCardFaceMatchScore ?? null,
+        studentCardVerifiedAt: item.user.studentProfile?.studentCardVerifiedAt ?? null,
         faceEmbeddingUpdatedAt: item.user.faceEmbeddingRecord?.faceEmbeddingUpdatedAt ?? null,
       })),
       page,
@@ -697,9 +697,9 @@ export class KycService {
             id: true,
             email: true,
             name: true,
-            studentCode: true,
-            profile: {
+            studentProfile: {
               select: {
+                studentCode: true,
                 className: true,
                 studentCardImageUrl: true,
                 studentCardFaceMatchScore: true,
@@ -718,16 +718,16 @@ export class KycService {
       id: student.user.id,
       email: student.user.email,
       name: student.user.name,
-      studentCode: student.user.studentCode,
-      className: student.user.profile?.className ?? null,
+      studentCode: student.user.studentProfile?.studentCode,
+      className: student.user.studentProfile?.className ?? null,
       kycStatus: student.kycStatus,
       kycLastAttemptAt: student.kycLastAttemptAt,
       kycRegisteredAt: student.kycRegisteredAt,
       kycVerifiedAt: student.kycVerifiedAt,
       kycStudentImageUrl: student.kycStudentImageUrl,
       kycFaceImageUrl: student.kycFaceImageUrl || student.kycStudentImageUrl,
-      studentCardImageUrl: student.user.profile?.studentCardImageUrl ?? null,
-      studentCardFaceMatchScore: student.user.profile?.studentCardFaceMatchScore ?? null,
+      studentCardImageUrl: student.user.studentProfile?.studentCardImageUrl ?? null,
+      studentCardFaceMatchScore: student.user.studentProfile?.studentCardFaceMatchScore ?? null,
       kycManualReviewStatus: student.kycManualReviewStatus,
       kycManualReviewRequestedAt: student.kycManualReviewRequestedAt,
       kycManualReviewRequestedReason: student.kycManualReviewRequestedReason,
@@ -760,7 +760,11 @@ export class KycService {
           select: {
             email: true,
             name: true,
-            studentCode: true,
+            studentProfile: {
+              select: {
+                studentCode: true,
+              },
+            },
           },
         },
       },
@@ -804,7 +808,7 @@ export class KycService {
         },
       });
 
-      await tx.userProfile.upsert({
+      await (tx as any).student.upsert({
         where: { userId: student.userId },
         update: {
           studentCardVerifiedAt: now,
@@ -841,7 +845,7 @@ export class KycService {
       await this.mailService.sendKycManualReviewApprovedEmail({
         email: student.user.email,
         studentName: student.user.name,
-        studentCode: student.user.studentCode,
+        studentCode: student.user.studentProfile?.studentCode,
       });
     } catch (error) {
       this.logger.error(
@@ -875,7 +879,11 @@ export class KycService {
           select: {
             email: true,
             name: true,
-            studentCode: true,
+            studentProfile: {
+              select: {
+                studentCode: true,
+              },
+            },
           },
         },
       },
@@ -914,7 +922,7 @@ export class KycService {
       await this.mailService.sendKycManualReviewRejectedEmail({
         email: student.user.email,
         studentName: student.user.name,
-        studentCode: student.user.studentCode,
+        studentCode: student.user.studentProfile?.studentCode,
         reason: dto.reason.trim(),
       });
     } catch (error) {
@@ -980,7 +988,7 @@ export class KycService {
       },
     });
 
-    await this.prisma.userProfile
+    await (this.prisma as any).student
       .update({
         where: { userId: student.userId },
         data: {

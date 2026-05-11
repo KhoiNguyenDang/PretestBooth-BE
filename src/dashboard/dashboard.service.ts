@@ -66,8 +66,18 @@ export class DashboardService {
           orderBy: { timestamp: 'desc' },
           take: 10,
           include: {
-            examSession: { select: { user: { select: { name: true, studentCode: true } } } },
-            practiceSession: { select: { user: { select: { name: true, studentCode: true } } } },
+            examSession: {
+              select: {
+                user: { select: { name: true } },
+                student: { select: { studentCode: true } },
+              },
+            },
+            practiceSession: {
+              select: {
+                user: { select: { name: true } },
+                student: { select: { studentCode: true } },
+              },
+            },
           },
         }),
       ]);
