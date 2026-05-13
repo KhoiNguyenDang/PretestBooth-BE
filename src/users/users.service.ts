@@ -491,6 +491,15 @@ export class UsersService {
               totalPoints: true,
             },
           },
+          examSessions: {
+            where: {
+              isPretestSession: true,
+              passed: true,
+              resultPublicationStatus: 'PUBLISHED',
+            },
+            take: 1,
+            select: { id: true },
+          },
         },
       }),
       (this.prisma as any).student.count({ where }),
@@ -510,6 +519,7 @@ export class UsersService {
       lockedReason: student.user.auth?.lockedReason ?? null,
       dateOfBirth: student.dateOfBirth ?? null,
       totalPoints: student.pointAccount?.totalPoints ?? 0,
+      hasPassedPretest: student.examSessions && student.examSessions.length > 0,
       createdAt: student.createdAt,
     }));
 

@@ -20,7 +20,7 @@ export class DashboardService {
       ? await this.prisma.pointAccount.findUnique({ where: { studentId } })
       : null;
 
-    const [completedExams, practiceSessions, upcomingBookings] = await Promise.all([
+    const [completedExams, practiceSessions, upcomingBookings, passedPretestCount] = await Promise.all([
       this.prisma.examSession.count({ where: { studentId, status: 'SUBMITTED' } }), // GRADED or SUBMITTED
       this.prisma.practiceSession.count({ where: { studentId, status: 'COMPLETED' } }),
       this.prisma.booking.findMany({
@@ -29,6 +29,16 @@ export class DashboardService {
         take: 5,
         include: { booth: { select: { name: true } } },
       }),
+      studentId
+        ? this.prisma.examSession.count({
+            where: {
+              studentId,
+              isPretestSession: true,
+              passed: true,
+              resultPublicationStatus: 'PUBLISHED',
+            },
+          })
+        : Promise.resolve(0),
     ]);
 
     // Calculate accuracy % roughly based on problem submissions
@@ -46,6 +56,7 @@ export class DashboardService {
       submissionAccuracy: accuracy,
       totalSubmissions: totalSubs,
       upcomingBookings,
+      hasPassedPretest: passedPretestCount > 0,
     };
   }
 

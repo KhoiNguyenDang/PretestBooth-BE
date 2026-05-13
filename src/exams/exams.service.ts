@@ -76,7 +76,10 @@ const VIETNAM_UTC_OFFSET_MINUTES = 7 * 60;
 @Injectable()
 export class ExamsService {
   private readonly logger = new Logger(ExamsService.name);
-  private readonly defaultPretestConfig: Omit<PretestConfigDto, 'updatedAt' | 'updatedByLecturerId'> = {
+  private readonly defaultPretestConfig: Omit<
+    PretestConfigDto,
+    'updatedAt' | 'updatedByLecturerId'
+  > = {
     isEnabled: false,
     assignmentMode: 'OFFICIAL_EXAM_POOL',
     maxAttempts: 3,
@@ -661,6 +664,7 @@ export class ExamsService {
           studentId,
           isPretestSession: true,
           passed: true,
+          resultPublicationStatus: 'PUBLISHED',
         },
         select: { id: true },
       }),
@@ -898,6 +902,7 @@ export class ExamsService {
           studentId,
           isPretestSession: true,
           passed: true,
+          resultPublicationStatus: 'PUBLISHED',
         },
         select: { id: true },
       }),
@@ -1029,7 +1034,8 @@ export class ExamsService {
    */
   async create(creatorId: string, userRole: string, dto: CreateExamDto): Promise<ExamDetailDto> {
     await this.assertExamManagementPermission(creatorId, userRole, 'tạo đề thi');
-    const lecturerId = userRole === 'LECTURER' ? await this.resolveLecturerIdentity(creatorId) : null;
+    const lecturerId =
+      userRole === 'LECTURER' ? await this.resolveLecturerIdentity(creatorId) : null;
 
     const selectedSubjectIds = dto.subjectIds?.length
       ? dto.subjectIds
@@ -1894,7 +1900,9 @@ export class ExamsService {
           },
         },
         answers: true,
-        student: { select: { id: true, userId: true, user: { select: { email: true, name: true } } } },
+        student: {
+          select: { id: true, userId: true, user: { select: { email: true, name: true } } },
+        },
       },
     });
 
@@ -2038,12 +2046,15 @@ export class ExamsService {
               `Auto-grading problem "${item.problem.title}" for session ${sessionId}, exam item ${item.id}`,
             );
 
-            const submission = await this.submissionsService.create(session.student?.userId ?? userId, {
-              language: fallbackLanguage,
-              version: resolvedLanguageVersion || '*',
-              sourceCode: normalizedSourceCode,
-              problemId: item.problem.id,
-            });
+            const submission = await this.submissionsService.create(
+              session.student?.userId ?? userId,
+              {
+                language: fallbackLanguage,
+                version: resolvedLanguageVersion || '*',
+                sourceCode: normalizedSourceCode,
+                problemId: item.problem.id,
+              },
+            );
 
             const passRate =
               submission.totalTestCases > 0
@@ -2225,7 +2236,12 @@ export class ExamsService {
       }
     });
 
-    await this.syncExamCompletionPoints(sessionId, session.studentId ?? userId, totalScore, session.maxScore);
+    await this.syncExamCompletionPoints(
+      sessionId,
+      session.studentId ?? userId,
+      totalScore,
+      session.maxScore,
+    );
     const linkedBooking = session.bookingId
       ? await this.prisma.booking.findUnique({
           where: { id: session.bookingId },
@@ -4250,5 +4266,3 @@ export class ExamsService {
     });
   }
 }
-
-
