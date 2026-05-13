@@ -21,7 +21,7 @@ export class ExamListItemDto {
   topicId: string | null;
   subject?: { id: string; name: string } | null;
   topic?: { id: string; name: string } | null;
-  creatorId: string;
+  lecturerId: string | null;
   totalItems: number;
   sessionCount: number;
   shuffleQuestions: boolean;
@@ -53,7 +53,7 @@ export class ExamDetailDto {
   topicId: string | null;
   subject?: { id: string; name: string } | null;
   topic?: { id: string; name: string } | null;
-  creatorId: string;
+  lecturerId: string | null;
   items: ExamItemDto[];
   sessionCount: number;
   shuffleQuestions: boolean;
@@ -283,7 +283,7 @@ export class SessionResultItemDto {
   manualIsCorrect?: boolean | null;
   manualScore?: number | null;
   reviewerFeedback?: string | null;
-  reviewedByUserId?: string | null;
+  reviewedByLecturerId?: string | null;
   reviewedAt?: Date | null;
 
   constructor(partial: Partial<SessionResultItemDto>) {
@@ -379,3 +379,4 @@ export class PaginatedExamSessionsDto {
     Object.assign(this, partial);
   }
 }
+

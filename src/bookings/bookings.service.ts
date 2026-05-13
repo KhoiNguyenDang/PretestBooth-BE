@@ -325,7 +325,6 @@ export class BookingsService {
     // Create the booking
     return (this.prisma as any).booking.create({
       data: {
-        userId,
         studentId: student.id,
         boothId: dto.boothId,
         type: dto.type as BookingType,
@@ -373,8 +372,15 @@ export class BookingsService {
         orderBy: { startTime: sortOrder },
         include: {
           booth: { select: { id: true, name: true, location: true } },
-          user: { select: { id: true, email: true, name: true } },
-          student: { select: { id: true, studentCode: true, className: true } },
+          student: {
+            select: {
+              id: true,
+              userId: true,
+              studentCode: true,
+              className: true,
+              user: { select: { id: true, email: true, name: true } },
+            },
+          },
         },
       }),
       this.prisma.booking.count({ where }),
@@ -438,8 +444,8 @@ export class BookingsService {
       };
 
       where.OR = [
-        { user: { name: textFilter } },
-        { user: { email: textFilter } },
+        { student: { user: { name: textFilter } } },
+        { student: { user: { email: textFilter } } },
         { student: { studentCode: textFilter } },
         { booth: { name: textFilter } },
         { booth: { code: textFilter } },
@@ -455,16 +461,16 @@ export class BookingsService {
           endTime: sortOrder,
         },
         include: {
-          user: {
-            select: {
-              id: true,
-              name: true,
-              email: true,
-            },
-          },
           student: {
             select: {
               studentCode: true,
+              user: {
+                select: {
+                  id: true,
+                  name: true,
+                  email: true,
+                },
+              },
             },
           },
           booth: {
@@ -535,9 +541,9 @@ export class BookingsService {
         boothId: booking.boothId,
         boothName: booking.booth.name,
         boothCode: booking.booth.code,
-        userId: booking.userId,
-        studentName: booking.user.name,
-        studentEmail: booking.user.email,
+        userId: booking.student?.user.id ?? null,
+        studentName: booking.student?.user.name ?? null,
+        studentEmail: booking.student?.user.email ?? null,
         studentCode: booking.student?.studentCode ?? null,
         bookingType: booking.type,
         status: booking.status,
@@ -591,6 +597,7 @@ export class BookingsService {
     const booking = await this.prisma.booking.findUnique({
       where: { id: bookingId },
       include: {
+        student: { select: { userId: true } },
         examSessions: {
           where: { status: 'IN_PROGRESS' },
           select: { id: true },
@@ -647,7 +654,7 @@ export class BookingsService {
     this.realtimeService.bookingCheckout({
       bookingId: booking.id,
       boothId: booking.boothId,
-      userId: booking.userId,
+      userId: booking.student?.userId ?? '',
       status: 'COMPLETED',
       type: booking.type,
       startTime: booking.startTime.toISOString(),
@@ -660,7 +667,7 @@ export class BookingsService {
       this.realtimeService.sessionTerminated({
         sessionType: 'EXAM',
         sessionId: examSession.id,
-        userId: booking.userId,
+        userId: booking.student?.userId ?? '',
         boothId: booking.boothId,
         status: 'SUBMITTED',
         reason: dto.reason,
@@ -672,7 +679,7 @@ export class BookingsService {
       this.realtimeService.sessionTerminated({
         sessionType: 'PRACTICE',
         sessionId: practiceSession.id,
-        userId: booking.userId,
+        userId: booking.student?.userId ?? '',
         boothId: booking.boothId,
         status: 'ABANDONED',
         reason: dto.reason,
@@ -685,12 +692,12 @@ export class BookingsService {
       action: 'FORCE_CHECKOUT',
       bookingId: booking.id,
       boothId: booking.boothId,
-      userId: booking.userId,
+      userId: booking.student?.userId ?? '',
       emittedAt: new Date().toISOString(),
     });
 
     this.realtimeService.notify({
-      userId: booking.userId,
+      userId: booking.student?.userId ?? '',
       boothId: booking.boothId,
       message: `Phiên booth đã bị kết thúc bởi quản trị viên/giảng viên. Lý do: ${dto.reason}`,
       level: 'warning',
@@ -718,7 +725,7 @@ export class BookingsService {
       select: {
         id: true,
         boothId: true,
-        userId: true,
+        student: { select: { userId: true } },
       },
     });
 
@@ -729,7 +736,7 @@ export class BookingsService {
     const emittedAt = new Date().toISOString();
 
     this.realtimeService.notify({
-      userId: booking.userId,
+      userId: booking.student?.userId ?? '',
       boothId: booking.boothId,
       message: dto.message,
       level: dto.level || 'warning',
@@ -741,7 +748,7 @@ export class BookingsService {
       action: 'NOTIFY',
       bookingId: booking.id,
       boothId: booking.boothId,
-      userId: booking.userId,
+      userId: booking.student?.userId ?? '',
       emittedAt,
     });
 
@@ -826,10 +833,11 @@ export class BookingsService {
    * Cancel a booking
    */
   async cancel(bookingId: string, userId: string, userRole: string) {
+    const student = userRole === 'STUDENT' ? await this.getStudentIdentity(userId) : null;
     const booking = await this.prisma.booking.findUnique({ where: { id: bookingId } });
     if (!booking) throw new NotFoundException('Booking không tồn tại');
 
-    if (userRole === 'STUDENT' && booking.userId !== userId) {
+    if (userRole === 'STUDENT' && booking.studentId !== student?.id) {
       throw new ForbiddenException('Bạn không có quyền hủy booking này');
     }
 
@@ -872,6 +880,7 @@ export class BookingsService {
         status: 'CHECKED_IN',
         checkedInAt: now,
       },
+      include: { student: { select: { userId: true } } },
     });
 
     const booth = await this.prisma.booth.findUnique({
@@ -886,7 +895,7 @@ export class BookingsService {
           fromStatus: booth.status,
           toStatus: booth.status,
           note: `Sinh viên auto check-in thành công (booking ${checkedInBooking.id})`,
-          changedByUserId: checkedInBooking.userId,
+          changedByLecturerId: null,
         },
       });
     }
@@ -894,7 +903,7 @@ export class BookingsService {
     this.realtimeService.bookingCheckin({
       bookingId: checkedInBooking.id,
       boothId: checkedInBooking.boothId,
-      userId: checkedInBooking.userId,
+      userId: checkedInBooking.student?.userId ?? userId,
       status: 'CHECKED_IN',
       type: checkedInBooking.type,
       startTime: checkedInBooking.startTime.toISOString(),
@@ -904,7 +913,7 @@ export class BookingsService {
     });
 
     this.realtimeService.notify({
-      userId: checkedInBooking.userId,
+      userId: checkedInBooking.student?.userId ?? userId,
       boothId: checkedInBooking.boothId,
       message: 'Check-in thành công. Phiên sử dụng booth đã bắt đầu.',
       level: 'success',
@@ -967,7 +976,7 @@ export class BookingsService {
       if (now >= noShowGraceTime) {
         await this.markBookingNoShowAndApplyPenalty({
           id: nextExamBooking.id,
-          userId: nextExamBooking.userId,
+          studentId: nextExamBooking.studentId,
           type: nextExamBooking.type,
           startTime: nextExamBooking.startTime,
           endTime: nextExamBooking.endTime,
@@ -1037,7 +1046,6 @@ export class BookingsService {
 
     const walkInBooking = await this.prisma.booking.create({
       data: {
-        userId,
         studentId: student.id,
         boothId,
         type: 'PRACTICE',
@@ -1051,13 +1059,14 @@ export class BookingsService {
         checkinStatus: 'PASSED',
         checkinVerifiedAt: now,
       } as any,
+      include: { student: { select: { userId: true } } },
     });
 
     const emittedAt = new Date().toISOString();
     this.realtimeService.bookingCheckin({
       bookingId: walkInBooking.id,
       boothId: walkInBooking.boothId,
-      userId: walkInBooking.userId,
+      userId: walkInBooking.student?.userId ?? userId,
       status: 'CHECKED_IN',
       type: walkInBooking.type,
       startTime: walkInBooking.startTime.toISOString(),
@@ -1071,7 +1080,7 @@ export class BookingsService {
       action: 'CHECKIN',
       bookingId: walkInBooking.id,
       boothId: walkInBooking.boothId,
-      userId: walkInBooking.userId,
+      userId: walkInBooking.student?.userId ?? userId,
       sessionType: 'PRACTICE',
       emittedAt,
     });
@@ -1288,7 +1297,7 @@ export class BookingsService {
       select: {
         id: true,
         boothId: true,
-        userId: true,
+        student: { select: { userId: true } },
         type: true,
         startTime: true,
         endTime: true,
@@ -1313,7 +1322,7 @@ export class BookingsService {
       this.realtimeService.bookingCheckout({
         bookingId: booking.id,
         boothId: booking.boothId,
-        userId: booking.userId,
+        userId: booking.student?.userId ?? '',
         status: 'COMPLETED',
         type: booking.type,
         startTime: booking.startTime.toISOString(),
@@ -1331,7 +1340,7 @@ export class BookingsService {
    */
   private async markBookingNoShowAndApplyPenalty(booking: {
     id: string;
-    userId: string;
+    studentId: string | null;
     type: BookingType;
     startTime: Date;
     endTime: Date;
@@ -1350,7 +1359,7 @@ export class BookingsService {
 
     const existingPenalty = await this.prisma.pointTransaction.findFirst({
       where: {
-        userId: booking.userId,
+        studentId: booking.studentId,
         type: 'NO_SHOW_PENALTY',
         bookingId: booking.id,
       },
@@ -1361,8 +1370,12 @@ export class BookingsService {
       return { marked: true, penalized: false };
     }
 
+    if (!booking.studentId) {
+      return { marked: true, penalized: false };
+    }
+
     await this.pointsService.addTransaction(
-      booking.userId,
+      booking.studentId,
       'NO_SHOW_PENALTY',
       -8,
       `Vắng mặt ca ${booking.type}: ${this.formatUtcDateTime(booking.startTime)} - ${this.formatUtcDateTime(booking.endTime)}`,
@@ -1390,7 +1403,7 @@ export class BookingsService {
       },
       select: {
         id: true,
-        userId: true,
+        studentId: true,
         type: true,
         startTime: true,
         endTime: true,
@@ -1407,7 +1420,7 @@ export class BookingsService {
     for (const booking of noShowCandidates) {
       const result = await this.markBookingNoShowAndApplyPenalty({
         id: booking.id,
-        userId: booking.userId,
+        studentId: booking.studentId,
         type: booking.type,
         startTime: booking.startTime,
         endTime: booking.endTime,
@@ -1425,3 +1438,5 @@ export class BookingsService {
     return { markedCount, penalizedCount };
   }
 }
+
+

@@ -28,10 +28,22 @@ export class SubmissionsService {
     private readonly executionService: ExecutionService,
   ) {}
 
+  private async resolveStudentId(userId: string): Promise<string> {
+    const student = await this.prisma.student.findUnique({
+      where: { userId },
+      select: { id: true },
+    });
+    if (!student) {
+      throw new ForbiddenException('Không tìm thấy hồ sơ sinh viên');
+    }
+    return student.id;
+  }
+
   /**
    * Create a new submission and execute against test cases
    */
   async create(userId: string, dto: CreateSubmissionDto): Promise<SubmissionResponseDto> {
+    const studentId = await this.resolveStudentId(userId);
     // Verify problem exists
     const problem = await this.prisma.problem.findUnique({
       where: { id: dto.problemId },
@@ -49,7 +61,7 @@ export class SubmissionsService {
         languageVersion: dto.version === '*' ? null : dto.version,
         sourceCode: dto.sourceCode,
         status: 'PENDING',
-        userId,
+        studentId,
         problemId: dto.problemId,
       },
     });
@@ -116,7 +128,7 @@ export class SubmissionsService {
         // Check if this is user's first accepted submission for this problem
         const previousAccepted = await this.prisma.submission.count({
           where: {
-            userId,
+            studentId,
             problemId: dto.problemId,
             status: 'ACCEPTED',
             id: { not: submission.id },
@@ -181,14 +193,14 @@ export class SubmissionsService {
 
     if (type === 'ALL' || type === 'PROBLEM') {
       const problemWhere: Prisma.SubmissionWhereInput = {
-        ...(userRole === 'STUDENT' ? { userId } : {}),
+        ...(userRole === 'STUDENT' ? { student: { is: { userId } } } : {}),
       };
 
       const problemSubmissions = await this.prisma.submission.findMany({
         where: problemWhere,
         select: {
           id: true,
-          userId: true,
+          studentId: true,
           status: true,
           createdAt: true,
           problemId: true,
@@ -240,7 +252,7 @@ export class SubmissionsService {
             questionCount: null,
             problemCount: null,
             totalSubmissions: 1,
-            submitterIds: new Set([submission.userId]),
+            submitterIds: new Set([submission.studentId ?? '']),
             passedCount: submission.status === 'ACCEPTED' ? 1 : 0,
             latestSubmittedAt: submission.createdAt,
           });
@@ -248,7 +260,7 @@ export class SubmissionsService {
         }
 
         existing.totalSubmissions += 1;
-        existing.submitterIds.add(submission.userId);
+        existing.submitterIds.add(submission.studentId ?? '');
         if (submission.status === 'ACCEPTED') {
           existing.passedCount += 1;
         }
@@ -277,14 +289,15 @@ export class SubmissionsService {
 
     if (type === 'ALL' || type === 'EXAM') {
       const examWhere: Prisma.ExamSessionWhereInput = {
-        ...(userRole === 'STUDENT' ? { userId } : {}),
+        ...(userRole === 'STUDENT' ? { student: { is: { userId } } } : {}),
       };
 
       const examSessions = await this.prisma.examSession.findMany({
         where: examWhere,
         select: {
           id: true,
-          userId: true,
+          studentId: true,
+          student: { select: { userId: true } },
           startedAt: true,
           examId: true,
           passed: true,
@@ -337,7 +350,7 @@ export class SubmissionsService {
             questionCount: session.exam.questionCount,
             problemCount: session.exam.problemCount,
             totalSubmissions: 1,
-            submitterIds: new Set([session.userId]),
+            submitterIds: new Set([session.student?.userId ?? '']),
             passedCount: session.passed === true ? 1 : 0,
             latestSubmittedAt: session.startedAt,
           });
@@ -345,7 +358,7 @@ export class SubmissionsService {
         }
 
         existing.totalSubmissions += 1;
-        existing.submitterIds.add(session.userId);
+        existing.submitterIds.add(session.student?.userId ?? '');
         if (session.passed === true) {
           existing.passedCount += 1;
         }
@@ -416,7 +429,7 @@ export class SubmissionsService {
     if (normalizedType === 'PROBLEM') {
       const where: Prisma.SubmissionWhereInput = {
         problemId: entityId,
-        ...(userRole === 'STUDENT' ? { userId } : {}),
+        ...(userRole === 'STUDENT' ? { student: { is: { userId } } } : {}),
       };
 
       const [rows, total] = await Promise.all([
@@ -427,20 +440,17 @@ export class SubmissionsService {
           take: limit,
           select: {
             id: true,
-            userId: true,
+            studentId: true,
             status: true,
             language: true,
             passedTestCases: true,
             totalTestCases: true,
             createdAt: true,
-            user: {
+            student: {
               select: {
                 id: true,
-                name: true,
-                email: true,
-                studentProfile: {
-                  select: { studentCode: true },
-                },
+                studentCode: true,
+                user: { select: { id: true, name: true, email: true } },
               },
             },
             problem: {
@@ -471,10 +481,10 @@ export class SubmissionsService {
         },
         data: rows.map((row) => ({
           id: row.id,
-          userId: row.userId,
-          userName: row.user?.name || null,
-          userEmail: row.user?.email || null,
-          studentCode: row.user?.studentProfile?.studentCode || null,
+          userId: row.student?.user?.id ?? null,
+          userName: row.student?.user?.name || null,
+          userEmail: row.student?.user?.email || null,
+          studentCode: row.student?.studentCode || null,
           status: row.status,
           language: row.language,
           passed: row.status === 'PENDING' ? null : row.status === 'ACCEPTED',
@@ -494,7 +504,7 @@ export class SubmissionsService {
 
     const examWhere: Prisma.ExamSessionWhereInput = {
       examId: entityId,
-      ...(userRole === 'STUDENT' ? { userId } : {}),
+      ...(userRole === 'STUDENT' ? { student: { is: { userId } } } : {}),
     };
 
     const [rows, total] = await Promise.all([
@@ -505,7 +515,7 @@ export class SubmissionsService {
         take: limit,
         select: {
           id: true,
-          userId: true,
+          studentId: true,
           status: true,
           passed: true,
           score: true,
@@ -521,14 +531,10 @@ export class SubmissionsService {
               problemCount: true,
             },
           },
-          user: {
+          student: {
             select: {
-              id: true,
-              name: true,
-              email: true,
-              studentProfile: {
-                select: { studentCode: true },
-              },
+              user: { select: { id: true, name: true, email: true } },
+              studentCode: true,
             },
           },
         },
@@ -551,10 +557,10 @@ export class SubmissionsService {
       },
       data: rows.map((row) => ({
         id: row.id,
-        userId: row.userId,
-        userName: row.user?.name || null,
-        userEmail: row.user?.email || null,
-        studentCode: row.user?.studentProfile?.studentCode || null,
+        userId: row.student?.user?.id ?? null,
+        userName: row.student?.user?.name || null,
+        userEmail: row.student?.user?.email || null,
+        studentCode: row.student?.studentCode || null,
         status: row.status,
         language: null,
         passed: row.passed,
@@ -588,7 +594,7 @@ export class SubmissionsService {
 
     // Students can only see their own submissions
     if (userRole === 'STUDENT') {
-      where.userId = userId;
+      where.student = { is: { userId } };
     }
 
     if (problemId) {
@@ -656,11 +662,12 @@ export class SubmissionsService {
         problem: {
           select: { id: true, title: true, slug: true, difficulty: true },
         },
-        user: {
+        student: {
           select: {
             id: true,
-            email: true,
-            studentProfile: { select: { studentCode: true } },
+            userId: true,
+            user: { select: { email: true } },
+            studentCode: true,
           },
         },
       },
@@ -671,7 +678,7 @@ export class SubmissionsService {
     }
 
     // Students can only view their own submissions
-    if (userRole === 'STUDENT' && submission.userId !== userId) {
+    if (userRole === 'STUDENT' && submission.student?.userId !== userId) {
       throw new ForbiddenException('You can only view your own submissions');
     }
 
@@ -679,10 +686,14 @@ export class SubmissionsService {
       ...submission,
       testCaseResults: submission.testCaseResults as TestCaseResultJson[] | null,
       problem: submission.problem,
-      user: {
-        ...submission.user,
-        studentCode: submission.user.studentProfile?.studentCode ?? null,
-      },
+      student: submission.student
+        ? {
+            id: submission.student.id,
+            userId: submission.student.userId,
+            email: submission.student.user?.email ?? null,
+            studentCode: submission.student.studentCode ?? null,
+          }
+        : undefined,
     });
   }
 
@@ -711,26 +722,27 @@ export class SubmissionsService {
    * Get submission statistics for a user on a problem
    */
   async getStats(problemId: string, userId: string): Promise<SubmissionStatsDto> {
+    const studentId = await this.resolveStudentId(userId);
     const [submissions, acceptedCount, bestSubmission, languagesResult] = await Promise.all([
       this.prisma.submission.count({
-        where: { problemId, userId },
+        where: { problemId, studentId },
       }),
       this.prisma.submission.count({
-        where: { problemId, userId, status: 'ACCEPTED' },
+        where: { problemId, studentId, status: 'ACCEPTED' },
       }),
       this.prisma.submission.findFirst({
-        where: { problemId, userId, status: 'ACCEPTED' },
+        where: { problemId, studentId, status: 'ACCEPTED' },
         orderBy: { executionTime: 'asc' },
         select: { executionTime: true, createdAt: true },
       }),
       this.prisma.submission.groupBy({
         by: ['language'],
-        where: { problemId, userId },
+        where: { problemId, studentId },
       }),
     ]);
 
     const lastSubmission = await this.prisma.submission.findFirst({
-      where: { problemId, userId },
+      where: { problemId, studentId },
       orderBy: { createdAt: 'desc' },
       select: { createdAt: true },
     });
@@ -757,7 +769,7 @@ export class SubmissionsService {
     if (type === 'ALL' || type === 'PROBLEM') {
       const where: Prisma.SubmissionWhereInput = {};
       if (userRole === 'STUDENT') {
-        where.userId = userId;
+        where.student = { is: { userId } };
       }
 
       [problemSubmissions, problemTotal] = await Promise.all([
@@ -788,7 +800,7 @@ export class SubmissionsService {
     if (type === 'ALL' || type === 'EXAM') {
       const where: Prisma.ExamSessionWhereInput = {};
       if (userRole === 'STUDENT') {
-        where.userId = userId;
+        where.student = { is: { userId } };
       }
 
       [examSessions, examTotal] = await Promise.all([

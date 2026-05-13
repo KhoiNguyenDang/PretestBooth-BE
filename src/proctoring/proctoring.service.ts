@@ -22,6 +22,7 @@ export class ProctoringService {
       where: { id: dto.sessionId },
       include: {
         booking: true,
+        student: { select: { userId: true, id: true } },
         exam: {
           select: { type: true },
         },
@@ -32,13 +33,13 @@ export class ProctoringService {
     if (!examSession) {
       practiceSession = await this.prisma.practiceSession.findFirst({
         where: { id: dto.sessionId },
-        include: { booking: true },
+        include: { booking: true, student: { select: { userId: true, id: true } } },
       });
     }
 
     const session = examSession || practiceSession;
     if (!session) throw new NotFoundException('Phiên làm bài không tồn tại (EXAM hoặc PRACTICE)');
-    if (session.userId !== userId)
+    if (session.student?.userId !== userId)
       throw new ForbiddenException('Bạn không có quyền báo cáo cho phiên này');
 
     const isExamSession = !!examSession;
@@ -66,9 +67,7 @@ export class ProctoringService {
 
     // Save event with appropriate session reference
     const eventData: any = {
-      user: {
-        connect: { id: userId },
-      },
+      studentId: session.student?.id,
       eventType: dto.eventType,
       warningLevel,
       metadata: (dto.metadata || {}) as Prisma.InputJsonValue,
@@ -107,7 +106,7 @@ export class ProctoringService {
 
       // Heavy point penalty
       await this.pointsService.addTransaction(
-        userId,
+        session.student?.id ?? userId,
         'EXAM_CANCELLED_PENALTY',
         -20,
         `Bài thi bị hủy do vi phạm quy chế nghiêm trọng (${totalSeverity} điểm cảnh báo)`,
@@ -118,7 +117,7 @@ export class ProctoringService {
     } else if (isExamSession && totalSeverity >= 5 && totalSeverity < 10 && warningLevel > 1) {
       // Threshold 2: Mild point penalty per major infraction after 5
       await this.pointsService.addTransaction(
-        userId,
+        session.student?.id ?? userId,
         'PROCTORING_WARNING',
         -2,
         `Trừ điểm do vi phạm quy chế thi (${dto.eventType})`,
@@ -140,7 +139,7 @@ export class ProctoringService {
   private async handleExamTabSwitchWarning(examSession: any, userId: string) {
     // Create warning event only. Do not terminate or deduct points.
     const examTabSwitchEventData: any = {
-      userId,
+      studentId: examSession.studentId,
       examSessionId: examSession.id,
       eventType: 'TAB_SWITCH',
       warningLevel: 1,
@@ -183,10 +182,10 @@ export class ProctoringService {
       select: {
         status: true,
         score: true,
-        user: {
+        student: {
           select: {
-            name: true,
-            studentProfile: { select: { studentCode: true } },
+            studentCode: true,
+            user: { select: { name: true } },
           },
         },
       },
@@ -206,10 +205,14 @@ export class ProctoringService {
         select: {
           status: true,
           score: true,
-          user: {
+          student: {
             select: {
-              name: true,
-              studentProfile: { select: { studentCode: true } },
+              studentCode: true,
+              user: {
+                select: {
+                  name: true,
+                },
+              },
             },
           },
         },
@@ -225,8 +228,8 @@ export class ProctoringService {
     session = {
       ...session,
       user: {
-        ...session.user,
-        studentCode: session.user?.studentProfile?.studentCode ?? null,
+        name: session.student?.user?.name ?? null,
+        studentCode: session.student?.studentCode ?? null,
       },
     };
 

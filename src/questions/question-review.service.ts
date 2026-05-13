@@ -15,6 +15,18 @@ import type { SubmitQuestionReviewDto } from './dto/submit-question-review.dto';
 export class QuestionReviewService {
   constructor(private readonly prisma: PrismaService) {}
 
+  private async resolveLecturerId(userId: string, role: string): Promise<string | null> {
+    if (role === 'ADMIN') return null;
+    const lecturer = await this.prisma.lecturer.findUnique({
+      where: { userId },
+      select: { id: true },
+    });
+    if (!lecturer) {
+      throw new ForbiddenException('Giảng viên không tồn tại');
+    }
+    return lecturer.id;
+  }
+
   async createQuarterlySessions(input?: GenerateReviewSessionsDto) {
     const today = new Date();
     const quarter = input?.quarter ?? this.getQuarter(today);
@@ -91,15 +103,11 @@ export class QuestionReviewService {
               choices: { orderBy: { order: 'asc' } },
             },
           },
-          reviewer: {
-            select: { id: true, name: true, email: true },
-          },
+          lecturer: { select: { id: true, user: { select: { id: true, name: true, email: true } } } },
           actions: {
             orderBy: { reviewedAt: 'desc' },
             include: {
-              reviewer: {
-                select: { id: true, name: true, email: true },
-              },
+              lecturer: { select: { id: true, user: { select: { id: true, name: true, email: true } } } },
             },
           },
         },
@@ -196,6 +204,7 @@ export class QuestionReviewService {
     }
 
     const reviewedAt = new Date();
+    const lecturerId = await this.resolveLecturerId(reviewerId, reviewerRole);
 
     const updated = await this.prisma.$transaction(async (tx) => {
       const updatedSession = await tx.questionReviewSession.update({
@@ -203,13 +212,11 @@ export class QuestionReviewService {
         data: {
           status: dto.status,
           notes: dto.notes?.trim() || null,
-          reviewedBy: reviewerId,
+          lecturerId,
           reviewedAt,
         },
         include: {
-          reviewer: {
-            select: { id: true, name: true, email: true },
-          },
+          lecturer: { select: { id: true, user: { select: { id: true, name: true, email: true } } } },
         },
       });
 
@@ -218,7 +225,7 @@ export class QuestionReviewService {
           sessionId: dto.sessionId,
           status: dto.status,
           notes: dto.notes?.trim() || null,
-          reviewedBy: reviewerId,
+          lecturerId,
           reviewedAt,
         },
       });
@@ -237,7 +244,7 @@ export class QuestionReviewService {
       where: { id: dto.sessionId },
       include: {
         question: {
-          select: { creatorId: true },
+          select: { lecturerId: true },
         },
       },
     });
@@ -246,7 +253,8 @@ export class QuestionReviewService {
       throw new NotFoundException('Review session không tồn tại');
     }
 
-    const isOwner = session.question.creatorId === actorId;
+    const actorLecturerId = await this.resolveLecturerId(actorId, actorRole);
+    const isOwner = session.question.lecturerId === actorLecturerId;
     if (!isOwner && actorRole !== 'ADMIN') {
       throw new ForbiddenException(
         'Chỉ người tạo câu hỏi hoặc quản trị viên mới được gửi duyệt lại',
@@ -268,13 +276,11 @@ export class QuestionReviewService {
         data: {
           status: QuestionReviewStatus.RESUBMITTED,
           notes,
-          reviewedBy: actorId,
+          lecturerId: actorLecturerId,
           reviewedAt,
         },
         include: {
-          reviewer: {
-            select: { id: true, name: true, email: true },
-          },
+          lecturer: { select: { id: true, user: { select: { id: true, name: true, email: true } } } },
         },
       });
 
@@ -283,7 +289,7 @@ export class QuestionReviewService {
           sessionId: dto.sessionId,
           status: QuestionReviewStatus.RESUBMITTED,
           notes,
-          reviewedBy: actorId,
+          lecturerId: actorLecturerId,
           reviewedAt,
         },
       });

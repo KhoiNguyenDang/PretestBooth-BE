@@ -39,6 +39,12 @@ export class ProblemsService {
     return lecturer;
   }
 
+  private async resolveActorLecturerId(userId: string, userRole: string) {
+    if (userRole !== 'LECTURER') return null;
+    const lecturer = await this.getLecturerIdentity(userId);
+    return lecturer.id;
+  }
+
   private normalizeImportHeaderText(text: string): string {
     return text
       .trim()
@@ -264,7 +270,6 @@ export class ProblemsService {
             hints: this.parseListValue(row.hints),
             subjectId,
             topicId,
-            creatorId,
             lecturerId: lecturer?.id ?? null,
           } as any,
         });
@@ -322,7 +327,6 @@ export class ProblemsService {
           isPublished: dto.isPublished,
           subjectId: dto.subjectId || null,
           topicId: dto.topicId || null,
-          creatorId,
           lecturerId: lecturer?.id ?? null,
         } as any,
       });
@@ -572,7 +576,8 @@ export class ProblemsService {
     }
 
     // Only creator or admin can update
-    if (problem.creatorId !== userId && userRole !== 'ADMIN') {
+    const actorLecturerId = await this.resolveActorLecturerId(userId, userRole);
+    if (problem.lecturerId !== actorLecturerId && userRole !== 'ADMIN') {
       throw new ForbiddenException('Bạn không có quyền chỉnh sửa bài tập này');
     }
 
@@ -631,7 +636,8 @@ export class ProblemsService {
     }
 
     // Only creator or admin can delete
-    if (problem.creatorId !== userId && userRole !== 'ADMIN') {
+    const actorLecturerId = await this.resolveActorLecturerId(userId, userRole);
+    if (problem.lecturerId !== actorLecturerId && userRole !== 'ADMIN') {
       throw new ForbiddenException('Bạn không có quyền xóa bài tập này');
     }
 
@@ -659,7 +665,8 @@ export class ProblemsService {
     }
 
     // Only creator or admin can add test cases
-    if (problem.creatorId !== userId && userRole !== 'ADMIN') {
+    const actorLecturerId = await this.resolveActorLecturerId(userId, userRole);
+    if (problem.lecturerId !== actorLecturerId && userRole !== 'ADMIN') {
       throw new ForbiddenException('Bạn không có quyền thêm test case');
     }
 
@@ -693,7 +700,8 @@ export class ProblemsService {
     }
 
     // Only creator or admin can add test cases
-    if (problem.creatorId !== userId && userRole !== 'ADMIN') {
+    const actorLecturerId = await this.resolveActorLecturerId(userId, userRole);
+    if (problem.lecturerId !== actorLecturerId && userRole !== 'ADMIN') {
       throw new ForbiddenException('Bạn không có quyền thêm test case');
     }
 
@@ -754,7 +762,8 @@ export class ProblemsService {
     }
 
     // Only creator or admin can update test cases
-    if (testCase.problem.creatorId !== userId && userRole !== 'ADMIN') {
+    const actorLecturerId = await this.resolveActorLecturerId(userId, userRole);
+    if (testCase.problem.lecturerId !== actorLecturerId && userRole !== 'ADMIN') {
       throw new ForbiddenException('Bạn không có quyền chỉnh sửa test case');
     }
 
@@ -788,7 +797,8 @@ export class ProblemsService {
     }
 
     // Only creator or admin can delete test cases
-    if (testCase.problem.creatorId !== userId && userRole !== 'ADMIN') {
+    const actorLecturerId = await this.resolveActorLecturerId(userId, userRole);
+    if (testCase.problem.lecturerId !== actorLecturerId && userRole !== 'ADMIN') {
       throw new ForbiddenException('Bạn không có quyền xóa test case');
     }
 

@@ -22,28 +22,12 @@ model User {
   auth                     UserAuth?          @relation("UserAuth")
   kycProfile               UserKyc?           @relation("UserKyc")
   faceEmbeddingRecord      UserFaceEmbedding? @relation("UserFaceEmbedding")
-  pointAccount             PointAccount?      @relation("PointAccount")
-  reviewedKycProfiles      UserKyc[]          @relation("UserKycReviewer")
 
-  // Cross-role relations (will migrate to Student/Lecturer but kept for backward compat)
-  bookings                   Booking[]                      @relation("UserBooking")
-  boothStatusLogs            BoothStatusLog[]
-  createdExams               Exam[]                         @relation("ExamCreator")
-  examSessions               ExamSession[]                  @relation("UserExamSession")
-  pointTransactions          PointTransaction[]             @relation("UserPointTransaction")
-  bookingCheckinAttempts     BookingCheckinAttempt[]         @relation("UserCheckinAttempt")
-  practiceSessions           PracticeSession[]              @relation("UserPracticeSession")
-  createdProblems            Problem[]                      @relation("ProblemCreator")
-  createdQuestions           Question[]                     @relation("QuestionCreator")
-  reviewedQuestionSessions   QuestionReviewSession[]        @relation("QuestionReviewSessionReviewer")
-  questionReviewActions      QuestionReviewAction[]         @relation("QuestionReviewActionReviewer")
-  grantedLecturerPermissions LecturerPermissionAssignment[] @relation("LecturerPermissionGrantor")
-  createdLecturerRoles       LecturerRole[]                 @relation("LecturerRoleCreator")
-  proctoringEvents           ProctoringEvent[]
-  submissions                Submission[]
+  // Audit/Identity relations only
   
-  // Cross-role relationsfor lecturers assigning roles
-  assignedLecturerRoles      Lecturer[]                     @relation("LecturerAssigner")
+  // Cross-role relations for lecturers assigning roles (audit)
+  
+  // Audit: submission creator identity (denormalized for backward compat)
 
   @@index([email])
   @@index([role])
@@ -84,20 +68,20 @@ model UserKyc {
   kycManualReviewRequestedAt     DateTime?
   kycManualReviewRequestedReason String?
   kycManualReviewReviewedAt      DateTime?
-  kycManualReviewedByUserId      String?
+  kycManualReviewedByLecturerId  String?
   kycManualReviewRejectionReason String?
   kycManualReviewNotes           String?
   kycConsentVersion              String?
   kycConsentedAt                 DateTime?
   createdAt                      DateTime              @default(now())
   updatedAt                      DateTime              @updatedAt
-  reviewedByUser                 User?                 @relation("UserKycReviewer", fields: [kycManualReviewedByUserId], references: [id], onDelete: SetNull)
+  reviewedByLecturer             Lecturer?             @relation("KycLecturerReviewer", fields: [kycManualReviewedByLecturerId], references: [id], onDelete: SetNull)
   user                           User                  @relation("UserKyc", fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([kycStatus])
   @@index([kycManualReviewStatus])
-  @@index([kycManualReviewedByUserId])
+  @@index([kycManualReviewedByLecturerId])
 }
 
 model UserFaceEmbedding {
@@ -130,13 +114,15 @@ model Student {
 
   user User @relation("UserStudent", fields: [userId], references: [id], onDelete: Cascade)
 
-  // Relations from existing User.bookings, examSessions, etc.
+  // Student-owned operational data
   bookings              Booking[]
   examSessions          ExamSession[]
   submissions           Submission[]
   practiceSessions      PracticeSession[]
   checkinAttempts       BookingCheckinAttempt[]
   pointTransactions     PointTransaction[]        @relation("StudentPointTransaction")
+  proctoringEvents      ProctoringEvent[]
+  pointAccount          PointAccount?             @relation("PointAccount")
 
   @@index([userId])
   @@index([studentCode])
@@ -147,51 +133,57 @@ model Lecturer {
   userId                       String    @unique
   lecturerRoleId               String?
   lecturerRoleAssignedAt       DateTime?
-  lecturerRoleAssignedByUserId String?
+  lecturerRoleAssignedByLecturerId String?
   createdAt                    DateTime  @default(now())
   updatedAt                    DateTime  @updatedAt
 
   user               User          @relation("UserLecturer", fields: [userId], references: [id], onDelete: Cascade)
   lecturerRole       LecturerRole? @relation("LecturerRole", fields: [lecturerRoleId], references: [id], onDelete: SetNull)
-  assignedByUser     User?         @relation("LecturerAssigner", fields: [lecturerRoleAssignedByUserId], references: [id], onDelete: SetNull)
+  assignedByLecturer Lecturer?     @relation("LecturerAssigner", fields: [lecturerRoleAssignedByLecturerId], references: [id], onDelete: SetNull)
+  assignedLecturers  Lecturer[]    @relation("LecturerAssigner")
   lecturerPermissions LecturerPermissionAssignment[] @relation("LecturerPermissionOwner")
 
-  // Relations from existing User tables
-  createdProblems    Problem[]       @relation("ProblemLecturerCreator")
-  createdQuestions   Question[]      @relation("QuestionLecturerCreator")
-  createdExams       Exam[]          @relation("ExamLecturerCreator")
-  reviewActions      QuestionReviewAction[]
+  // Lecturer-owned operational data
+  createdProblems           Problem[]                 @relation("ProblemLecturerCreator")
+  createdQuestions          Question[]                @relation("QuestionLecturerCreator")
+  createdExams              Exam[]                    @relation("ExamLecturerCreator")
+  reviewActions             QuestionReviewAction[]
+  reviewedQuestionSessions   QuestionReviewSession[]
+  reviewedKycProfiles        UserKyc[]                      @relation("KycLecturerReviewer")
+  grantedPermissions         LecturerPermissionAssignment[] @relation("LecturerPermissionGrantor")
+  createdRoles               LecturerRole[]                 @relation("LecturerRoleCreator")
+  boothStatusLogs            BoothStatusLog[]
 
   @@index([userId])
   @@index([lecturerRoleId])
-  @@index([lecturerRoleAssignedByUserId])
+  @@index([lecturerRoleAssignedByLecturerId])
 }
 
 model PointAccount {
-  id          String   @id @default(uuid())
-  userId      String   @unique
-  totalPoints Int      @default(0)
-  updatedAt   DateTime @updatedAt
-  createdAt   DateTime @default(now())
-  user        User     @relation("PointAccount", fields: [userId], references: [id], onDelete: Cascade)
+  id          String    @id @default(uuid())
+  studentId   String    @unique
+  totalPoints Int       @default(0)
+  updatedAt   DateTime  @updatedAt
+  createdAt   DateTime  @default(now())
+  student     Student   @relation("PointAccount", fields: [studentId], references: [id], onDelete: Cascade)
 
-  @@index([userId])
+  @@index([studentId])
 }
 
 model LecturerPermissionAssignment {
   id              String             @id @default(uuid())
   lecturerId      String
   permission      LecturerPermission
-  grantedByUserId String?
+  grantedByLecturerId String?
   grantedAt       DateTime           @default(now())
   updatedAt       DateTime           @updatedAt
   lecturer        Lecturer           @relation("LecturerPermissionOwner", fields: [lecturerId], references: [id], onDelete: Cascade)
-  grantedByUser   User?              @relation("LecturerPermissionGrantor", fields: [grantedByUserId], references: [id], onDelete: SetNull)
+  grantedByLecturer Lecturer?        @relation("LecturerPermissionGrantor", fields: [grantedByLecturerId], references: [id], onDelete: SetNull)
 
   @@unique([lecturerId, permission])
   @@index([lecturerId])
   @@index([permission])
-  @@index([grantedByUserId])
+  @@index([grantedByLecturerId])
 }
 
 model LecturerRole {
@@ -201,16 +193,16 @@ model LecturerRole {
   description     String?
   priority        Int                      @unique
   isActive        Boolean                  @default(true)
-  createdByUserId String?
+  createdByLecturerId String?
   createdAt       DateTime                 @default(now())
   updatedAt       DateTime                 @updatedAt
-  createdByUser   User?                    @relation("LecturerRoleCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  createdByLecturer Lecturer?              @relation("LecturerRoleCreator", fields: [createdByLecturerId], references: [id], onDelete: SetNull)
   lecturers       Lecturer[]               @relation("LecturerRole")
   permissions     LecturerRolePermission[]
 
   @@index([priority])
   @@index([isActive])
-  @@index([createdByUserId])
+  @@index([createdByLecturerId])
 }
 
 model LecturerRolePermission {
@@ -247,14 +239,12 @@ model Problem {
   subjectId           String?
   topicId             String?
   categoryId          String?
-  creatorId           String
-  lecturerId          String?  // New FK for role-based migration
+  lecturerId          String?
   createdAt           DateTime              @default(now())
   updatedAt           DateTime              @updatedAt
   examItems           ExamItem[]            @relation("ProblemExamItems")
   practiceItems       PracticeSessionItem[]
   category            Category?             @relation(fields: [categoryId], references: [id])
-  creator             User                  @relation("ProblemCreator", fields: [creatorId], references: [id])
   lecturerCreator     Lecturer?             @relation("ProblemLecturerCreator", fields: [lecturerId], references: [id])
   subject             Subject?              @relation(fields: [subjectId], references: [id])
   topic               Topic?                @relation(fields: [topicId], references: [id])
@@ -263,7 +253,6 @@ model Problem {
 
   @@index([difficulty])
   @@index([isPublished])
-  @@index([creatorId])
   @@index([lecturerId])
   @@index([subjectId])
   @@index([topicId])
@@ -303,20 +292,17 @@ model Submission {
   compileOutput   String?
   errorMessage    String?
   testCaseResults Json?
-  userId          String
-  studentId       String?  // New FK for role-based migration
+  studentId       String?
   problemId       String
   createdAt       DateTime         @default(now())
   problem         Problem          @relation(fields: [problemId], references: [id], onDelete: Cascade)
-  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  student         Student?         @relation(fields: [studentId], references: [id], onDelete: SetNull)
+  student         Student?         @relation(fields: [studentId], references: [id], onDelete: Cascade)
 
-  @@index([userId])
   @@index([studentId])
   @@index([problemId])
   @@index([status])
   @@index([createdAt])
-  @@index([userId, problemId])
+  @@index([studentId, problemId])
 }
 
 model Subject {
@@ -364,14 +350,12 @@ model Question {
   subjectId      String
   topicId        String?
   categoryId     String?
-  creatorId      String
-  lecturerId     String?  // New FK for role-based migration
+  lecturerId     String?
   createdAt      DateTime                @default(now())
   updatedAt      DateTime                @updatedAt
   examItems      ExamItem[]              @relation("QuestionExamItems")
   practiceItems  PracticeSessionItem[]
   category       Category?               @relation(fields: [categoryId], references: [id])
-  creator        User                    @relation("QuestionCreator", fields: [creatorId], references: [id])
   lecturerCreator Lecturer?              @relation("QuestionLecturerCreator", fields: [lecturerId], references: [id])
   subject        Subject                 @relation(fields: [subjectId], references: [id])
   topic          Topic?                  @relation(fields: [topicId], references: [id])
@@ -385,7 +369,6 @@ model Question {
   @@index([subjectId])
   @@index([topicId])
   @@index([categoryId])
-  @@index([creatorId])
   @@index([lecturerId])
 }
 
@@ -398,18 +381,18 @@ model QuestionReviewSession {
   endDate      DateTime
   status       QuestionReviewStatus   @default(PENDING)
   notes        String?
-  reviewedBy   String?
+  lecturerId   String?
   reviewedAt   DateTime?
   questionId   String
   createdAt    DateTime               @default(now())
   updatedAt    DateTime               @updatedAt
   question     Question               @relation(fields: [questionId], references: [id], onDelete: Cascade)
-  reviewer     User?                  @relation("QuestionReviewSessionReviewer", fields: [reviewedBy], references: [id])
+  lecturer     Lecturer?              @relation(fields: [lecturerId], references: [id], onDelete: SetNull)
   actions      QuestionReviewAction[]
 
   @@unique([quarter, year, questionId])
   @@index([quarter, year, status])
-  @@index([reviewedBy])
+  @@index([lecturerId])
   @@index([questionId])
 }
 
@@ -418,16 +401,13 @@ model QuestionReviewAction {
   sessionId  String
   status     QuestionReviewStatus
   notes      String?
-  reviewedBy String
-  lecturerId String?  // New FK for role-based migration
+  lecturerId String?
   reviewedAt DateTime              @default(now())
   createdAt  DateTime              @default(now())
   session    QuestionReviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  reviewer   User                  @relation("QuestionReviewActionReviewer", fields: [reviewedBy], references: [id], onDelete: Cascade)
   lecturer   Lecturer?             @relation(fields: [lecturerId], references: [id], onDelete: SetNull)
 
   @@index([sessionId])
-  @@index([reviewedBy])
   @@index([lecturerId])
   @@index([reviewedAt])
 }
@@ -461,8 +441,7 @@ model Exam {
   subjectId                         String?
   topicId                           String?
   isPublished                       Boolean        @default(false)
-  creatorId                         String
-  lecturerId                        String?  // New FK for role-based migration
+  lecturerId                        String?
   createdAt                         DateTime       @default(now())
   updatedAt                         DateTime       @updatedAt
   visibility                        ExamVisibility @default(PRIVATE)
@@ -470,14 +449,12 @@ model Exam {
   publishedAt                       DateTime?
   allowStudentReviewResults         Boolean        @default(false)
   passingScoreAbsolute              Float?
-  creator                           User           @relation("ExamCreator", fields: [creatorId], references: [id])
   lecturerCreator                   Lecturer?      @relation("ExamLecturerCreator", fields: [lecturerId], references: [id])
   subject                           Subject?       @relation(fields: [subjectId], references: [id])
   topic                             Topic?         @relation(fields: [topicId], references: [id])
   items                             ExamItem[]
   sessions                          ExamSession[]
 
-  @@index([creatorId])
   @@index([lecturerId])
   @@index([subjectId])
   @@index([topicId])
@@ -509,7 +486,6 @@ model ExamItem {
 model ExamSession {
   id                          String                  @id @default(uuid())
   examId                      String
-  userId                      String
   studentId                   String?  // New FK for role-based migration
   bookingId                   String?
   isPretestSession            Boolean                 @default(false)
@@ -532,22 +508,18 @@ model ExamSession {
   createdAt                   DateTime                @default(now()) @db.Timestamptz(3)
   expiresAt                   DateTime                @default(now()) @db.Timestamptz(3)
   exam                        Exam                    @relation(fields: [examId], references: [id], onDelete: Cascade)
-  user                        User                    @relation("UserExamSession", fields: [userId], references: [id], onDelete: Cascade)
   student                     Student?                @relation(fields: [studentId], references: [id], onDelete: SetNull)
   booking                     Booking?                @relation("ExamSessionBooking", fields: [bookingId], references: [id], onDelete: SetNull)
   answers                     ExamSessionAnswer[]
   gradeAudits                 ExamSessionGradeAudit[]
   proctoringEvents            ProctoringEvent[]
 
-  @@index([examId, userId])
   @@index([examId])
-  @@index([userId])
   @@index([studentId])
   @@index([status])
   @@index([resultPublicationStatus])
   @@index([expiresAt])
   @@index([bookingId])
-  @@index([userId, isPretestSession])
   @@index([bookingId, isPretestSession])
 }
 
@@ -570,7 +542,7 @@ model ExamSessionAnswer {
   manualIsCorrect      Boolean?
   manualScore          Float?
   reviewerFeedback     String?
-  reviewedByUserId     String?
+  reviewedByLecturerId String?
   reviewedAt           DateTime?
   createdAt            DateTime    @default(now())
   updatedAt            DateTime    @updatedAt
@@ -580,7 +552,7 @@ model ExamSessionAnswer {
   @@unique([sessionId, examItemId])
   @@index([sessionId])
   @@index([examItemId])
-  @@index([reviewedByUserId])
+  @@index([reviewedByLecturerId])
   @@index([reviewedAt])
 }
 
@@ -594,14 +566,14 @@ model ExamSessionGradeAudit {
   previousIsCorrect Boolean?
   newIsCorrect      Boolean?
   feedback          String?
-  actorUserId       String?
+  actorLecturerId   String?
   actorRole         Role?
   createdAt         DateTime         @default(now()) @db.Timestamptz(3)
   session           ExamSession      @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@index([sessionId, createdAt])
   @@index([action])
-  @@index([actorUserId])
+  @@index([actorLecturerId])
 }
 
 model Category {
@@ -649,13 +621,13 @@ model BoothStatusLog {
   fromStatus      BoothStatus
   toStatus        BoothStatus
   note            String
-  changedByUserId String?
+  changedByLecturerId String?
   changedAt       DateTime    @default(now()) @db.Timestamptz(3)
   booth           Booth       @relation(fields: [boothId], references: [id], onDelete: Cascade)
-  changedByUser   User?       @relation(fields: [changedByUserId], references: [id])
+  changedByLecturer Lecturer? @relation(fields: [changedByLecturerId], references: [id])
 
   @@index([boothId, changedAt])
-  @@index([changedByUserId])
+  @@index([changedByLecturerId])
 }
 
 model BookingDurationOption {
@@ -675,16 +647,15 @@ model SystemSetting {
   key             String   @id
   value           String
   description     String?
-  updatedByUserId String?
+  updatedByLecturerId String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  @@index([updatedByUserId])
+  @@index([updatedByLecturerId])
 }
 
 model Booking {
   id                       String        @id @default(uuid())
-  userId                   String
   studentId                String?  // New FK for role-based migration
   boothId                  String
   type                     BookingType
@@ -713,10 +684,8 @@ model Booking {
   updatedAt DateTime @updatedAt @db.Timestamptz(3)
 
   booth   Booth    @relation(fields: [boothId], references: [id])
-  user    User     @relation("UserBooking", fields: [userId], references: [id])
   student Student? @relation(fields: [studentId], references: [id], onDelete: SetNull)
 
-  @@index([userId])
   @@index([studentId])
   @@index([boothId, date])
   @@index([date, startTime])
@@ -728,7 +697,6 @@ model Booking {
 model BookingCheckinAttempt {
   id               String   @id @default(uuid())
   bookingId        String
-  userId           String
   studentId        String?  // New FK for role-based migration
   similarityScore  Float
   threshold        Float    @default(0.6)
@@ -739,18 +707,15 @@ model BookingCheckinAttempt {
   verifierDeviceId String?
   createdAt        DateTime @default(now()) @db.Timestamptz(3)
   booking          Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
-  user             User     @relation("UserCheckinAttempt", fields: [userId], references: [id], onDelete: Cascade)
   student          Student? @relation(fields: [studentId], references: [id], onDelete: SetNull)
 
   @@index([bookingId, createdAt])
-  @@index([userId, createdAt])
   @@index([studentId, createdAt])
   @@index([isMatch])
 }
 
 model PointTransaction {
   id            String    @id @default(uuid())
-  userId        String
   studentId     String?  // New FK for role-based migration
   type          PointType
   points        Int
@@ -758,10 +723,8 @@ model PointTransaction {
   bookingId     String?
   examSessionId String?
   createdAt     DateTime  @default(now()) @db.Timestamptz(3)
-  user          User      @relation("UserPointTransaction", fields: [userId], references: [id])
   student       Student?  @relation("StudentPointTransaction", fields: [studentId], references: [id], onDelete: SetNull)
 
-  @@index([userId])
   @@index([studentId])
   @@index([type])
   @@index([createdAt])
@@ -770,8 +733,8 @@ model PointTransaction {
 model ProctoringEvent {
   id String @id @default(uuid())
 
-  userId String?
-  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+  studentId String?
+  student   Student? @relation(fields: [studentId], references: [id], onDelete: SetNull)
 
   // Either examSessionId or practiceSessionId should be set
   examSessionId String?
@@ -786,15 +749,14 @@ model ProctoringEvent {
 
   timestamp DateTime @default(now()) @db.Timestamptz(3)
 
+  @@index([studentId])
   @@index([examSessionId])
   @@index([practiceSessionId])
-  @@index([userId])
   @@index([eventType])
 }
 
 model PracticeSession {
   id               String                @id @default(uuid())
-  userId           String
   studentId        String?  // New FK for role-based migration
   bookingId        String?
   duration         Int
@@ -809,13 +771,11 @@ model PracticeSession {
   maxScore         Float?
   status           PracticeSessionStatus @default(IN_PROGRESS)
   createdAt        DateTime              @default(now()) @db.Timestamptz(3)
-  user             User                  @relation("UserPracticeSession", fields: [userId], references: [id])
   student          Student?              @relation(fields: [studentId], references: [id], onDelete: SetNull)
   booking          Booking?              @relation("PracticeSessionBooking", fields: [bookingId], references: [id], onDelete: SetNull)
   items            PracticeSessionItem[]
   proctoringEvents ProctoringEvent[]
 
-  @@index([userId])
   @@index([studentId])
   @@index([status])
   @@index([createdAt])

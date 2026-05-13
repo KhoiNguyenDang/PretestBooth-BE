@@ -76,7 +76,7 @@ const VIETNAM_UTC_OFFSET_MINUTES = 7 * 60;
 @Injectable()
 export class ExamsService {
   private readonly logger = new Logger(ExamsService.name);
-  private readonly defaultPretestConfig: Omit<PretestConfigDto, 'updatedAt' | 'updatedByUserId'> = {
+  private readonly defaultPretestConfig: Omit<PretestConfigDto, 'updatedAt' | 'updatedByLecturerId'> = {
     isEnabled: false,
     assignmentMode: 'OFFICIAL_EXAM_POOL',
     maxAttempts: 3,
@@ -101,6 +101,11 @@ export class ExamsService {
   private async resolveLecturerIdentity(userId: string) {
     const lecturer = await this.lecturerService.getLecturerByUserId(userId);
     return lecturer?.id ?? null;
+  }
+
+  private async resolveStudentIdentity(userId: string) {
+    const student = await this.prisma.student.findUnique({ where: { userId } });
+    return student?.id ?? null;
   }
 
   private async assertExamManagementPermission(
@@ -205,11 +210,11 @@ export class ExamsService {
   }
 
   async autoSubmitExpiredSessions(): Promise<number> {
-    const inProgressSessions = await this.prisma.examSession.findMany({
+    const inProgressSessions = await (this.prisma as any).examSession.findMany({
       where: { status: 'IN_PROGRESS' },
       select: {
         id: true,
-        userId: true,
+        student: { select: { userId: true } },
         startedAt: true,
         expiresAt: true,
         exam: {
@@ -228,7 +233,7 @@ export class ExamsService {
       }
 
       try {
-        await this.submitSession(session.id, session.userId);
+        await this.submitSession(session.id, session.student?.userId ?? '');
         submittedCount += 1;
       } catch (error) {
         this.logger.warn(
@@ -303,9 +308,14 @@ export class ExamsService {
       ? 0
       : this.calculateExamCompletionPoints(score, maxScore);
 
+    const sessionOwner = await this.prisma.examSession.findUnique({
+      where: { id: sessionId },
+      select: { studentId: true },
+    });
+
     const existingTransactions = await this.prisma.pointTransaction.findMany({
       where: {
-        userId,
+        studentId: sessionOwner?.studentId ?? undefined,
         type: 'EXAM_COMPLETION',
         examSessionId: sessionId,
       },
@@ -320,7 +330,7 @@ export class ExamsService {
     }
 
     await this.pointsService.addTransaction(
-      userId,
+      sessionOwner?.studentId ?? userId,
       'EXAM_COMPLETION',
       delta,
       `Điều chỉnh điểm hoàn thành bài thi: ${score}/${maxScore ?? 0}`,
@@ -410,7 +420,7 @@ export class ExamsService {
 
   private parseStoredPretestConfig(
     rawValue: string | null | undefined,
-  ): Omit<PretestConfigDto, 'updatedAt' | 'updatedByUserId'> {
+  ): Omit<PretestConfigDto, 'updatedAt' | 'updatedByLecturerId'> {
     if (!rawValue) {
       return { ...this.defaultPretestConfig };
     }
@@ -448,7 +458,7 @@ export class ExamsService {
     return {
       ...config,
       updatedAt: setting?.updatedAt ?? null,
-      updatedByUserId: setting?.updatedByUserId ?? null,
+      updatedByLecturerId: setting?.updatedByLecturerId ?? null,
     };
   }
 
@@ -606,13 +616,13 @@ export class ExamsService {
       where: { key: PRETEST_CONFIG_SETTING_KEY },
       update: {
         value: JSON.stringify(normalized),
-        updatedByUserId: userId,
+        updatedByLecturerId: await this.resolveLecturerIdentity(userId),
       },
       create: {
         key: PRETEST_CONFIG_SETTING_KEY,
         value: JSON.stringify(normalized),
         description: 'Global pretest exam-flow config for booth EXAM check-in sessions',
-        updatedByUserId: userId,
+        updatedByLecturerId: await this.resolveLecturerIdentity(userId),
       },
     });
 
@@ -624,17 +634,21 @@ export class ExamsService {
       questionBankRandom: normalized.questionBankRandom ?? null,
       officialExamPool: normalized.officialExamPool ?? null,
       updatedAt: savedSetting.updatedAt,
-      updatedByUserId: savedSetting.updatedByUserId,
+      updatedByLecturerId: savedSetting.updatedByLecturerId,
     };
   }
 
   async getMyPretestStatus(userId: string, _userRole: string): Promise<PretestStatusDto> {
     const config = await this.loadPretestConfigRecord();
+    const studentId = await this.resolveStudentIdentity(userId);
+    if (!studentId) {
+      throw new NotFoundException('Sinh viên không tồn tại');
+    }
     const todayRange = this.getVietnamDayRange();
     const [attemptsUsed, passedSession] = await Promise.all([
       this.prisma.examSession.count({
         where: {
-          userId,
+          studentId,
           isPretestSession: true,
           startedAt: {
             gte: todayRange.start,
@@ -644,7 +658,7 @@ export class ExamsService {
       }),
       this.prisma.examSession.findFirst({
         where: {
-          userId,
+          studentId,
           isPretestSession: true,
           passed: true,
         },
@@ -769,7 +783,7 @@ export class ExamsService {
           visibility: 'PRIVATE',
           allowStudentReviewResults: false,
           passingScoreAbsolute: null,
-          creatorId: userId,
+          lecturerId: null,
         },
       });
 
@@ -823,12 +837,16 @@ export class ExamsService {
     }
 
     const todayRange = this.getVietnamDayRange();
+    const studentId = await this.resolveStudentIdentity(userId);
+    if (!studentId) {
+      throw new NotFoundException('Sinh viên không tồn tại');
+    }
 
     const activeBooking = await this.bookingsService.requireActiveCheckedInBooking(userId, 'EXAM');
 
     const existingInProgress = await this.prisma.examSession.findFirst({
       where: {
-        userId,
+        studentId,
         isPretestSession: true,
         status: 'IN_PROGRESS',
       },
@@ -867,7 +885,7 @@ export class ExamsService {
     const [attemptsUsedToday, hasPassed] = await Promise.all([
       this.prisma.examSession.count({
         where: {
-          userId,
+          studentId,
           isPretestSession: true,
           startedAt: {
             gte: todayRange.start,
@@ -877,7 +895,7 @@ export class ExamsService {
       }),
       this.prisma.examSession.findFirst({
         where: {
-          userId,
+          studentId,
           isPretestSession: true,
           passed: true,
         },
@@ -937,7 +955,7 @@ export class ExamsService {
     const session = await this.prisma.examSession.create({
       data: {
         examId: assignedExam.id,
-        userId,
+        studentId,
         bookingId: activeBooking.id,
         seed,
         expiresAt,
@@ -1254,7 +1272,6 @@ export class ExamsService {
           subjectId:
             selectedSubjectIds.length === 1 ? selectedSubjectIds[0] : dto.subjectId || null,
           topicId: dto.topicId || null,
-          creatorId,
           lecturerId,
           type: examType,
         } as any,
@@ -1405,7 +1422,7 @@ export class ExamsService {
         // Tìm các examSession của user với examId là pretest, trạng thái SUBMITTED hoặc PASSED
         const sessions = await this.prisma.examSession.findMany({
           where: {
-            userId,
+            studentId: await this.resolveStudentIdentity(userId),
             examId: { in: pretestExamIds },
             status: { in: ['SUBMITTED', 'GRADED'] },
           },
@@ -1444,7 +1461,7 @@ export class ExamsService {
         topicId: e.topicId,
         subject: e.subject,
         topic: e.topic,
-        creatorId: e.creatorId,
+        lecturerId: e.lecturerId,
         totalItems: e._count.items,
         sessionCount: e._count.sessions,
         shuffleQuestions: e.shuffleQuestions,
@@ -1578,7 +1595,8 @@ export class ExamsService {
     const exam = await this.prisma.exam.findUnique({ where: { id } });
     if (!exam) throw new NotFoundException('Đề thi không tồn tại');
 
-    if (exam.creatorId !== userId && userRole !== 'ADMIN') {
+    const actorLecturerId = await this.resolveLecturerIdentity(userId);
+    if (exam.lecturerId !== actorLecturerId && userRole !== 'ADMIN') {
       throw new ForbiddenException('Bạn không có quyền xóa đề thi này');
     }
 
@@ -1600,6 +1618,10 @@ export class ExamsService {
     authContext?: BoothAuthContext,
   ): Promise<ShuffledSessionDto> {
     await this.syncScheduledExamPublication();
+    const studentId = await this.resolveStudentIdentity(userId);
+    if (!studentId) {
+      throw new NotFoundException('Sinh viên không tồn tại');
+    }
 
     const exam = await this.prisma.exam.findUnique({
       where: { id: examId },
@@ -1639,7 +1661,7 @@ export class ExamsService {
       ? await this.prisma.examSession.findFirst({
           where: {
             bookingId: activeBooking.id,
-            userId,
+            studentId,
             status: 'IN_PROGRESS',
           },
           include: { exam: true },
@@ -1684,7 +1706,7 @@ export class ExamsService {
 
     // Check if there's an existing session of this exam for this user
     const existingSession = await this.prisma.examSession.findFirst({
-      where: { examId, userId },
+      where: { examId, studentId },
       include: { exam: true },
       orderBy: { startedAt: 'desc' },
     });
@@ -1726,7 +1748,7 @@ export class ExamsService {
     const session = await this.prisma.examSession.create({
       data: {
         examId,
-        userId,
+        studentId,
         seed,
         expiresAt,
         bookingId: activeBooking?.id ?? null,
@@ -1753,7 +1775,7 @@ export class ExamsService {
    * Get an existing session (for resume).
    */
   async getSessionData(sessionId: string, userId: string): Promise<ShuffledSessionDto> {
-    const session = await this.prisma.examSession.findUnique({
+    const session = await (this.prisma as any).examSession.findUnique({
       where: { id: sessionId },
       include: {
         exam: {
@@ -1768,17 +1790,12 @@ export class ExamsService {
           },
         },
         answers: true,
-        user: {
-          select: {
-            email: true,
-            name: true,
-          },
-        },
+        student: { select: { userId: true, user: { select: { email: true, name: true } } } },
       },
     });
 
     if (!session) throw new NotFoundException('Phiên thi không tồn tại');
-    if (session.userId !== userId)
+    if (session.student?.userId !== userId)
       throw new ForbiddenException('Bạn không có quyền xem phiên thi này');
 
     // Check if session has expired
@@ -1797,12 +1814,13 @@ export class ExamsService {
     userId: string,
     dto: SaveAnswerDto,
   ): Promise<SessionAnswerDto> {
-    const session = await this.prisma.examSession.findUnique({
+    const session = await (this.prisma as any).examSession.findUnique({
       where: { id: sessionId },
+      include: { student: { select: { userId: true } } },
     });
 
     if (!session) throw new NotFoundException('Phiên thi không tồn tại');
-    if (session.userId !== userId)
+    if (session.student?.userId !== userId)
       throw new ForbiddenException('Bạn không có quyền trả lời phiên thi này');
     if (session.status !== 'IN_PROGRESS') {
       throw new BadRequestException('Phiên thi đã kết thúc, không thể cập nhật câu trả lời');
@@ -1861,7 +1879,7 @@ export class ExamsService {
    * Submit a session: auto-score MC + auto-grade coding problems via code execution.
    */
   async submitSession(sessionId: string, userId: string): Promise<SessionResultDto> {
-    const session = await this.prisma.examSession.findUnique({
+    const session = await (this.prisma as any).examSession.findUnique({
       where: { id: sessionId },
       include: {
         exam: {
@@ -1876,17 +1894,12 @@ export class ExamsService {
           },
         },
         answers: true,
-        user: {
-          select: {
-            email: true,
-            name: true,
-          },
-        },
+        student: { select: { id: true, userId: true, user: { select: { email: true, name: true } } } },
       },
     });
 
     if (!session) throw new NotFoundException('Phiên thi không tồn tại');
-    if (session.userId !== userId)
+    if (session.student?.userId !== userId)
       throw new ForbiddenException('Bạn không có quyền nộp phiên thi này');
     if (session.status !== 'IN_PROGRESS') {
       throw new BadRequestException('Phiên thi đã được nộp rồi');
@@ -1925,7 +1938,7 @@ export class ExamsService {
     }[] = [];
 
     for (const item of session.exam.items) {
-      const answer = answerByExamItemId.get(item.id);
+      const answer: any = answerByExamItemId.get(item.id);
       const selectedChoiceIds = answer?.selectedChoiceIds ?? [];
       const textAnswer = answer?.textAnswer ?? null;
       const sourceCode = answer?.sourceCode ?? null;
@@ -2025,7 +2038,7 @@ export class ExamsService {
               `Auto-grading problem "${item.problem.title}" for session ${sessionId}, exam item ${item.id}`,
             );
 
-            const submission = await this.submissionsService.create(userId, {
+            const submission = await this.submissionsService.create(session.student?.userId ?? userId, {
               language: fallbackLanguage,
               version: resolvedLanguageVersion || '*',
               sourceCode: normalizedSourceCode,
@@ -2053,7 +2066,7 @@ export class ExamsService {
             // SubmissionsService may have persisted a failed submission before throwing.
             const fallbackSubmission = await this.prisma.submission.findFirst({
               where: {
-                userId,
+                studentId: session.studentId,
                 problemId: item.problem.id,
                 sourceCode: normalizedSourceCode,
               },
@@ -2212,7 +2225,7 @@ export class ExamsService {
       }
     });
 
-    await this.syncExamCompletionPoints(sessionId, session.userId, totalScore, session.maxScore);
+    await this.syncExamCompletionPoints(sessionId, session.studentId ?? userId, totalScore, session.maxScore);
     const linkedBooking = session.bookingId
       ? await this.prisma.booking.findUnique({
           where: { id: session.bookingId },
@@ -2226,7 +2239,7 @@ export class ExamsService {
     this.realtimeService.sessionTerminated({
       sessionType: 'EXAM',
       sessionId,
-      userId: session.userId,
+      userId: session.student?.userId ?? userId,
       boothId: linkedBooking?.boothId || undefined,
       status: result.status,
       emittedAt,
@@ -2237,7 +2250,7 @@ export class ExamsService {
       action: 'SUBMIT',
       bookingId: session.bookingId || undefined,
       boothId: linkedBooking?.boothId || undefined,
-      userId: session.userId,
+      userId: session.student?.userId ?? userId,
       sessionType: 'EXAM',
       sessionId,
       emittedAt,
@@ -2246,10 +2259,10 @@ export class ExamsService {
     if (result.resultPublicationStatus === 'PUBLISHED' && result.score !== null) {
       await this.notifyResultPublished({
         sessionId,
-        userId: session.userId,
+        userId: session.student?.userId ?? userId,
         boothId: linkedBooking?.boothId,
-        email: session.user.email,
-        studentName: session.user.name,
+        email: session.student?.user?.email,
+        studentName: session.student?.user?.name,
         examTitle: session.exam.title,
         score: result.score,
         maxScore: result.maxScore,
@@ -2267,7 +2280,7 @@ export class ExamsService {
     userId: string,
     userRole?: string,
   ): Promise<SessionResultDto> {
-    const session = await this.prisma.examSession.findUnique({
+    const session = await (this.prisma as any).examSession.findUnique({
       where: { id: sessionId },
       include: {
         exam: {
@@ -2303,13 +2316,14 @@ export class ExamsService {
             },
           },
         },
-        user: {
+        student: {
           select: {
-            kycProfile: {
-              select: { kycFaceImageUrl: true },
-            },
-            studentProfile: {
-              select: { studentCardImageUrl: true },
+            userId: true,
+            studentCardImageUrl: true,
+            user: {
+              select: {
+                kycProfile: { select: { kycFaceImageUrl: true } },
+              },
             },
           },
         },
@@ -2329,7 +2343,7 @@ export class ExamsService {
 
     // Lecturers/admin can review all sessions. Students can review only their own
     // sessions and may receive summary-only data when exam review is disabled.
-    const isOwner = session.userId === userId;
+    const isOwner = session.student?.userId === userId;
     let role = typeof userRole === 'string' ? userRole.toUpperCase() : undefined;
 
     if (role !== 'ADMIN' && role !== 'LECTURER' && role !== 'STUDENT') {
@@ -2364,8 +2378,8 @@ export class ExamsService {
             checkinAttemptCount: session.booking?.checkinAttemptCount ?? 0,
             fallbackAppliedAt: session.booking?.fallbackAppliedAt ?? null,
             fallbackEvidenceImageUrl: session.booking?.fallbackEvidenceImageUrl ?? null,
-            registeredFaceImageUrl: session.user.kycProfile?.kycFaceImageUrl ?? null,
-            studentCardImageUrl: session.user.studentProfile?.studentCardImageUrl ?? null,
+            registeredFaceImageUrl: session.student?.user?.kycProfile?.kycFaceImageUrl ?? null,
+            studentCardImageUrl: session.student?.studentCardImageUrl ?? null,
           })
         : null;
     const detailMessage = canViewItemDetails
@@ -2445,7 +2459,7 @@ export class ExamsService {
 
       const missingSubmissionLookups = examItems
         .map((examItem) => {
-          const answer = answerByExamItemId.get(examItem.id);
+          const answer: any = answerByExamItemId.get(examItem.id);
 
           if (
             examItem.section !== 'PROBLEM' ||
@@ -2497,8 +2511,8 @@ export class ExamsService {
         uniqueMissingLookups.length > 0
           ? await this.prisma.submission.findMany({
               where: {
-                userId: session.userId,
-                OR: uniqueMissingLookups.map((entry) => ({
+                studentId: session.studentId,
+                OR: uniqueMissingLookups.map((entry: any) => ({
                   problemId: entry.problemId,
                   sourceCode: entry.sourceCode,
                 })),
@@ -2538,7 +2552,7 @@ export class ExamsService {
       }
 
       for (const examItem of examItems) {
-        const answer = answerByExamItemId.get(examItem.id);
+        const answer: any = answerByExamItemId.get(examItem.id);
         const outcome = resolveItemOutcome(examItem, answer);
         const section = examItem.section as 'QUESTION' | 'PROBLEM';
         const selectedChoiceIds = answer?.selectedChoiceIds ?? [];
@@ -2563,7 +2577,7 @@ export class ExamsService {
           manualIsCorrect: canViewAsLecturer ? (answer?.manualIsCorrect ?? null) : null,
           manualScore: canViewAsLecturer ? (answer?.manualScore ?? null) : null,
           reviewerFeedback: canViewAsLecturer ? (answer?.reviewerFeedback ?? null) : null,
-          reviewedByUserId: canViewAsLecturer ? (answer?.reviewedByUserId ?? null) : null,
+          reviewedByLecturerId: canViewAsLecturer ? (answer?.reviewedByLecturerId ?? null) : null,
           reviewedAt: canViewAsLecturer ? (answer?.reviewedAt ?? null) : null,
         });
 
@@ -2584,7 +2598,7 @@ export class ExamsService {
           );
         }
 
-        let resolvedSubmissionId = answer?.submissionId ?? null;
+        let resolvedSubmissionId: string | null = answer?.submissionId ?? null;
 
         if (
           section === 'PROBLEM' &&
@@ -2692,7 +2706,7 @@ export class ExamsService {
   ): Promise<SessionResultDto> {
     await this.assertResultReviewPermission(userRole, 'chấm điểm');
 
-    const session = await this.prisma.examSession.findUnique({
+    const session = await (this.prisma as any).examSession.findUnique({
       where: { id: sessionId },
       include: {
         exam: {
@@ -2708,10 +2722,10 @@ export class ExamsService {
             },
           },
         },
-        user: {
+        student: {
           select: {
-            email: true,
-            name: true,
+            userId: true,
+            user: { select: { email: true, name: true } },
           },
         },
       },
@@ -2748,7 +2762,7 @@ export class ExamsService {
     // Update grades in a transaction
     const gradingSummary = await this.prisma.$transaction(async (tx) => {
       for (const item of dto.items) {
-        const gradableItem = manuallyGradableItemMap.get(item.examItemId);
+        const gradableItem: any = manuallyGradableItemMap.get(item.examItemId);
         if (!gradableItem) {
           throw new BadRequestException(
             'Chỉ được phép chỉnh điểm cho câu tự luận ngắn hoặc bài code',
@@ -2785,7 +2799,7 @@ export class ExamsService {
             manualIsCorrect: item.isCorrect,
             manualScore: item.score,
             reviewerFeedback: item.feedback?.trim() || null,
-            reviewedByUserId: userId,
+            reviewedByLecturerId: await this.resolveLecturerIdentity(userId),
             reviewedAt: new Date(),
           },
         });
@@ -2800,7 +2814,7 @@ export class ExamsService {
             previousIsCorrect: previous.isCorrect,
             newIsCorrect: item.isCorrect,
             feedback: item.feedback?.trim() || null,
-            actorUserId: userId,
+            actorLecturerId: await this.resolveLecturerIdentity(userId),
             actorRole: userRole as 'ADMIN' | 'LECTURER',
           },
         });
@@ -2843,7 +2857,7 @@ export class ExamsService {
             action: 'RESULT_UPDATED_AFTER_PUBLISH',
             previousScore: session.score,
             newScore: totalScore,
-            actorUserId: userId,
+            actorLecturerId: await this.resolveLecturerIdentity(userId),
             actorRole: userRole as 'ADMIN' | 'LECTURER',
           },
         });
@@ -2854,7 +2868,7 @@ export class ExamsService {
 
     await this.syncExamCompletionPoints(
       sessionId,
-      session.userId,
+      session.studentId ?? '',
       gradingSummary.totalScore,
       session.maxScore,
     );
@@ -2869,10 +2883,10 @@ export class ExamsService {
     if (session.resultPublicationStatus === 'PUBLISHED' && gradingSummary.scoreChanged) {
       await this.notifyResultUpdatedAfterPublish({
         sessionId,
-        userId: session.userId,
+        userId: session.student?.userId ?? '',
         boothId: linkedBooking?.boothId,
-        email: session.user.email,
-        studentName: session.user.name,
+        email: session.student?.user?.email,
+        studentName: session.student?.user?.name,
         examTitle: session.exam.title,
         score: gradingSummary.totalScore,
         maxScore: session.maxScore,
@@ -2890,7 +2904,7 @@ export class ExamsService {
   ): Promise<SessionResultDto> {
     await this.assertResultReviewPermission(userRole, 'chấm lại bài code');
 
-    const session = await this.prisma.examSession.findUnique({
+    const session = await (this.prisma as any).examSession.findUnique({
       where: { id: sessionId },
       include: {
         exam: {
@@ -2906,10 +2920,10 @@ export class ExamsService {
         answers: {
           where: { examItemId },
         },
-        user: {
+        student: {
           select: {
-            email: true,
-            name: true,
+            userId: true,
+            user: { select: { email: true, name: true } },
           },
         },
       },
@@ -2942,7 +2956,7 @@ export class ExamsService {
     const previousScore = answer.score;
     const previousIsCorrect = answer.isCorrect;
 
-    const submission = await this.submissionsService.create(session.userId, {
+    const submission = await this.submissionsService.create(session.student?.userId ?? '', {
       language,
       version: languageVersion,
       sourceCode,
@@ -2968,7 +2982,7 @@ export class ExamsService {
           manualIsCorrect: null,
           manualScore: null,
           reviewerFeedback: null,
-          reviewedByUserId: null,
+          reviewedByLecturerId: null,
           reviewedAt: null,
         },
       });
@@ -2983,7 +2997,7 @@ export class ExamsService {
           previousIsCorrect,
           newIsCorrect,
           feedback: `REJUDGE:${submission.status}`,
-          actorUserId: userId,
+          actorLecturerId: await this.resolveLecturerIdentity(userId),
           actorRole: userRole as 'ADMIN' | 'LECTURER',
         },
       });
@@ -3024,7 +3038,7 @@ export class ExamsService {
             action: 'RESULT_UPDATED_AFTER_PUBLISH',
             previousScore: session.score,
             newScore: totalScore,
-            actorUserId: userId,
+            actorLecturerId: await this.resolveLecturerIdentity(userId),
             actorRole: userRole as 'ADMIN' | 'LECTURER',
           },
         });
@@ -3035,7 +3049,7 @@ export class ExamsService {
 
     await this.syncExamCompletionPoints(
       sessionId,
-      session.userId,
+      session.studentId ?? '',
       gradingSummary.totalScore,
       session.maxScore,
     );
@@ -3050,10 +3064,10 @@ export class ExamsService {
     if (session.resultPublicationStatus === 'PUBLISHED' && gradingSummary.scoreChanged) {
       await this.notifyResultUpdatedAfterPublish({
         sessionId,
-        userId: session.userId,
+        userId: session.student?.userId ?? '',
         boothId: linkedBooking?.boothId,
-        email: session.user.email,
-        studentName: session.user.name,
+        email: session.student?.user?.email,
+        studentName: session.student?.user?.name,
         examTitle: session.exam.title,
         score: gradingSummary.totalScore,
         maxScore: session.maxScore,
@@ -3070,7 +3084,7 @@ export class ExamsService {
   ): Promise<SessionResultDto> {
     await this.assertResultReviewPermission(userRole, 'công bố kết quả');
 
-    const session = await this.prisma.examSession.findUnique({
+    const session = await (this.prisma as any).examSession.findUnique({
       where: { id: sessionId },
       include: {
         exam: {
@@ -3092,10 +3106,10 @@ export class ExamsService {
             reviewedAt: true,
           },
         },
-        user: {
+        student: {
           select: {
-            email: true,
-            name: true,
+            userId: true,
+            user: { select: { email: true, name: true } },
           },
         },
       },
@@ -3144,7 +3158,7 @@ export class ExamsService {
           data: {
             sessionId,
             action: 'RESULT_PUBLISHED',
-            actorUserId: userId,
+            actorLecturerId: await this.resolveLecturerIdentity(userId),
             actorRole: userRole as 'ADMIN' | 'LECTURER',
           },
         });
@@ -3161,10 +3175,10 @@ export class ExamsService {
     if (shouldNotifyPublish) {
       await this.notifyResultPublished({
         sessionId,
-        userId: session.userId,
+        userId: session.student?.userId ?? '',
         boothId: linkedBooking?.boothId,
-        email: session.user.email,
-        studentName: session.user.name,
+        email: session.student?.user?.email,
+        studentName: session.student?.user?.name,
         examTitle: session.exam.title,
         score: session.score ?? 0,
         maxScore: session.maxScore,
@@ -3191,9 +3205,9 @@ export class ExamsService {
 
     // Students only see their own sessions
     if (userRole === 'STUDENT') {
-      where.userId = userId;
+      where.student = { is: { userId } } as any;
     } else if (query.studentId) {
-      where.userId = query.studentId;
+      where.student = { is: { userId: query.studentId } } as any;
     }
 
     if (query.examId) {
@@ -3276,7 +3290,7 @@ export class ExamsService {
   ) {
     await this.assertSessionMonitoringPermission(requesterId, requesterRole, 'buộc nộp bài thi');
 
-    const session = await this.prisma.examSession.findUnique({
+    const session = await (this.prisma as any).examSession.findUnique({
       where: { id: sessionId },
       include: {
         booking: { select: { boothId: true } },
@@ -3295,7 +3309,7 @@ export class ExamsService {
     let result;
 
     try {
-      result = await this.submitSession(sessionId, session.userId);
+      result = await this.submitSession(sessionId, session.student?.userId ?? '');
     } catch (error) {
       forcedByFallback = true;
 
@@ -3321,7 +3335,7 @@ export class ExamsService {
       this.realtimeService.sessionTerminated({
         sessionType: 'EXAM',
         sessionId,
-        userId: session.userId,
+        userId: session.student?.userId ?? '',
         boothId: session.booking?.boothId || undefined,
         status: 'SUBMITTED',
         reason,
@@ -3331,7 +3345,7 @@ export class ExamsService {
       this.realtimeService.monitoringUpdated({
         scope: 'EXAM',
         action: 'SUBMIT',
-        userId: session.userId,
+        userId: session.student?.userId ?? '',
         boothId: session.booking?.boothId || undefined,
         sessionType: 'EXAM',
         sessionId,
@@ -3341,7 +3355,7 @@ export class ExamsService {
     }
 
     this.realtimeService.notify({
-      userId: session.userId,
+      userId: session.student?.userId ?? '',
       boothId: session.booking?.boothId || undefined,
       message: `Bài thi đã được buộc nộp bởi quản trị viên/giảng viên. Lý do: ${reason}`,
       level: 'warning',
@@ -3366,7 +3380,7 @@ export class ExamsService {
   ) {
     await this.assertSessionMonitoringPermission(requesterId, requesterRole, 'hủy phiên thi');
 
-    const session = await this.prisma.examSession.findUnique({
+    const session = await (this.prisma as any).examSession.findUnique({
       where: { id: sessionId },
       include: {
         booking: { select: { boothId: true } },
@@ -3398,7 +3412,7 @@ export class ExamsService {
 
       await tx.proctoringEvent.create({
         data: {
-          userId: session.userId,
+          studentId: session.studentId,
           examSessionId: sessionId,
           eventType: 'SESSION_ABORTED',
           warningLevel: 3,
@@ -3415,7 +3429,7 @@ export class ExamsService {
     this.realtimeService.sessionTerminated({
       sessionType: 'EXAM',
       sessionId,
-      userId: session.userId,
+      userId: session.student?.userId ?? '',
       boothId: session.booking?.boothId || undefined,
       status: 'ABORTED',
       reason,
@@ -3425,7 +3439,7 @@ export class ExamsService {
     this.realtimeService.monitoringUpdated({
       scope: 'EXAM',
       action: 'ABORT',
-      userId: session.userId,
+      userId: session.student?.userId ?? '',
       boothId: session.booking?.boothId || undefined,
       sessionType: 'EXAM',
       sessionId,
@@ -3434,7 +3448,7 @@ export class ExamsService {
     });
 
     this.realtimeService.notify({
-      userId: session.userId,
+      userId: session.student?.userId ?? '',
       boothId: session.booking?.boothId || undefined,
       message: `Phiên thi đã bị hủy bởi quản trị viên/giảng viên. Lý do: ${reason}`,
       level: 'error',
@@ -3459,7 +3473,7 @@ export class ExamsService {
   ) {
     await this.assertSessionMonitoringPermission(requesterId, requesterRole, 'gia hạn phiên thi');
 
-    const session = await this.prisma.examSession.findUnique({
+    const session = await (this.prisma as any).examSession.findUnique({
       where: { id: sessionId },
       include: {
         booking: { select: { boothId: true } },
@@ -3489,7 +3503,7 @@ export class ExamsService {
     this.realtimeService.sessionTimerAdjusted({
       sessionType: 'EXAM',
       sessionId,
-      userId: session.userId,
+      userId: session.student?.userId ?? '',
       boothId: session.booking?.boothId || undefined,
       expiresAt: nextExpiresAt.toISOString(),
       reason,
@@ -3499,7 +3513,7 @@ export class ExamsService {
     this.realtimeService.monitoringUpdated({
       scope: 'EXAM',
       action: 'EXTEND',
-      userId: session.userId,
+      userId: session.student?.userId ?? '',
       boothId: session.booking?.boothId || undefined,
       sessionType: 'EXAM',
       sessionId,
@@ -4226,7 +4240,7 @@ export class ExamsService {
       topicId: exam.topicId,
       subject: exam.subject,
       topic: exam.topic,
-      creatorId: exam.creatorId,
+      lecturerId: exam.lecturerId,
       items,
       sessionCount: exam._count?.sessions || 0,
       shuffleQuestions: exam.shuffleQuestions,
@@ -4236,3 +4250,5 @@ export class ExamsService {
     });
   }
 }
+
+

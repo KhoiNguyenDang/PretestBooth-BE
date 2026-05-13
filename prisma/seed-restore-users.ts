@@ -34,7 +34,7 @@ type LegacyUserRow = {
   kycConsentedAt: string | null;
   lecturerRoleId: string | null;
   lecturerRoleAssignedAt: string | null;
-  lecturerRoleAssignedByUserId: string | null;
+  lecturerRoleAssignedByLecturerId: string | null;
   faceEmbedding: unknown | null;
   faceEmbeddingModel: string | null;
   faceEmbeddingVersion: string | null;
@@ -50,7 +50,7 @@ type LegacyUserRow = {
   kycManualReviewRequestedReason: string | null;
   kycManualReviewReviewedAt: string | null;
   kycManualReviewStatus: 'NOT_REQUESTED' | 'PENDING' | 'APPROVED' | 'REJECTED';
-  kycManualReviewedByUserId: string | null;
+  kycManualReviewedByLecturerId: string | null;
   kycStudentImageUrl: string | null;
 };
 
@@ -129,7 +129,7 @@ async function seedRoles(tx: PrismaClient, adminUserId: string) {
         description: roleSeed.description,
         priority: roleSeed.priority,
         isActive: true,
-        createdByUserId: adminUserId,
+        createdByLecturerId: adminUserId,
       },
       create: {
         id: roleSeed.id,
@@ -138,7 +138,7 @@ async function seedRoles(tx: PrismaClient, adminUserId: string) {
         description: roleSeed.description,
         priority: roleSeed.priority,
         isActive: true,
-        createdByUserId: adminUserId,
+        createdByLecturerId: adminUserId,
       },
     });
 
@@ -242,7 +242,7 @@ async function main() {
         } as any,
       });
 
-      await tx.student.upsert({
+      const student = await tx.student.upsert({
         where: { userId: user.id },
         update: {
           studentCode: user.studentCode,
@@ -280,7 +280,7 @@ async function main() {
           kycManualReviewRequestedAt: parseDate(user.kycManualReviewRequestedAt),
           kycManualReviewRequestedReason: user.kycManualReviewRequestedReason,
           kycManualReviewReviewedAt: parseDate(user.kycManualReviewReviewedAt),
-          kycManualReviewedByUserId: user.kycManualReviewedByUserId,
+          kycManualReviewedByLecturerId: user.kycManualReviewedByLecturerId,
           kycManualReviewRejectionReason: user.kycManualReviewRejectionReason,
           kycManualReviewNotes: user.kycManualReviewNotes,
           kycConsentVersion: user.kycConsentVersion,
@@ -300,7 +300,7 @@ async function main() {
           kycManualReviewRequestedAt: parseDate(user.kycManualReviewRequestedAt),
           kycManualReviewRequestedReason: user.kycManualReviewRequestedReason,
           kycManualReviewReviewedAt: parseDate(user.kycManualReviewReviewedAt),
-          kycManualReviewedByUserId: user.kycManualReviewedByUserId,
+          kycManualReviewedByLecturerId: user.kycManualReviewedByLecturerId,
           kycManualReviewRejectionReason: user.kycManualReviewRejectionReason,
           kycManualReviewNotes: user.kycManualReviewNotes,
           kycConsentVersion: user.kycConsentVersion,
@@ -334,27 +334,27 @@ async function main() {
       });
 
       await tx.pointAccount.upsert({
-        where: { userId: user.id },
+        where: { studentId: student.id },
         update: {
           totalPoints: user.totalPoints,
           createdAt: parseDate(user.createdAt) ?? undefined,
           updatedAt: parseDate(user.updatedAt) ?? undefined,
         } as any,
         create: {
-          userId: user.id,
+          studentId: student.id,
           totalPoints: user.totalPoints,
           createdAt: parseDate(user.createdAt) ?? undefined,
           updatedAt: parseDate(user.updatedAt) ?? undefined,
         } as any,
       });
 
-      if (user.lecturerRoleId || user.lecturerRoleAssignedAt || user.lecturerRoleAssignedByUserId) {
+      if (user.lecturerRoleId || user.lecturerRoleAssignedAt || user.lecturerRoleAssignedByLecturerId) {
         await tx.lecturer.upsert({
           where: { userId: user.id },
           update: {
             lecturerRoleId: user.lecturerRoleId,
             lecturerRoleAssignedAt: parseDate(user.lecturerRoleAssignedAt),
-            lecturerRoleAssignedByUserId: user.lecturerRoleAssignedByUserId,
+            lecturerRoleAssignedByLecturerId: user.lecturerRoleAssignedByLecturerId,
             createdAt: parseDate(user.createdAt) ?? undefined,
             updatedAt: parseDate(user.updatedAt) ?? undefined,
           } as any,
@@ -362,7 +362,7 @@ async function main() {
             userId: user.id,
             lecturerRoleId: user.lecturerRoleId,
             lecturerRoleAssignedAt: parseDate(user.lecturerRoleAssignedAt),
-            lecturerRoleAssignedByUserId: user.lecturerRoleAssignedByUserId,
+            lecturerRoleAssignedByLecturerId: user.lecturerRoleAssignedByLecturerId,
             createdAt: parseDate(user.createdAt) ?? undefined,
             updatedAt: parseDate(user.updatedAt) ?? undefined,
           } as any,

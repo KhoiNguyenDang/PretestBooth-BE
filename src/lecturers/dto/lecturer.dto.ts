@@ -9,7 +9,7 @@ export class CreateLecturerDTO {
 
   @IsOptional()
   @IsString()
-  lecturerRoleAssignedByUserId?: string;
+  lecturerRoleAssignedByLecturerId?: string;
 }
 
 export class UpdateLecturerDTO {
@@ -23,7 +23,7 @@ export class LecturerProfileDTO {
   userId!: string;
   lecturerRoleId!: string;
   lecturerRoleAssignedAt!: Date;
-  lecturerRoleAssignedByUserId?: string;
+  lecturerRoleAssignedByLecturerId?: string;
   createdAt!: Date;
   updatedAt!: Date;
 }
@@ -33,3 +33,4 @@ export class LecturerIdentityDTO {
   userId!: string;
   lecturerRoleId!: string;
 }
+

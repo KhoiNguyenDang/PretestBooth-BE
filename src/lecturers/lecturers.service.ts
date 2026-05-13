@@ -81,7 +81,7 @@ export class LecturerService {
       data: {
         userId: data.userId,
         lecturerRoleId: data.lecturerRoleId,
-        lecturerRoleAssignedByUserId: data.lecturerRoleAssignedByUserId,
+        lecturerRoleAssignedByLecturerId: data.lecturerRoleAssignedByLecturerId,
         lecturerRoleAssignedAt: new Date()
       },
       include: {
@@ -196,3 +196,4 @@ export class LecturerService {
     });
   }
 }
+

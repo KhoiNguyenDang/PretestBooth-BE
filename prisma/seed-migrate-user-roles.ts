@@ -86,12 +86,12 @@ async function migrateUserRolesToSubtables() {
             userId: user.id,
             lecturerRoleId: metadata?.lecturerRoleId,
             lecturerRoleAssignedAt: metadata?.lecturerRoleAssignedAt,
-            lecturerRoleAssignedByUserId: metadata?.lecturerRoleAssignedByUserId,
+            lecturerRoleAssignedByLecturerId: metadata?.lecturerRoleAssignedByLecturerId,
           },
           update: {
             lecturerRoleId: metadata?.lecturerRoleId,
             lecturerRoleAssignedAt: metadata?.lecturerRoleAssignedAt,
-            lecturerRoleAssignedByUserId: metadata?.lecturerRoleAssignedByUserId,
+            lecturerRoleAssignedByLecturerId: metadata?.lecturerRoleAssignedByLecturerId,
           },
         });
       } catch (error) {

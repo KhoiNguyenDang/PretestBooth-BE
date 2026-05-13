@@ -2,17 +2,15 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 
 /**
- * DualWriteService ensures data consistency during phase 2.
- * When creating/updating records that have dual FKs (old userId + new studentId/lecturerId),
- * this service writes to both to ensure backward compatibility.
+ * Legacy compatibility wrapper kept to avoid breaking imports.
+ * Current implementation writes only role-based FKs (studentId/lecturerId).
  */
 @Injectable()
 export class DualWriteService {
   constructor(private prisma: PrismaService) {}
 
   /**
-   * Create booking with dual-write support.
-   * Writes to both userId (old) and studentId (new) FK columns.
+   * Create booking.
    */
   async createBookingDualWrite(
     data: any,
@@ -22,8 +20,7 @@ export class DualWriteService {
       return tx.booking.create({
         data: {
           ...data,
-          userId: student.userId,  // OLD FK for backward compat
-          studentId: student.id     // NEW FK for new code
+          studentId: student.id
         }
       });
     });
@@ -40,7 +37,6 @@ export class DualWriteService {
       return tx.examSession.create({
         data: {
           ...data,
-          userId: student.userId,
           studentId: student.id
         }
       });
@@ -58,7 +54,6 @@ export class DualWriteService {
       return tx.submission.create({
         data: {
           ...data,
-          userId: student.userId,
           studentId: student.id
         }
       });
@@ -76,7 +71,6 @@ export class DualWriteService {
       return tx.practiceSession.create({
         data: {
           ...data,
-          userId: student.userId,
           studentId: student.id
         }
       });
@@ -94,7 +88,6 @@ export class DualWriteService {
       return tx.bookingCheckinAttempt.create({
         data: {
           ...data,
-          userId: student.userId,
           studentId: student.id
         }
       });
@@ -112,7 +105,6 @@ export class DualWriteService {
       return tx.pointTransaction.create({
         data: {
           ...data,
-          userId: student.userId,
           studentId: student.id
         }
       });
@@ -130,8 +122,7 @@ export class DualWriteService {
       return tx.problem.create({
         data: {
           ...data,
-          creatorId: lecturer.userId,  // OLD FK for backward compat
-          lecturerId: lecturer.id       // NEW FK for new code
+          lecturerId: lecturer.id
         }
       });
     });
@@ -148,7 +139,6 @@ export class DualWriteService {
       return tx.question.create({
         data: {
           ...data,
-          creatorId: lecturer.userId,
           lecturerId: lecturer.id
         }
       });
@@ -166,7 +156,6 @@ export class DualWriteService {
       return tx.exam.create({
         data: {
           ...data,
-          creatorId: lecturer.userId,
           lecturerId: lecturer.id
         }
       });
@@ -184,7 +173,6 @@ export class DualWriteService {
       return tx.questionReviewAction.create({
         data: {
           ...data,
-          userId: lecturer.userId,
           lecturerId: lecturer.id
         }
       });
@@ -205,7 +193,6 @@ export class DualWriteService {
         data: {
           ...data,
           ...(student && {
-            userId: student.userId,
             studentId: student.id
           })
         }

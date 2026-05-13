@@ -192,11 +192,19 @@ export class BoothsService {
     };
   }
 
+  private async resolveLecturerIdByUserId(userId: string): Promise<string | null> {
+    const lecturer = await this.prisma.lecturer.findUnique({
+      where: { userId },
+      select: { id: true },
+    });
+    return lecturer?.id ?? null;
+  }
+
   private async appendBoothActivityLog(
     boothId: string,
     status: BoothStatus,
     note: string,
-    changedByUserId: string | null = null,
+    changedByLecturerId: string | null = null,
     tx?: Prisma.TransactionClient,
   ) {
     const db = tx ?? this.prisma;
@@ -206,7 +214,7 @@ export class BoothsService {
         fromStatus: status,
         toStatus: status,
         note,
-        changedByUserId,
+        changedByLecturerId,
       },
     });
   }
@@ -265,7 +273,7 @@ export class BoothsService {
           orderBy: { changedAt: 'desc' },
           take: 20,
           include: {
-            changedByUser: { select: { id: true, email: true, name: true } },
+            changedByLecturer: { select: { id: true, user: { select: { id: true, email: true, name: true } } } },
           },
         },
       },
@@ -328,7 +336,7 @@ export class BoothsService {
             fromStatus: booth.status,
             toStatus: dto.status as BoothStatus,
             note: dto.statusNote || '',
-            changedByUserId: userId,
+            changedByLecturerId: await this.resolveLecturerIdByUserId(userId),
           },
           select: {
             changedAt: true,
@@ -345,7 +353,7 @@ export class BoothsService {
         status: txResult.updated.status,
         previousStatus: booth.status,
         note: dto.statusNote || '',
-        changedByUserId: userId,
+        changedByLecturerId: await this.resolveLecturerIdByUserId(userId),
         changedAt: txResult.statusLog.changedAt.toISOString(),
       });
     }
@@ -361,7 +369,7 @@ export class BoothsService {
       where: { boothId },
       orderBy: { changedAt: 'desc' },
       include: {
-        changedByUser: { select: { id: true, email: true, name: true } },
+        changedByLecturer: { select: { id: true, user: { select: { id: true, email: true, name: true } } } },
       },
     });
   }
@@ -419,18 +427,22 @@ export class BoothsService {
         orderBy: [{ startTime: 'asc' }, { createdAt: 'asc' }],
         select: {
           id: true,
-          userId: true,
           status: true,
           startTime: true,
           endTime: true,
-          user: {
+          student: {
             select: {
-              id: true,
-              email: true,
-              name: true,
+              userId: true,
+              studentCode: true,
+              className: true,
+              user: {
+                select: {
+                  email: true,
+                  name: true,
+                },
+              },
             },
           },
-          student: { select: { studentCode: true, className: true } },
         },
       });
 
@@ -456,9 +468,9 @@ export class BoothsService {
 
       for (const candidate of candidates) {
         const studentName = this.buildStudentLabel({
-          id: candidate.user.id,
-          email: candidate.user.email,
-          name: candidate.user.name,
+          id: candidate.student?.userId ?? '',
+          email: candidate.student?.user.email ?? '',
+          name: candidate.student?.user.name ?? null,
           studentCode: candidate.student?.studentCode ?? null,
         });
         const conflict = await tx.booking.findFirst({
@@ -491,9 +503,9 @@ export class BoothsService {
                 reason:
                   'Booth đích đã có lịch trùng khung giờ. Booking đã được chuyển trạng thái CANCEL',
                 wasCancelled: true,
-                userId: candidate.userId,
+                userId: candidate.student?.userId ?? '',
                 studentName,
-                studentEmail: candidate.user.email,
+                studentEmail: candidate.student?.user.email ?? '',
                 startTime: candidate.startTime,
                 endTime: candidate.endTime,
               });
@@ -505,9 +517,9 @@ export class BoothsService {
             bookingId: candidate.id,
             reason: 'Booth đích đã có lịch trùng khung giờ',
             wasCancelled: false,
-            userId: candidate.userId,
+            userId: candidate.student?.userId ?? '',
             studentName,
-            studentEmail: candidate.user.email,
+            studentEmail: candidate.student?.user.email ?? '',
             startTime: candidate.startTime,
             endTime: candidate.endTime,
           });
@@ -517,10 +529,10 @@ export class BoothsService {
         if (dto.dryRun) {
           transferred.push({
             bookingId: candidate.id,
-            userId: candidate.userId,
+            userId: candidate.student?.userId ?? '',
             status: candidate.status,
             studentName,
-            studentEmail: candidate.user.email,
+            studentEmail: candidate.student?.user.email ?? '',
             startTime: candidate.startTime,
             endTime: candidate.endTime,
           });
@@ -544,9 +556,9 @@ export class BoothsService {
             bookingId: candidate.id,
             reason: 'Booking đã thay đổi trạng thái hoặc booth trong lúc xử lý',
             wasCancelled: false,
-            userId: candidate.userId,
+            userId: candidate.student?.userId ?? '',
             studentName,
-            studentEmail: candidate.user.email,
+            studentEmail: candidate.student?.user.email ?? '',
             startTime: candidate.startTime,
             endTime: candidate.endTime,
           });
@@ -555,10 +567,10 @@ export class BoothsService {
 
         transferred.push({
           bookingId: candidate.id,
-          userId: candidate.userId,
+          userId: candidate.student?.userId ?? '',
           status: candidate.status,
           studentName,
-          studentEmail: candidate.user.email,
+          studentEmail: candidate.student?.user.email ?? '',
           startTime: candidate.startTime,
           endTime: candidate.endTime,
         });
@@ -617,7 +629,7 @@ export class BoothsService {
           fromStatus: sourceBooth.status,
           toStatus: sourceStatusAfterTransfer,
           note,
-          changedByUserId: userId,
+          changedByLecturerId: await this.resolveLecturerIdByUserId(userId),
         },
       });
 
@@ -697,7 +709,7 @@ export class BoothsService {
       status: transferResult.updatedSourceBooth.status,
       previousStatus: transferResult.sourceBooth.status,
       note: `Booth chuyển lịch sự cố sang ${transferResult.targetBooth.name}. Lý do: ${dto.reason}`,
-      changedByUserId: userId,
+      changedByLecturerId: await this.resolveLecturerIdByUserId(userId),
       changedAt: emittedAt,
     });
 
@@ -813,6 +825,7 @@ export class BoothsService {
     const otpHash = await bcrypt.hash(otp, 10);
     const now = new Date();
     const expiresAt = new Date(now.getTime() + this.getOtpTtlMinutes() * 60 * 1000);
+    const lecturerId = await this.resolveLecturerIdByUserId(userId);
 
     await this.prisma.$transaction(async (tx) => {
       await tx.booth.update({
@@ -829,7 +842,7 @@ export class BoothsService {
         booth.id,
         booth.status,
         `Tạo OTP kích hoạt booth (hết hạn lúc ${this.formatVnDateTime(expiresAt)})`,
-        userId,
+        lecturerId,
         tx,
       );
     });
@@ -1035,6 +1048,7 @@ export class BoothsService {
     userId?: string,
   ) {
     const booth = await this.validateBoothSessionToken(boothSessionToken, bindingContext);
+    const lecturerId = userId ? await this.resolveLecturerIdByUserId(userId) : null;
 
     await this.prisma.$transaction(async (tx) => {
       await tx.booth.update({
@@ -1048,7 +1062,7 @@ export class BoothsService {
         booth.id,
         booth.status,
         'Kiosk đăng xuất khỏi booth',
-        userId || null,
+        lecturerId,
         tx,
       );
     });
@@ -1086,6 +1100,7 @@ export class BoothsService {
         status: 'CHECKED_IN',
       },
       include: {
+        student: { select: { userId: true } },
         examSessions: {
           where: { status: 'IN_PROGRESS' },
           select: { id: true },
@@ -1127,11 +1142,12 @@ export class BoothsService {
         });
       }
 
+      const lecturerId = await this.resolveLecturerIdByUserId(userId);
       await this.appendBoothActivityLog(
         booth.id,
         booth.status,
         `Buộc kiosk đăng xuất. Lý do: ${reason}`,
-        userId,
+        lecturerId,
         tx,
       );
     });
@@ -1142,7 +1158,7 @@ export class BoothsService {
       this.realtimeService.bookingCheckout({
         bookingId: activeBooking.id,
         boothId: activeBooking.boothId,
-        userId: activeBooking.userId,
+        userId: activeBooking.student?.userId ?? '',
         status: 'COMPLETED',
         type: activeBooking.type,
         startTime: activeBooking.startTime.toISOString(),
@@ -1155,7 +1171,7 @@ export class BoothsService {
         this.realtimeService.sessionTerminated({
           sessionType: 'EXAM',
           sessionId: examSession.id,
-          userId: activeBooking.userId,
+          userId: activeBooking.student?.userId ?? '',
           boothId: activeBooking.boothId,
           status: 'SUBMITTED',
           reason,
@@ -1167,7 +1183,7 @@ export class BoothsService {
         this.realtimeService.sessionTerminated({
           sessionType: 'PRACTICE',
           sessionId: practiceSession.id,
-          userId: activeBooking.userId,
+          userId: activeBooking.student?.userId ?? '',
           boothId: activeBooking.boothId,
           status: 'ABANDONED',
           reason,

@@ -10,16 +10,26 @@ export class PointsService {
    * Award or deduct points for a user
    */
   async addTransaction(
-    userId: string,
+    studentOrUserId: string,
     type: PointType,
     points: number,
     reason: string,
     refs?: { bookingId?: string; examSessionId?: string },
   ) {
+    const student =
+      (await this.prisma.student.findUnique({
+        where: { id: studentOrUserId },
+      })) ||
+      (await this.prisma.student.findUnique({
+        where: { userId: studentOrUserId },
+      }));
+
+    if (!student) throw new Error('Sinh viên không tồn tại');
+
     const [transaction] = await this.prisma.$transaction([
       this.prisma.pointTransaction.create({
         data: {
-          userId,
+          studentId: student.id,
           type,
           points,
           reason,
@@ -28,9 +38,9 @@ export class PointsService {
         },
       }),
       this.prisma.pointAccount.upsert({
-        where: { userId },
+        where: { studentId: student.id },
         update: { totalPoints: { increment: points } },
-        create: { userId, totalPoints: points },
+        create: { studentId: student.id, totalPoints: points },
       }),
     ]);
 
@@ -41,28 +51,39 @@ export class PointsService {
    * Get user's total points
    */
   async getMyPoints(userId: string) {
-    const pointAccount = await this.prisma.pointAccount.findUnique({
-      where: { userId },
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: { studentProfile: true },
     });
 
-    if (!pointAccount) throw new NotFoundException('Người dùng không tồn tại');
+    if (!user?.studentProfile) throw new NotFoundException('Sinh viên không tồn tại');
+
+    const pointAccount = await this.prisma.pointAccount.findUnique({
+      where: { studentId: user.studentProfile.id },
+    });
+
+    if (!pointAccount) throw new NotFoundException('Tài khoản điểm không tồn tại');
     return { totalPoints: pointAccount.totalPoints };
   }
 
-  /**
-   * Get user's point transaction history
-   */
   async getHistory(userId: string, page = 1, limit = 20) {
     const skip = (page - 1) * limit;
 
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: { studentProfile: true },
+    });
+
+    if (!user?.studentProfile) throw new NotFoundException('Sinh viên không tồn tại');
+
     const [transactions, total] = await Promise.all([
       this.prisma.pointTransaction.findMany({
-        where: { userId },
+        where: { studentId: user.studentProfile.id },
         orderBy: { createdAt: 'desc' },
         skip,
         take: limit,
       }),
-      this.prisma.pointTransaction.count({ where: { userId } }),
+      this.prisma.pointTransaction.count({ where: { studentId: user.studentProfile.id } }),
     ]);
 
     return {
@@ -74,25 +95,24 @@ export class PointsService {
     };
   }
 
-  /**
-   * Get leaderboard (top students by points)
-   */
   async getLeaderboard(limit = 20) {
     const pointAccounts = await this.prisma.pointAccount.findMany({
       where: {
-        user: { role: 'STUDENT', auth: { isLocked: false } },
+        student: {
+          user: { role: 'STUDENT', auth: { isLocked: false } },
+        },
       },
       orderBy: { totalPoints: 'desc' },
       take: limit,
       include: {
-        user: {
+        student: {
           select: {
-            id: true,
-            name: true,
-            email: true,
-            studentProfile: {
+            studentCode: true,
+            user: {
               select: {
-                studentCode: true,
+                id: true,
+                name: true,
+                email: true,
               },
             },
           },
@@ -102,10 +122,10 @@ export class PointsService {
 
     return pointAccounts.map((pa, index) => ({
       rank: index + 1,
-      id: pa.user.id,
-      name: pa.user.name,
-      email: pa.user.email,
-      studentCode: pa.user.studentProfile?.studentCode ?? null,
+      id: pa.student.user.id,
+      name: pa.student.user.name,
+      email: pa.student.user.email,
+      studentCode: pa.student.studentCode ?? null,
       totalPoints: pa.totalPoints,
     }));
   }

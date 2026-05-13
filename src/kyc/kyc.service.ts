@@ -47,6 +47,14 @@ export class KycService {
     }
   }
 
+  private async resolveLecturerIdByUserId(userId: string): Promise<string | null> {
+    const lecturer = await this.prisma.lecturer.findUnique({
+      where: { userId },
+      select: { id: true },
+    });
+    return lecturer?.id ?? null;
+  }
+
   private parseThreshold(rawValue: string | null | undefined): number | null {
     if (rawValue === null || rawValue === undefined) {
       return null;
@@ -118,6 +126,7 @@ export class KycService {
 
   async updateKycCardThreshold(userRole: string, userId: string, threshold: number) {
     this.ensureAdmin(userRole);
+    const actorLecturerId = await this.resolveLecturerIdByUserId(userId);
 
     if (!Number.isFinite(threshold)) {
       throw new BadRequestException('Ngưỡng xác thực thẻ sinh viên không hợp lệ');
@@ -134,13 +143,13 @@ export class KycService {
       where: { key: KYC_CARD_THRESHOLD_SETTING_KEY },
       update: {
         value: String(normalizedThreshold),
-        updatedByUserId: userId,
+        updatedByLecturerId: actorLecturerId,
       },
       create: {
         key: KYC_CARD_THRESHOLD_SETTING_KEY,
         value: String(normalizedThreshold),
         description: 'Card-to-live face similarity threshold for KYC verification',
-        updatedByUserId: userId,
+        updatedByLecturerId: actorLecturerId,
       },
     });
 
@@ -149,7 +158,7 @@ export class KycService {
       threshold: normalizedThreshold,
       source: 'database' as const,
       updatedAt: savedSetting.updatedAt,
-      updatedByUserId: savedSetting.updatedByUserId,
+      updatedByLecturerId: savedSetting.updatedByLecturerId,
     };
   }
 
@@ -213,7 +222,7 @@ export class KycService {
             kycManualReviewRequestedAt: null,
             kycManualReviewRequestedReason: null,
             kycManualReviewReviewedAt: null,
-            kycManualReviewedByUserId: null,
+            kycManualReviewedByLecturerId: null,
             kycManualReviewRejectionReason: null,
             kycManualReviewNotes: null,
           },
@@ -231,7 +240,7 @@ export class KycService {
             kycManualReviewRequestedAt: null,
             kycManualReviewRequestedReason: null,
             kycManualReviewReviewedAt: null,
-            kycManualReviewedByUserId: null,
+            kycManualReviewedByLecturerId: null,
             kycManualReviewRejectionReason: null,
             kycManualReviewNotes: null,
           },
@@ -302,7 +311,7 @@ export class KycService {
           kycManualReviewRequestedAt: null,
           kycManualReviewRequestedReason: null,
           kycManualReviewReviewedAt: null,
-          kycManualReviewedByUserId: null,
+          kycManualReviewedByLecturerId: null,
           kycManualReviewRejectionReason: null,
           kycManualReviewNotes: null,
         },
@@ -320,7 +329,7 @@ export class KycService {
           kycManualReviewRequestedAt: null,
           kycManualReviewRequestedReason: null,
           kycManualReviewReviewedAt: null,
-          kycManualReviewedByUserId: null,
+          kycManualReviewedByLecturerId: null,
           kycManualReviewRejectionReason: null,
           kycManualReviewNotes: null,
         },
@@ -472,7 +481,7 @@ export class KycService {
         kycManualReviewRequestedAt: now,
         kycManualReviewRequestedReason: dto.reason?.trim() || null,
         kycManualReviewReviewedAt: null,
-        kycManualReviewedByUserId: null,
+        kycManualReviewedByLecturerId: null,
         kycManualReviewRejectionReason: null,
         kycManualReviewNotes: null,
       },
@@ -689,7 +698,7 @@ export class KycService {
         kycManualReviewRequestedAt: true,
         kycManualReviewRequestedReason: true,
         kycManualReviewReviewedAt: true,
-        kycManualReviewedByUserId: true,
+        kycManualReviewedByLecturerId: true,
         kycManualReviewRejectionReason: true,
         kycManualReviewNotes: true,
         user: {
@@ -732,7 +741,7 @@ export class KycService {
       kycManualReviewRequestedAt: student.kycManualReviewRequestedAt,
       kycManualReviewRequestedReason: student.kycManualReviewRequestedReason,
       kycManualReviewReviewedAt: student.kycManualReviewReviewedAt,
-      kycManualReviewedByUserId: student.kycManualReviewedByUserId,
+      kycManualReviewedByLecturerId: student.kycManualReviewedByLecturerId,
       kycManualReviewRejectionReason: student.kycManualReviewRejectionReason,
       kycManualReviewNotes: student.kycManualReviewNotes,
     };
@@ -745,6 +754,7 @@ export class KycService {
     dto: ApproveKycManualReviewDto,
   ) {
     await this.assertKycReviewerAccess(reviewerId, reviewerRole);
+    const reviewerLecturerId = await this.resolveLecturerIdByUserId(reviewerId);
 
     const student = await this.prisma.userKyc.findFirst({
       where: {
@@ -826,7 +836,7 @@ export class KycService {
           kycVerifiedAt: now,
           kycManualReviewStatus: 'APPROVED',
           kycManualReviewReviewedAt: now,
-          kycManualReviewedByUserId: reviewerId,
+          kycManualReviewedByLecturerId: reviewerLecturerId,
           kycManualReviewRejectionReason: null,
           kycManualReviewNotes: dto.notes?.trim() || null,
         },
@@ -836,7 +846,7 @@ export class KycService {
           kycVerifiedAt: true,
           kycManualReviewStatus: true,
           kycManualReviewReviewedAt: true,
-          kycManualReviewedByUserId: true,
+          kycManualReviewedByLecturerId: true,
         },
       });
     });
@@ -866,6 +876,7 @@ export class KycService {
     dto: RejectKycManualReviewDto,
   ) {
     await this.assertKycReviewerAccess(reviewerId, reviewerRole);
+    const reviewerLecturerId = await this.resolveLecturerIdByUserId(reviewerId);
 
     const student = await this.prisma.userKyc.findFirst({
       where: {
@@ -904,7 +915,7 @@ export class KycService {
         kycStatus: 'REJECTED',
         kycManualReviewStatus: 'REJECTED',
         kycManualReviewReviewedAt: now,
-        kycManualReviewedByUserId: reviewerId,
+        kycManualReviewedByLecturerId: reviewerLecturerId,
         kycManualReviewRejectionReason: dto.reason.trim(),
         kycManualReviewNotes: dto.notes?.trim() || null,
       },
@@ -913,7 +924,7 @@ export class KycService {
         kycStatus: true,
         kycManualReviewStatus: true,
         kycManualReviewReviewedAt: true,
-        kycManualReviewedByUserId: true,
+        kycManualReviewedByLecturerId: true,
         kycManualReviewRejectionReason: true,
       },
     });
@@ -944,6 +955,7 @@ export class KycService {
     dto: CancelVerifiedKycDto,
   ) {
     await this.assertKycReviewerAccess(reviewerId, reviewerRole);
+    const reviewerLecturerId = await this.resolveLecturerIdByUserId(reviewerId);
 
     const student = await this.prisma.userKyc.findFirst({
       where: {
@@ -975,7 +987,7 @@ export class KycService {
         kycManualReviewRequestedAt: null,
         kycManualReviewRequestedReason: null,
         kycManualReviewReviewedAt: new Date(),
-        kycManualReviewedByUserId: reviewerId,
+        kycManualReviewedByLecturerId: reviewerLecturerId,
         kycManualReviewRejectionReason: dto.reason.trim(),
       },
       select: {
@@ -983,7 +995,7 @@ export class KycService {
         kycStatus: true,
         kycManualReviewStatus: true,
         kycManualReviewReviewedAt: true,
-        kycManualReviewedByUserId: true,
+        kycManualReviewedByLecturerId: true,
         kycManualReviewRejectionReason: true,
       },
     });
@@ -1005,3 +1017,4 @@ export class KycService {
     };
   }
 }
+

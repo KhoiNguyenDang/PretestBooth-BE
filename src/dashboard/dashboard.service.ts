@@ -9,16 +9,22 @@ export class DashboardService {
    * Get student-specific dashboard stats
    */
   async getStudentStats(userId: string) {
-    // Fetch points from PointAccount (new table)
-    const pointAccount = await this.prisma.pointAccount.findUnique({
-      where: { userId },
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: { studentProfile: true },
     });
+    const studentId = user?.studentProfile?.id;
+
+    // Fetch points from PointAccount (new table)
+    const pointAccount = studentId
+      ? await this.prisma.pointAccount.findUnique({ where: { studentId } })
+      : null;
 
     const [completedExams, practiceSessions, upcomingBookings] = await Promise.all([
-      this.prisma.examSession.count({ where: { userId, status: 'SUBMITTED' } }), // GRADED or SUBMITTED
-      this.prisma.practiceSession.count({ where: { userId, status: 'COMPLETED' } }),
+      this.prisma.examSession.count({ where: { studentId, status: 'SUBMITTED' } }), // GRADED or SUBMITTED
+      this.prisma.practiceSession.count({ where: { studentId, status: 'COMPLETED' } }),
       this.prisma.booking.findMany({
-        where: { userId, date: { gte: new Date() }, status: 'CONFIRM' },
+        where: { studentId, date: { gte: new Date() }, status: 'CONFIRM' },
         orderBy: { startTime: 'asc' },
         take: 5,
         include: { booth: { select: { name: true } } },
@@ -27,8 +33,8 @@ export class DashboardService {
 
     // Calculate accuracy % roughly based on problem submissions
     const [totalSubs, acceptedSubs] = await Promise.all([
-      this.prisma.submission.count({ where: { userId } }),
-      this.prisma.submission.count({ where: { userId, status: 'ACCEPTED' } }),
+      this.prisma.submission.count({ where: { studentId } }),
+      this.prisma.submission.count({ where: { studentId, status: 'ACCEPTED' } }),
     ]);
 
     const accuracy = totalSubs > 0 ? Math.round((acceptedSubs / totalSubs) * 100) : 0;
@@ -68,14 +74,17 @@ export class DashboardService {
           include: {
             examSession: {
               select: {
-                user: { select: { name: true } },
-                student: { select: { studentCode: true } },
+                student: { select: { studentCode: true, user: { select: { name: true } } } },
               },
             },
             practiceSession: {
               select: {
-                user: { select: { name: true } },
-                student: { select: { studentCode: true } },
+                student: {
+                  select: {
+                    studentCode: true,
+                    user: { select: { name: true } },
+                  },
+                },
               },
             },
           },

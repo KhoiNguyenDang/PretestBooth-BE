@@ -40,6 +40,14 @@ export class CheckinService {
     }
   }
 
+  private async resolveLecturerIdByUserId(userId: string): Promise<string | null> {
+    const lecturer = await this.prisma.lecturer.findUnique({
+      where: { userId },
+      select: { id: true },
+    });
+    return lecturer?.id ?? null;
+  }
+
   private parseThreshold(rawValue: string | null | undefined): number | null {
     if (rawValue === null || rawValue === undefined) {
       return null;
@@ -92,6 +100,7 @@ export class CheckinService {
 
   async updateCheckinThreshold(userRole: string, userId: string, threshold: number) {
     this.ensureAdmin(userRole);
+    const actorLecturerId = await this.resolveLecturerIdByUserId(userId);
 
     if (!Number.isFinite(threshold)) {
       throw new BadRequestException('Ngưỡng xác thực không hợp lệ');
@@ -109,13 +118,13 @@ export class CheckinService {
       where: { key: CHECKIN_THRESHOLD_SETTING_KEY },
       update: {
         value: String(normalizedThreshold),
-        updatedByUserId: userId,
+        updatedByLecturerId: actorLecturerId,
       },
       create: {
         key: CHECKIN_THRESHOLD_SETTING_KEY,
         value: String(normalizedThreshold),
         description: 'Cosine similarity threshold for booth face check-in verification',
-        updatedByUserId: userId,
+        updatedByLecturerId: actorLecturerId,
       },
     });
 
@@ -124,7 +133,7 @@ export class CheckinService {
       threshold: normalizedThreshold,
       source: 'database' as const,
       updatedAt: savedSetting.updatedAt,
-      updatedByUserId: savedSetting.updatedByUserId,
+      updatedByLecturerId: savedSetting.updatedByLecturerId,
     };
   }
 
@@ -158,6 +167,7 @@ export class CheckinService {
     const booking = await this.prisma.booking.findUnique({
       where: { id: dto.bookingId },
       include: {
+        student: { select: { id: true, userId: true } },
         booth: { select: { id: true, name: true, status: true } },
       },
     });
@@ -166,7 +176,7 @@ export class CheckinService {
       throw new NotFoundException('Booking không tồn tại');
     }
 
-    if (userRole === 'STUDENT' && booking.userId !== userId) {
+    if (userRole === 'STUDENT' && booking.student?.userId !== userId) {
       throw new ForbiddenException('Bạn không có quyền xác thực check-in cho booking này');
     }
 
@@ -192,7 +202,7 @@ export class CheckinService {
     }
 
     const bookingUser = await this.prisma.userKyc.findUnique({
-      where: { userId: booking.userId },
+      where: { userId: booking.student?.userId ?? '' },
       select: {
         userId: true,
         kycStatus: true,
@@ -242,7 +252,7 @@ export class CheckinService {
     await this.prisma.bookingCheckinAttempt.create({
       data: {
         bookingId: booking.id,
-        userId: booking.userId,
+        studentId: booking.studentId,
         similarityScore,
         threshold,
         isMatch: matched,
@@ -284,6 +294,9 @@ export class CheckinService {
             }
           : {}),
       },
+      include: {
+        student: { select: { userId: true } },
+      },
     });
 
     await this.prisma.boothStatusLog.create({
@@ -296,7 +309,7 @@ export class CheckinService {
             ? `Sinh viên check-in fallback duoc phep (booking ${updatedBooking.id}, similarity=${similarityScore.toFixed(4)}, threshold=${threshold.toFixed(2)})`
             : `Sinh viên check-in thành công (booking ${updatedBooking.id}, similarity=${similarityScore.toFixed(4)})`
           : `Sinh viên check-in thất bại (booking ${updatedBooking.id}, similarity=${similarityScore.toFixed(4)})`,
-        changedByUserId: updatedBooking.userId,
+        changedByLecturerId: null,
       },
     });
 
@@ -304,7 +317,7 @@ export class CheckinService {
       this.realtimeService.bookingCheckin({
         bookingId: updatedBooking.id,
         boothId: updatedBooking.boothId,
-        userId: updatedBooking.userId,
+        userId: updatedBooking.student?.userId ?? userId,
         status: 'CHECKED_IN',
         type: updatedBooking.type,
         startTime: updatedBooking.startTime.toISOString(),
@@ -314,7 +327,7 @@ export class CheckinService {
       });
 
       this.realtimeService.notify({
-        userId: updatedBooking.userId,
+        userId: updatedBooking.student?.userId ?? userId,
         boothId: updatedBooking.boothId,
         message: fallbackActivated
           ? 'Xac thuc khuon mat that bai qua 5 lan, he thong da luu anh lan cuoi va cho phep vao thi de giang vien doi chieu truoc khi cong bo diem.'
@@ -346,3 +359,5 @@ export class CheckinService {
     };
   }
 }
+
+

@@ -67,7 +67,7 @@ export type PretestConfigDto = {
   questionBankRandom: PretestQuestionBankRandomConfig | null;
   officialExamPool: PretestOfficialExamPoolConfig | null;
   updatedAt: Date | null;
-  updatedByUserId: string | null;
+  updatedByLecturerId: string | null;
 };
 
 export class PretestStatusDto {
@@ -83,3 +83,4 @@ export class PretestStatusDto {
     Object.assign(this, partial);
   }
 }
+

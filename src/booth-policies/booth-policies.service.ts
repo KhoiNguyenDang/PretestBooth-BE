@@ -24,6 +24,14 @@ const DEFAULT_BOOTH_POLICY_CONFIG: BoothPolicyConfigDto = {
 export class BoothPoliciesService {
   constructor(private readonly prisma: PrismaService) {}
 
+  private async resolveLecturerIdByUserId(userId: string): Promise<string | null> {
+    const lecturer = await this.prisma.lecturer.findUnique({
+      where: { userId },
+      select: { id: true },
+    });
+    return lecturer?.id ?? null;
+  }
+
   private ensureAdmin(userRole: string) {
     if (userRole !== 'ADMIN') {
       throw new ForbiddenException('Chi quan tri vien moi duoc cap nhat cau hinh booth policy');
@@ -115,6 +123,7 @@ export class BoothPoliciesService {
 
   async updateBoothPolicyConfig(userRole: string, userId: string, dto: UpdateBoothPolicyDto) {
     this.ensureAdmin(userRole);
+    const actorLecturerId = await this.resolveLecturerIdByUserId(userId);
 
     const current = await this.getConfig();
     const next = this.mergeWithDefault({
@@ -126,13 +135,13 @@ export class BoothPoliciesService {
       where: { key: BOOTH_POLICY_SETTING_KEY },
       update: {
         value: JSON.stringify(next),
-        updatedByUserId: userId,
+        updatedByLecturerId: actorLecturerId,
       },
       create: {
         key: BOOTH_POLICY_SETTING_KEY,
         value: JSON.stringify(next),
         description: 'Global booth booking and kiosk walk-in policy',
-        updatedByUserId: userId,
+        updatedByLecturerId: actorLecturerId,
       },
     });
 
@@ -141,7 +150,8 @@ export class BoothPoliciesService {
       config: next,
       source: 'database' as const,
       updatedAt: savedSetting.updatedAt,
-      updatedByUserId: savedSetting.updatedByUserId,
+      updatedByLecturerId: savedSetting.updatedByLecturerId,
     };
   }
 }
+

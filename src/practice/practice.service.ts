@@ -64,7 +64,7 @@ export class PracticeService {
       where: { status: 'IN_PROGRESS' },
       select: {
         id: true,
-        userId: true,
+        student: { select: { userId: true } },
         startedAt: true,
         duration: true,
       },
@@ -81,7 +81,7 @@ export class PracticeService {
       }
 
       try {
-        await this.completeSession(session.id, session.userId);
+        await this.completeSession(session.id, session.student?.userId ?? '');
         completedCount += 1;
       } catch {
         // Continue processing other sessions; individual failures should not stop the cron batch.
@@ -96,6 +96,8 @@ export class PracticeService {
    */
   async createSession(userId: string, dto: CreatePracticeSessionDto) {
     const activeBooking = await this.bookingsService.findActiveCheckedInBooking(userId, 'PRACTICE');
+    const student = await this.prisma.student.findUnique({ where: { userId } });
+    if (!student) throw new NotFoundException('Sinh viên không tồn tại');
 
     // 1. Fetch eligible items
     if (!dto.includeQuestions && !dto.includeProblems) {
@@ -162,7 +164,7 @@ export class PracticeService {
     const created = await this.prisma.$transaction(async (tx) => {
       const session = await tx.practiceSession.create({
         data: {
-          userId,
+          studentId: student.id,
           bookingId: activeBooking?.id ?? null,
           duration: dto.duration,
           totalItems: totalActualItems,
@@ -229,6 +231,7 @@ export class PracticeService {
     const session = await this.prisma.practiceSession.findUnique({
       where: { id: sessionId },
       include: {
+        student: { select: { userId: true } },
         items: {
           orderBy: { order: 'asc' },
           include: {
@@ -257,7 +260,7 @@ export class PracticeService {
     });
 
     if (!session) throw new NotFoundException('Phiên luyện tập không tồn tại');
-    if (session.userId !== userId)
+    if (session.student?.userId !== userId)
       throw new ForbiddenException('Bạn không có quyền truy cập phiên này');
 
     const shouldShuffleChoices = session.status === 'IN_PROGRESS';
@@ -327,10 +330,11 @@ export class PracticeService {
   async submitAnswer(sessionId: string, userId: string, dto: SubmitPracticeAnswerDto) {
     const session = await this.prisma.practiceSession.findUnique({
       where: { id: sessionId },
+      include: { student: { select: { userId: true } } },
     });
 
     if (!session) throw new NotFoundException('Phiên luyện tập không tồn tại');
-    if (session.userId !== userId)
+    if (session.student?.userId !== userId)
       throw new ForbiddenException('Bạn không có quyền truy cập phiên này');
     if (session.status !== 'IN_PROGRESS')
       throw new BadRequestException('Phiên luyện tập đã kết thúc');
@@ -385,6 +389,7 @@ export class PracticeService {
     const session = await this.prisma.practiceSession.findUnique({
       where: { id: sessionId },
       include: {
+        student: { select: { id: true, userId: true } },
         items: {
           include: {
             question: { include: { choices: true } },
@@ -401,7 +406,7 @@ export class PracticeService {
     });
 
     if (!session) throw new NotFoundException('Phiên luyện tập không tồn tại');
-    if (session.userId !== userId)
+    if (session.student?.userId !== userId)
       throw new ForbiddenException('Bạn không có quyền truy cập phiên này');
     if (session.status !== 'IN_PROGRESS') return session; // Already completed
 
@@ -490,7 +495,7 @@ export class PracticeService {
 
         if (sourceCode && answer.language) {
           try {
-            const submission = await this.submissionsService.create(userId, {
+            const submission = await this.submissionsService.create(session.student?.userId ?? userId, {
               language: answer.language,
               version: answer.languageVersion || '*',
               sourceCode,
@@ -558,7 +563,7 @@ export class PracticeService {
     if (practiceSessionWithBooking?.bookingId) {
       const existing = await this.prisma.pointTransaction.findFirst({
         where: {
-          userId,
+          studentId: session.studentId,
           type: 'PRACTICE_ATTENDANCE',
           bookingId: practiceSessionWithBooking.bookingId,
         },
@@ -567,7 +572,7 @@ export class PracticeService {
 
       if (!existing) {
         await this.pointsService.addTransaction(
-          userId,
+          session.studentId ?? userId,
           'PRACTICE_ATTENDANCE',
           practicePoints,
           `Hoàn thành luyện tập: ${totalScore}/${session.maxScore ?? 0}`,
@@ -581,7 +586,7 @@ export class PracticeService {
     this.realtimeService.sessionTerminated({
       sessionType: 'PRACTICE',
       sessionId,
-      userId,
+      userId: session.student?.userId ?? userId,
       boothId: practiceSessionWithBooking?.booking?.boothId || undefined,
       status: 'COMPLETED',
       emittedAt,
@@ -592,7 +597,7 @@ export class PracticeService {
       action: 'SUBMIT',
       bookingId: practiceSessionWithBooking?.bookingId || undefined,
       boothId: practiceSessionWithBooking?.booking?.boothId || undefined,
-      userId,
+      userId: session.student?.userId ?? userId,
       sessionType: 'PRACTICE',
       sessionId,
       emittedAt,
@@ -613,6 +618,7 @@ export class PracticeService {
     const session = await this.prisma.practiceSession.findUnique({
       where: { id: sessionId },
       include: {
+        student: { select: { userId: true } },
         booking: {
           select: {
             boothId: true,
@@ -647,7 +653,7 @@ export class PracticeService {
     this.realtimeService.sessionTimerAdjusted({
       sessionType: 'PRACTICE',
       sessionId,
-      userId: session.userId,
+      userId: session.student?.userId ?? '',
       boothId: session.booking?.boothId || undefined,
       expiresAt: nextExpiresAt.toISOString(),
       reason,
@@ -657,7 +663,7 @@ export class PracticeService {
     this.realtimeService.monitoringUpdated({
       scope: 'PRACTICE',
       action: 'EXTEND',
-      userId: session.userId,
+      userId: session.student?.userId ?? '',
       boothId: session.booking?.boothId || undefined,
       sessionType: 'PRACTICE',
       sessionId,
@@ -688,6 +694,7 @@ export class PracticeService {
     const session = await this.prisma.practiceSession.findUnique({
       where: { id: sessionId },
       include: {
+        student: { select: { userId: true } },
         booking: {
           select: {
             boothId: true,
@@ -717,7 +724,7 @@ export class PracticeService {
     this.realtimeService.sessionTerminated({
       sessionType: 'PRACTICE',
       sessionId,
-      userId: session.userId,
+      userId: session.student?.userId ?? '',
       boothId: session.booking?.boothId || undefined,
       status: 'ABANDONED',
       reason,
@@ -727,7 +734,7 @@ export class PracticeService {
     this.realtimeService.monitoringUpdated({
       scope: 'PRACTICE',
       action: 'ABORT',
-      userId: session.userId,
+      userId: session.student?.userId ?? '',
       boothId: session.booking?.boothId || undefined,
       sessionType: 'PRACTICE',
       sessionId,
@@ -736,7 +743,7 @@ export class PracticeService {
     });
 
     this.realtimeService.notify({
-      userId: session.userId,
+      userId: session.student?.userId ?? '',
       boothId: session.booking?.boothId || undefined,
       message: `Phiên luyện tập đã bị hủy bởi quản trị viên/giảng viên. Lý do: ${reason}`,
       level: 'error',

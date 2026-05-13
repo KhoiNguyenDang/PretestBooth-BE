@@ -153,6 +153,9 @@ export class AuthService {
           },
         },
       },
+      include: {
+        studentProfile: true,
+      },
     });
 
     await Promise.all([
@@ -165,12 +168,12 @@ export class AuthService {
           emailVerificationExpiry: verificationExpiry,
         },
       }),
-      this.prisma.pointAccount.create({
+      user.studentProfile ? this.prisma.pointAccount.create({
         data: {
-          userId: user.id,
+          studentId: user.studentProfile.id,
         },
-      }),
-    ]);
+      }) : null,
+    ].filter(Boolean));
 
     // Send verification email
     await this.mailService.sendVerificationEmail(email, verificationToken);

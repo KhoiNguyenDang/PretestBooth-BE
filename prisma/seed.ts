@@ -753,7 +753,7 @@ function requireTopicId(topicByKey: Map<string, { id: string; name: string }>, t
   return topic.id;
 }
 
-async function seedRolesAndPermissions(adminUserId: string) {
+async function seedRolesAndPermissions(adminLecturerId: string) {
   const roleMap = new Map<string, { id: string; code: string }>();
 
   for (const roleSeed of ROLE_SEEDS) {
@@ -764,7 +764,7 @@ async function seedRolesAndPermissions(adminUserId: string) {
         description: roleSeed.description,
         priority: roleSeed.priority,
         isActive: true,
-        createdByUserId: adminUserId,
+        createdByLecturerId: adminLecturerId,
       },
       create: {
         id: roleSeed.id,
@@ -773,7 +773,7 @@ async function seedRolesAndPermissions(adminUserId: string) {
         description: roleSeed.description,
         priority: roleSeed.priority,
         isActive: true,
-        createdByUserId: adminUserId,
+        createdByLecturerId: adminLecturerId,
       },
     });
 
@@ -873,7 +873,7 @@ async function seedProblems(
         outputType: seed.outputType,
         argNames: seed.argNames,
         isPublished: true,
-        creatorId,
+        lecturerId: creatorId,
         subjectId,
         topicId,
       },
@@ -892,7 +892,7 @@ async function seedProblems(
         outputType: seed.outputType,
         argNames: seed.argNames,
         isPublished: true,
-        creatorId,
+        lecturerId: creatorId,
         subjectId,
         topicId,
       },
@@ -943,7 +943,7 @@ async function seedQuestions(
         isPublished: seed.isPublished,
         subjectId,
         topicId,
-        creatorId,
+        lecturerId: creatorId,
       },
       create: {
         id: seed.id,
@@ -956,7 +956,7 @@ async function seedQuestions(
         isPublished: seed.isPublished,
         subjectId,
         topicId,
-        creatorId,
+        lecturerId: creatorId,
       },
     });
 
@@ -1027,7 +1027,7 @@ async function seedExams(
         passingScoreAbsolute: seed.type === 'EXAM' ? seed.passingScoreAbsolute : null,
         subjectId,
         topicId,
-        creatorId,
+        lecturerId: creatorId,
       },
       create: {
         id: seed.id,
@@ -1049,7 +1049,7 @@ async function seedExams(
         passingScoreAbsolute: seed.type === 'EXAM' ? seed.passingScoreAbsolute : null,
         subjectId,
         topicId,
-        creatorId,
+        lecturerId: creatorId,
       },
     });
 
@@ -1157,7 +1157,7 @@ async function seedBookingDurations() {
   }
 }
 
-async function seedSystemSettings(adminUserId: string) {
+async function seedSystemSettings(adminLecturerId: string) {
   const pretestConfig = {
     isEnabled: true,
     assignmentMode: 'QUESTION_BANK_RANDOM',
@@ -1185,13 +1185,13 @@ async function seedSystemSettings(adminUserId: string) {
     update: {
       value: JSON.stringify(BOOTH_POLICY_DEFAULT),
       description: 'Global booth booking and kiosk walk-in policy',
-      updatedByUserId: adminUserId,
+      updatedByLecturerId: adminLecturerId,
     },
     create: {
       key: 'BOOTH_POLICY_CONFIG',
       value: JSON.stringify(BOOTH_POLICY_DEFAULT),
       description: 'Global booth booking and kiosk walk-in policy',
-      updatedByUserId: adminUserId,
+      updatedByLecturerId: adminLecturerId,
     },
   });
 
@@ -1200,13 +1200,13 @@ async function seedSystemSettings(adminUserId: string) {
     update: {
       value: '0.6',
       description: 'Cosine similarity threshold for booth face check-in verification',
-      updatedByUserId: adminUserId,
+      updatedByLecturerId: adminLecturerId,
     },
     create: {
       key: 'CHECKIN_SIMILARITY_THRESHOLD',
       value: '0.6',
       description: 'Cosine similarity threshold for booth face check-in verification',
-      updatedByUserId: adminUserId,
+      updatedByLecturerId: adminLecturerId,
     },
   });
 
@@ -1215,13 +1215,13 @@ async function seedSystemSettings(adminUserId: string) {
     update: {
       value: JSON.stringify(pretestConfig),
       description: 'Global pretest exam-flow config for booth EXAM check-in sessions',
-      updatedByUserId: adminUserId,
+      updatedByLecturerId: adminLecturerId,
     },
     create: {
       key: 'PRETEST_EXAM_FLOW_CONFIG',
       value: JSON.stringify(pretestConfig),
       description: 'Global pretest exam-flow config for booth EXAM check-in sessions',
-      updatedByUserId: adminUserId,
+      updatedByLecturerId: adminLecturerId,
     },
   });
 }
@@ -1253,7 +1253,14 @@ async function main() {
 
   console.log('✅ Upserted admin:', admin.email);
 
-  const roleMap = await seedRolesAndPermissions(admin.id);
+  const adminLecturer = await prisma.lecturer.upsert({
+    where: { userId: admin.id },
+    update: {},
+    create: { userId: admin.id },
+    select: { id: true },
+  });
+
+  const roleMap = await seedRolesAndPermissions(adminLecturer.id);
   const lecturerSuperAdminRole = roleMap.get('LECTURER_SUPER_ADMIN');
   const lecturerExamManagerRole = roleMap.get('LECTURER_EXAM_MANAGER');
 
@@ -1267,7 +1274,7 @@ async function main() {
       name: 'Nguyen Van Giang Vien',
       role: 'LECTURER',
       auth: { upsert: { update: { password: lecturerPasswordHash, isEmailVerified: true, isLocked: false }, create: { password: lecturerPasswordHash, isEmailVerified: true, isLocked: false } } },
-      lecturerProfile: { upsert: { update: { lecturerRoleId: lecturerSuperAdminRole.id, lecturerRoleAssignedByUserId: admin.id }, create: { lecturerRoleId: lecturerSuperAdminRole.id, lecturerRoleAssignedByUserId: admin.id } } },
+      lecturerProfile: { upsert: { update: { lecturerRoleId: lecturerSuperAdminRole.id, lecturerRoleAssignedByLecturerId: adminLecturer.id }, create: { lecturerRoleId: lecturerSuperAdminRole.id, lecturerRoleAssignedByLecturerId: adminLecturer.id } } },
     },
     create: {
       id: IDS.users.lecturerSuperAdmin,
@@ -1275,7 +1282,7 @@ async function main() {
       name: 'Nguyen Van Giang Vien',
       role: 'LECTURER',
       auth: { create: { password: lecturerPasswordHash, isEmailVerified: true, isLocked: false } },
-      lecturerProfile: { create: { lecturerRoleId: lecturerSuperAdminRole.id, lecturerRoleAssignedByUserId: admin.id } },
+      lecturerProfile: { create: { lecturerRoleId: lecturerSuperAdminRole.id, lecturerRoleAssignedByLecturerId: adminLecturer.id } },
     },
   });
 
@@ -1285,7 +1292,7 @@ async function main() {
       name: 'Tran Thi Giang Vien',
       role: 'LECTURER',
       auth: { upsert: { update: { password: lecturerPasswordHash, isEmailVerified: true, isLocked: false }, create: { password: lecturerPasswordHash, isEmailVerified: true, isLocked: false } } },
-      lecturerProfile: { upsert: { update: { lecturerRoleId: lecturerExamManagerRole.id, lecturerRoleAssignedByUserId: admin.id }, create: { lecturerRoleId: lecturerExamManagerRole.id, lecturerRoleAssignedByUserId: admin.id } } },
+      lecturerProfile: { upsert: { update: { lecturerRoleId: lecturerExamManagerRole.id, lecturerRoleAssignedByLecturerId: adminLecturer.id }, create: { lecturerRoleId: lecturerExamManagerRole.id, lecturerRoleAssignedByLecturerId: adminLecturer.id } } },
     },
     create: {
       id: IDS.users.lecturerExamManager,
@@ -1293,7 +1300,7 @@ async function main() {
       name: 'Tran Thi Giang Vien',
       role: 'LECTURER',
       auth: { create: { password: lecturerPasswordHash, isEmailVerified: true, isLocked: false } },
-      lecturerProfile: { create: { lecturerRoleId: lecturerExamManagerRole.id, lecturerRoleAssignedByUserId: admin.id } },
+      lecturerProfile: { create: { lecturerRoleId: lecturerExamManagerRole.id, lecturerRoleAssignedByLecturerId: adminLecturer.id } },
     },
   });
 
@@ -1333,8 +1340,15 @@ async function main() {
       studentProfile: { create: { studentCode: '22000001', className: 'DHKTPM18A', dateOfBirth: new Date('2004-01-15T00:00:00.000Z') } },
       kycProfile: { create: { kycStatus: 'VERIFIED', kycRegisteredAt: daysAgo(30), kycVerifiedAt: daysAgo(29), kycLastAttemptAt: daysAgo(29), kycConsentVersion: 'v1', kycConsentedAt: daysAgo(30) } },
       faceEmbeddingRecord: { create: { faceEmbedding: verifiedEmbedding, faceEmbeddingModel: 'arcface-r100', faceEmbeddingVersion: 'seed-v1', faceEmbeddingNorm: 1, faceEmbeddingUpdatedAt: daysAgo(29) } },
-      pointAccount: { create: {} },
     },
+    include: { studentProfile: true },
+  });
+
+  // Create PointAccount for studentVerified (now linked to Student, not User)
+  await prisma.pointAccount.upsert({
+    where: { studentId: studentVerified.studentProfile!.id },
+    update: {},
+    create: { studentId: studentVerified.studentProfile!.id },
   });
 
   const studentPending = await prisma.user.upsert({
@@ -1367,8 +1381,15 @@ async function main() {
       auth: { create: { password: studentPasswordHash, isEmailVerified: true, isLocked: false } },
       studentProfile: { create: { studentCode: '22000002', className: 'DHKTPM18B', dateOfBirth: new Date('2004-05-20T00:00:00.000Z') } },
       kycProfile: { create: { kycStatus: 'NOT_STARTED' } },
-      pointAccount: { create: {} },
     },
+    include: { studentProfile: true },
+  });
+
+  // Create PointAccount for studentPending
+  await prisma.pointAccount.upsert({
+    where: { studentId: studentPending.studentProfile!.id },
+    update: {},
+    create: { studentId: studentPending.studentProfile!.id },
   });
 
   console.log('✅ Upserted students:', studentVerified.email, ',', studentPending.email);
@@ -1397,7 +1418,7 @@ async function main() {
   await seedBookingDurations();
   console.log('✅ Seeded booking duration options');
 
-  await seedSystemSettings(admin.id);
+  await seedSystemSettings(adminLecturer.id);
   console.log('✅ Seeded system settings (booth policy, checkin threshold, pretest config)');
 
   await prisma.lecturerPermissionAssignment.upsert({
@@ -1408,12 +1429,12 @@ async function main() {
       },
     },
     update: {
-      grantedByUserId: admin.id,
+      grantedByLecturerId: adminLecturer.id,
     },
     create: {
       lecturerId: lecturerExamManager.id,
       permission: 'MONITOR_SESSIONS',
-      grantedByUserId: admin.id,
+      grantedByLecturerId: adminLecturer.id,
     },
   });
 
@@ -1435,3 +1456,4 @@ main()
     await prisma.$disconnect();
     await pool.end();
   });
+

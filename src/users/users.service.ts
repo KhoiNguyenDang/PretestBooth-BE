@@ -348,6 +348,14 @@ export class UsersService {
     return roles.map((role) => this.mapLecturerRole(role));
   }
 
+  private async resolveLecturerIdByUserId(userId: string): Promise<string | null> {
+    const lecturer = await this.prisma.lecturer.findUnique({
+      where: { userId },
+      select: { id: true },
+    });
+    return lecturer?.id ?? null;
+  }
+
   private getStudentCodePrefixForCohort(cohort: number) {
     return String(cohort + 4).padStart(2, '0');
   }
@@ -476,11 +484,11 @@ export class UsersService {
                   lockedReason: true,
                 },
               },
-              pointAccount: {
-                select: {
-                  totalPoints: true,
-                },
-              },
+            },
+          },
+          pointAccount: {
+            select: {
+              totalPoints: true,
             },
           },
         },
@@ -501,7 +509,7 @@ export class UsersService {
       lockedAt: student.user.auth?.lockedAt ?? null,
       lockedReason: student.user.auth?.lockedReason ?? null,
       dateOfBirth: student.dateOfBirth ?? null,
-      totalPoints: student.user.pointAccount?.totalPoints ?? 0,
+      totalPoints: student.pointAccount?.totalPoints ?? 0,
       createdAt: student.createdAt,
     }));
 
@@ -537,11 +545,11 @@ export class UsersService {
                 lockedReason: true,
               },
             },
-            pointAccount: {
-              select: {
-                totalPoints: true,
-              },
-            },
+          },
+        },
+        pointAccount: {
+          select: {
+            totalPoints: true,
           },
         },
       },
@@ -557,7 +565,7 @@ export class UsersService {
         : '',
       status: student.user.auth?.isLocked ? 'LOCKED' : 'ACTIVE',
       lockedReason: student.user.auth?.lockedReason || '',
-      totalPoints: student.user.pointAccount?.totalPoints ?? 0,
+      totalPoints: student.pointAccount?.totalPoints ?? 0,
       createdAt: student.createdAt.toISOString(),
     }));
 
@@ -639,11 +647,11 @@ export class UsersService {
                 lockedReason: true,
               },
             },
-            pointAccount: {
-              select: {
-                totalPoints: true,
-              },
-            },
+          },
+        },
+        pointAccount: {
+          select: {
+            totalPoints: true,
           },
         },
       },
@@ -676,7 +684,7 @@ export class UsersService {
       lockedAt: rawStudent.user.auth?.lockedAt ?? null,
       lockedReason: rawStudent.user.auth?.lockedReason ?? null,
       dateOfBirth: rawStudent.dateOfBirth ?? null,
-      totalPoints: rawStudent.user.pointAccount?.totalPoints ?? 0,
+      totalPoints: rawStudent.pointAccount?.totalPoints ?? 0,
       createdAt: rawStudent.createdAt,
     };
   }
@@ -734,9 +742,6 @@ export class UsersService {
             password: hashedPassword,
             isEmailVerified: true, // Created by admin = verified
           },
-        },
-        pointAccount: {
-          create: {},
         },
       },
     });
@@ -819,7 +824,7 @@ export class UsersService {
       create: {
         userId: lecturer.id,
         lecturerRoleId: null,
-        lecturerRoleAssignedByUserId: null,
+        lecturerRoleAssignedByLecturerId: null,
       },
     });
 
@@ -979,7 +984,7 @@ export class UsersService {
       create: {
         userId: lecturerId,
         lecturerRoleId: null,
-        lecturerRoleAssignedByUserId: null,
+        lecturerRoleAssignedByLecturerId: null,
       },
     });
 
@@ -1350,8 +1355,11 @@ export class UsersService {
               select: {
                 permission: true,
                 grantedAt: true,
-                grantedByUser: {
-                  select: { id: true, email: true, name: true },
+                grantedByLecturer: {
+                  select: {
+                    id: true,
+                    user: { select: { id: true, email: true, name: true } },
+                  },
                 },
               },
               orderBy: { permission: 'asc' },
@@ -1465,6 +1473,8 @@ export class UsersService {
       );
     }
 
+    const requesterLecturerId = await this.resolveLecturerIdByUserId(requesterId);
+
     await this.prisma.$transaction(async (tx) => {
       await tx.lecturerPermissionAssignment.deleteMany({
         where: { lecturerId },
@@ -1475,7 +1485,7 @@ export class UsersService {
           data: requestedPermissions.map((permission) => ({
             lecturerId,
             permission,
-            grantedByUserId: requesterId,
+            grantedByLecturerId: requesterLecturerId,
           })),
         });
       }
@@ -1622,6 +1632,7 @@ export class UsersService {
 
     const normalizedCode = dto.code.trim().toUpperCase();
     const permissions = [...new Set(dto.permissions)] as LecturerPermissionKey[];
+    const requesterLecturerId = await this.resolveLecturerIdByUserId(requesterId);
 
     try {
       const role = await this.prisma.lecturerRole.create({
@@ -1631,7 +1642,7 @@ export class UsersService {
           description: dto.description?.trim() || null,
           priority: dto.priority,
           isActive: dto.isActive ?? true,
-          createdByUserId: requesterId,
+          createdByLecturerId: requesterLecturerId,
           permissions: {
             createMany: {
               data: permissions.map((permission) => ({ permission })),
@@ -1876,21 +1887,23 @@ export class UsersService {
       }
     }
 
+    const requesterLecturerId = await this.resolveLecturerIdByUserId(requesterId);
+
     await (this.prisma as any).lecturer.upsert({
       where: { userId: lecturerId },
       update: dto.roleId
         ? {
             lecturerRoleId: dto.roleId,
-            lecturerRoleAssignedByUserId: requesterId,
+            lecturerRoleAssignedByLecturerId: requesterLecturerId,
           }
         : {
             lecturerRoleId: null,
-            lecturerRoleAssignedByUserId: null,
+            lecturerRoleAssignedByLecturerId: null,
           },
       create: {
         userId: lecturerId,
         lecturerRoleId: dto.roleId || null,
-        lecturerRoleAssignedByUserId: dto.roleId ? requesterId : null,
+        lecturerRoleAssignedByLecturerId: dto.roleId ? requesterLecturerId : null,
       },
     });
 
@@ -2182,9 +2195,6 @@ export class UsersService {
                 password: hashedPassword,
                 isEmailVerified: true,
               },
-            },
-            pointAccount: {
-              create: {},
             },
           },
         });

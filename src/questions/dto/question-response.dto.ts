@@ -54,7 +54,7 @@ export class QuestionDetailResponseDto {
   isPublished: boolean;
   subjectId: string;
   topicId: string | null;
-  creatorId: string;
+  lecturerId: string | null;
   subject?: SubjectResponseDto;
   topic?: TopicResponseDto | null;
   choices?: QuestionChoiceResponseDto[];

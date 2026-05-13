@@ -14,7 +14,7 @@ export interface BoothStatusUpdatedPayload {
   status: 'ACTIVE' | 'MAINTENANCE_PENDING' | 'MAINTENANCE' | 'INACTIVE';
   previousStatus: 'ACTIVE' | 'MAINTENANCE_PENDING' | 'MAINTENANCE' | 'INACTIVE';
   note: string;
-  changedByUserId: string;
+  changedByLecturerId: string | null;
   changedAt: string;
 }
 
@@ -79,3 +79,4 @@ export interface SessionTerminatedPayload {
   reason?: string;
   emittedAt: string;
 }
+

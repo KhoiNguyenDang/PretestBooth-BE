@@ -57,6 +57,12 @@ export class QuestionsService {
     return lecturer;
   }
 
+  private async resolveActorLecturerId(userId: string, userRole: string) {
+    if (userRole !== 'LECTURER') return null;
+    const lecturer = await this.getLecturerIdentity(userId);
+    return lecturer.id;
+  }
+
   private looksLikeUrl(value: string): boolean {
     return /^https?:\/\//i.test(value);
   }
@@ -978,7 +984,6 @@ export class QuestionsService {
           isPublished: dto.isPublished,
           subjectId: dto.subjectId,
           topicId: dto.topicId || null,
-          creatorId,
           lecturerId: lecturer?.id ?? null,
         } as any,
       });
@@ -1158,7 +1163,8 @@ export class QuestionsService {
       throw new NotFoundException('Câu hỏi không tồn tại');
     }
 
-    if (question.creatorId !== userId && userRole !== 'ADMIN') {
+    const actorLecturerId = await this.resolveActorLecturerId(userId, userRole);
+    if (question.lecturerId !== actorLecturerId && userRole !== 'ADMIN') {
       throw new ForbiddenException('Bạn không có quyền chỉnh sửa câu hỏi này');
     }
 
@@ -1235,7 +1241,8 @@ export class QuestionsService {
       throw new NotFoundException('Câu hỏi không tồn tại');
     }
 
-    if (question.creatorId !== userId && userRole !== 'ADMIN') {
+    const actorLecturerId = await this.resolveActorLecturerId(userId, userRole);
+    if (question.lecturerId !== actorLecturerId && userRole !== 'ADMIN') {
       throw new ForbiddenException('Bạn không có quyền xóa câu hỏi này');
     }
 
@@ -1256,7 +1263,8 @@ export class QuestionsService {
       throw new NotFoundException('Câu hỏi không tồn tại');
     }
 
-    if (question.creatorId !== userId && userRole !== 'ADMIN') {
+    const actorLecturerId = await this.resolveActorLecturerId(userId, userRole);
+    if (question.lecturerId !== actorLecturerId && userRole !== 'ADMIN') {
       throw new ForbiddenException('Bạn không có quyền thay đổi trạng thái câu hỏi này');
     }
 
@@ -1318,7 +1326,7 @@ export class QuestionsService {
       isPublished: question.isPublished,
       subjectId: question.subjectId,
       topicId: question.topicId,
-      creatorId: question.creatorId,
+      lecturerId: question.lecturerId,
       subject,
       topic,
       choices,

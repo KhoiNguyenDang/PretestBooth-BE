@@ -33,7 +33,7 @@ export class SubmissionResponseDto {
   compileOutput: string | null;
   errorMessage: string | null;
   testCaseResults: TestCaseResultJson[] | null;
-  userId: string;
+  studentId: string | null;
   problemId: string;
   createdAt: Date;
 
@@ -44,9 +44,10 @@ export class SubmissionResponseDto {
     slug: string;
     difficulty: string;
   };
-  user?: {
+  student?: {
     id: string;
-    email: string;
+    userId: string;
+    email: string | null;
     studentCode: string | null;
   };
 

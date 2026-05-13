@@ -31,7 +31,7 @@ export class ProblemResponseDto {
   acceptedSubmissions: number;
   acceptanceRate: number;
   isPublished: boolean;
-  creatorId: string;
+  lecturerId: string | null;
   subjectId: string | null;
   topicId: string | null;
   subject?: { id: string; name: string } | null;
