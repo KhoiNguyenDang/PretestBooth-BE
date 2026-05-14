@@ -57,7 +57,7 @@ export class ProctoringService {
 
     // Special handling for TAB_SWITCH on EXAM sessions: warning only, no forced submit.
     if (isExamSession && dto.eventType === 'TAB_SWITCH') {
-      return await this.handleExamTabSwitchWarning(examSession as any, userId);
+      return await this.handleExamTabSwitchWarning(examSession as any, userId, dto.metadata);
     }
 
     // For other events, continue with normal proctoring logic
@@ -136,28 +136,31 @@ export class ProctoringService {
   /**
    * Handle TAB_SWITCH for EXAM sessions: warning only.
    */
-  private async handleExamTabSwitchWarning(examSession: any, userId: string) {
+  private async handleExamTabSwitchWarning(examSession: any, userId: string, customMetadata?: any) {
     // Create warning event only. Do not terminate or deduct points.
     const examTabSwitchEventData: any = {
       studentId: examSession.studentId,
       examSessionId: examSession.id,
       eventType: 'TAB_SWITCH',
       warningLevel: 1,
-      metadata: { reason: 'Học sinh chuyển tab trong kỳ thi' } as Prisma.InputJsonValue,
+      metadata: {
+        reason: 'Học sinh chuyển tab trong kỳ thi',
+        ...(customMetadata || {}),
+      } as Prisma.InputJsonValue,
     };
 
     const event = await this.prisma.proctoringEvent.create({
       data: examTabSwitchEventData,
     });
 
-    const totalSeverity = await this.prisma.proctoringEvent.aggregate({
+    const totalSeverityResult = await this.prisma.proctoringEvent.aggregate({
       where: { examSessionId: examSession.id },
       _sum: { warningLevel: true },
     });
 
     return {
       eventId: event.id,
-      totalSeverity: totalSeverity._sum.warningLevel || 0,
+      totalSeverity: totalSeverityResult._sum.warningLevel || 0,
       actionTaken: 'LOGGED',
       sessionType: 'EXAM',
     };
