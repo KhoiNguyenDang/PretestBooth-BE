@@ -817,7 +817,7 @@ export class KycService {
       throw new ConflictException('Hồ sơ này không còn ở trạng thái chờ duyệt');
     }
 
-    const faceImageSource = student.kycFaceImageUrl || student.kycStudentImageUrl;
+    const faceImageSource = student.kycFaceImageUrl;
     if (!faceImageSource) {
       throw new BadRequestException(
         'Thiếu ảnh khuôn mặt KYC mới nhất, vui lòng yêu cầu sinh viên xác thực lại KYC',

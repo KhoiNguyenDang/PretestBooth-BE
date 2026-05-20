@@ -31,6 +31,11 @@ export class FaceRecognitionService {
   private readonly expectedDimension = Number(process.env.FACE_EMBEDDING_DIM ?? 512);
 
   async extractEmbedding(imageDataUrl: string): Promise<FaceEmbeddingResult> {
+    // If a remote URL is provided (cloudinary secure url), fetch and convert it to a data URL
+    if (typeof imageDataUrl === 'string' && (imageDataUrl.startsWith('http://') || imageDataUrl.startsWith('https://'))) {
+      imageDataUrl = await this.fetchRemoteImageAsDataUrl(imageDataUrl);
+    }
+
     this.validateImageInput(imageDataUrl);
 
     if (this.embeddingServiceUrl && !this.useMockEmbedding) {
@@ -52,6 +57,27 @@ export class FaceRecognitionService {
       version: '1',
       norm,
     };
+  }
+
+  private async fetchRemoteImageAsDataUrl(url: string): Promise<string> {
+    let response: globalThis.Response;
+    try {
+      response = await fetch(url);
+    } catch (error) {
+      this.logger.error(`Failed to fetch remote image ${url}`, error as Error);
+      throw new BadRequestException('Không thể tải ảnh từ nguồn bên ngoài. Vui lòng thử lại.');
+    }
+
+    if (!response.ok) {
+      this.logger.error(`Fetching remote image returned ${response.status} for ${url}`);
+      throw new BadRequestException('Không thể tải ảnh từ nguồn bên ngoài. Vui lòng thử lại.');
+    }
+
+    const contentType = response.headers.get('content-type') || 'image/jpeg';
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    const base64 = buffer.toString('base64');
+    return `data:${contentType};base64,${base64}`;
   }
 
   cosineSimilarity(vectorA: number[], vectorB: number[]): number {
