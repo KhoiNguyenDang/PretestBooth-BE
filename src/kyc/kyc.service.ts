@@ -26,6 +26,7 @@ const KYC_CARD_THRESHOLD_SETTING_KEY = 'KYC_CARD_FACE_SIMILARITY_THRESHOLD';
 const DEFAULT_KYC_CARD_THRESHOLD = 0.75;
 const MIN_KYC_CARD_THRESHOLD = 0.5;
 const MAX_KYC_CARD_THRESHOLD = 0.99;
+const MAX_KYC_STUDENT_CARD_IMAGE_BYTES = 10 * 1024 * 1024;
 
 @Injectable()
 export class KycService {
@@ -53,6 +54,32 @@ export class KycService {
       select: { id: true },
     });
     return lecturer?.id ?? null;
+  }
+
+  private getDataUrlByteSize(dataUrl: string): number | null {
+    const base64Index = dataUrl.indexOf(',');
+    if (base64Index < 0) {
+      return null;
+    }
+
+    const payload = dataUrl.slice(base64Index + 1);
+    if (!payload) {
+      return null;
+    }
+
+    return Buffer.byteLength(payload, 'base64');
+  }
+
+  private assertStudentCardImageSize(imageDataUrl: string) {
+    const byteSize = this.getDataUrlByteSize(imageDataUrl);
+
+    if (byteSize === null) {
+      throw new BadRequestException('Ảnh thẻ sinh viên không hợp lệ');
+    }
+
+    if (byteSize > MAX_KYC_STUDENT_CARD_IMAGE_BYTES) {
+      throw new BadRequestException('Ảnh thẻ sinh viên không được vượt quá 10MB');
+    }
   }
 
   private parseThreshold(rawValue: string | null | undefined): number | null {
@@ -172,6 +199,8 @@ export class KycService {
     if (!user) {
       throw new NotFoundException('Người dùng không tồn tại');
     }
+
+    this.assertStudentCardImageSize(dto.studentCardImage);
 
     const [embeddingResult, studentCardEmbeddingResult, cardThresholdConfig] = await Promise.all([
       this.faceRecognitionService.extractEmbedding(dto.image),
