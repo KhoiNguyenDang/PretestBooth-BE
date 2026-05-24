@@ -177,7 +177,7 @@ export class ExecutionService implements OnModuleInit {
   private getCompilerOptions(language: string): string | undefined {
     if (language.toLowerCase() === 'java') {
       // Keep javac memory bounded for self-hosted Judge0 environments.
-      return '-J-Xms16m -J-Xmx64m -J-XX:MaxMetaspaceSize=64m -J-XX:ReservedCodeCacheSize=32m';
+      return '-J-Xms16m -J-Xmx64m -J-XX:MaxMetaspaceSize=64m -J-XX:ReservedCodeCacheSize=32m -J-XX:+UseSerialGC';
     }
 
     return undefined;

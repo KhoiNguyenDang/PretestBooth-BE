@@ -101,7 +101,7 @@ services:
       - -c
       - |
         sleep 12
-        psql -h judge0-db -U judge0 -d judge0 -c "UPDATE languages SET compile_cmd='/usr/local/openjdk13/bin/javac -J-Xms16m -J-Xmx64m -J-XX:MaxMetaspaceSize=64m -J-XX:ReservedCodeCacheSize=32m %s Main.java', run_cmd='/usr/local/openjdk13/bin/java -Xms16m -Xmx64m -XX:MaxMetaspaceSize=64m -XX:ReservedCodeCacheSize=32m Main' WHERE id=62;"
+        psql -h judge0-db -U judge0 -d judge0 -c "UPDATE languages SET compile_cmd='/usr/local/openjdk13/bin/javac -J-Xms16m -J-Xmx64m -J-XX:MaxMetaspaceSize=64m -J-XX:ReservedCodeCacheSize=32m -J-XX:+UseSerialGC %s Main.java', run_cmd='/usr/local/openjdk13/bin/java -Xms16m -Xmx64m -XX:MaxMetaspaceSize=64m -XX:ReservedCodeCacheSize=32m -XX:+UseSerialGC Main' WHERE id=62;"
     restart: "no"
 
   judge0-redis:
